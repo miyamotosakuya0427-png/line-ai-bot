@@ -23,7 +23,7 @@ async function getAIReply(message) {
     throw new Error("OpenAI API error");
   }
 
-  return data.output_text || (data.output?.[0]?.content?.[0]?.text) || "回答を取得できませんでした。";
+  return data.output_text || "申し訳ありません。回答を取得できませんでした。";
 
 function verifySignature(body, signature) {
   const hash = crypto
