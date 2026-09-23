@@ -25,7 +25,7 @@ async function getAIReply(message) {
 
   console.log("OpenAI RESPONSE:", JSON.stringify(data));
 
-  return return data.output?.[0]?.content?.[0]?.text || "回答を取得できませんでした。";
+return return data.output?.[0]?.content?.[0]?.text || "回答を取得できませんでした。";
 
 function verifySignature(body, signature) {
   const hash = crypto
