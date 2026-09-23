@@ -19,11 +19,14 @@ async function getAIReply(message) {
   const data = await response.json();
 
   if (!response.ok) {
-    console.error(data);
+    console.error("OpenAI ERROR:", JSON.stringify(data));
     throw new Error("OpenAI API error");
   }
 
-  return data.output_text || "申し訳ありません。回答を取得できませんでした。";
+  console.log("OpenAI RESPONSE:", JSON.stringify(data));
+
+  return data.output_text || "回答を取得できませんでした。";
+}
 
 function verifySignature(body, signature) {
   const hash = crypto
@@ -35,25 +38,32 @@ function verifySignature(body, signature) {
 }
 
 async function replyToLINE(replyToken, text) {
-  await fetch("https://api.line.me/v2/bot/message/reply", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`
-    },
-    body: JSON.stringify({
-      replyToken,
-      messages: [
-        {
-          type: "text",
-          text: text.slice(0, 5000)
-        }
-      ]
-    })
-  });
+  const response = await fetch(
+    "https://api.line.me/v2/bot/message/reply",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`
+      },
+      body: JSON.stringify({
+        replyToken: replyToken,
+        messages: [
+          {
+            type: "text",
+            text: String(text).slice(0, 5000)
+          }
+        ]
+      })
+    }
+  );
+
+  const data = await response.text();
+  console.log("LINE RESPONSE:", data);
 }
 
 const server = http.createServer((req, res) => {
+
   if (req.method === "GET") {
     res.writeHead(200);
     res.end("LINE AI Bot is running");
@@ -73,10 +83,11 @@ const server = http.createServer((req, res) => {
   });
 
   req.on("end", async () => {
+
     try {
       const signature = req.headers["x-line-signature"];
 
-      if (!verifySignature(body, signature)) {
+      if (!signature || !verifySignature(body, signature)) {
         res.writeHead(401);
         res.end("Unauthorized");
         return;
@@ -88,17 +99,37 @@ const server = http.createServer((req, res) => {
       const data = JSON.parse(body);
 
       for (const event of data.events || []) {
+
         if (
           event.type === "message" &&
           event.message &&
           event.message.type === "text"
         ) {
-          const aiReply = await getAIReply(event.message.text);
-          await replyToLINE(event.replyToken, aiReply);
+
+          console.log("LINE MESSAGE:", event.message.text);
+
+          try {
+            const aiReply = await getAIReply(event.message.text);
+
+            await replyToLINE(
+              event.replyToken,
+              aiReply
+            );
+
+          } catch (error) {
+
+            console.error("AI ERROR:", error);
+
+            await replyToLINE(
+              event.replyToken,
+              "申し訳ありません。現在AIの回答を取得できません。"
+            );
+          }
         }
       }
+
     } catch (error) {
-      console.error(error);
+      console.error("SERVER ERROR:", error);
     }
   });
 });
