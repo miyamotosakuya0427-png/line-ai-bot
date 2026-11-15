@@ -1,4 +1,3 @@
-  assert.ok(payload.request.split("\n").some(line => line.startsWith("動画ID：V")));
 "use strict";
 
 const test = require("node:test");
@@ -10,7 +9,7 @@ const { createJobStore } = require("./job-store");
 const { createVideoBatchStore } = require("./video-batch-store");
 const { enqueueVideoBatchPlans } = require("./video-batch-queue");
 
-test("batch queue enqueues up to 100 eligible history drafts and is safe to retry", async t => {
+test("batch queue enqueues eligible history drafts and is safe to retry", async t => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "jarvis-video-batch-queue-"));
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   const videoBatchStore = createVideoBatchStore({ filePath: path.join(dir, "videos.jsonl") });
@@ -39,6 +38,9 @@ test("batch queue enqueues up to 100 eligible history drafts and is safe to retr
 
   const payload = (await jobStore.list({ status: "queued", limit: 20 }))[0].payload;
   assert.equal(payload.taskKind, "video-batch-plan");
+  assert.ok(payload.request.split("\n").some(line => line.startsWith("動画ID：V")));
+  assert.ok(payload.request.includes("要一次資料確認"));
+  assert.ok(payload.request.includes("YouTube公開"));
 });
 
 test("batch queue rejects invalid batch IDs and ignores non-eligible stages", async t => {
