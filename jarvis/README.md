@@ -156,7 +156,7 @@ Stage advancement is evidence-gated: source QA must record verified claims and p
 
 ### Video batch queue
 
-Japanese narration timing is estimated using a configurable 350–420 spoken-character/minute range. This is a planning estimate only; the dashboard labels it as such and requires the actual recorded narration duration before the episode can be treated as finished. An English-oriented word counter is not used to determine Japanese runtime.
+Japanese narration timing is estimated using a configurable 330–400 spoken-character/minute range. This is a planning estimate only; the dashboard labels it as such and requires the actual recorded narration duration before the episode can be treated as finished. An English-oriented word counter is not used to determine Japanese runtime.
 
 
 The video batch journal is stored at `<JARVIS_JOB_STORE_PATH>.video-batches.jsonl` and is initialized alongside the job journal. It supports up to 100 ideas per batch, separate channel identifiers, ordered production stages, owner review decisions (approve / request changes / hold), and scoped action-approval records with provider, cost estimate, destination, and expiry. Finance-channel bulk registration is blocked in both the dashboard and store/API until a verified destination and financial controls are configured. Queue registration only creates ideas; it does not start research, paid generation, editing, uploads, scheduling, or publication. A provider executor is not connected. Approval actions are verified records only and must not be treated as completed external work.
