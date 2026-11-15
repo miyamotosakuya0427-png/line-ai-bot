@@ -608,7 +608,7 @@ test("video batch plan endpoint queues an idempotent ONE CONTENT draft task with
   const jobStore=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
   const videoBatchStore=createVideoBatchStore({filePath:path.join(dir,"videos.jsonl")});
   await videoBatchStore.createBatch({items:[{id:"V01",title:"江戸の町を変えた大火",topic:"明暦の大火と江戸の都市改造"}]});
-  const worker=createWorker({store:jobStore,handlers:{"department.content":async payload=>({draft:true,videoId:payload.videoId,request:payload.request})}});
+  const worker=createWorker({store:jobStore,handlers:{"department.content":async payload=>({draft:true,videoId:payload.videoId,request:payload.request,answer:"台本初稿："+payload.request})}});
   await worker.start();
   const app=createServer({token,jobStore,videoBatchStore,worker});
   await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
