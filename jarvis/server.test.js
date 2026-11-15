@@ -216,3 +216,31 @@ test("metadata check includes LINE link sheet headers only", async () => {
     await new Promise(resolve => app.close(resolve));
   }
 });
+
+test("public LINE link status reports counts without exposing row values", async () => {
+  const app = createServer({
+    token,
+    sheetsUrl: "https://script.google.com/macros/s/test-id/exec",
+    sheetsToken: "f".repeat(128),
+    fetchImpl: async (url, options) => {
+      const body = JSON.parse(options.body);
+      if (body.action === "listSheets") return { ok: true, json: async () => ({ ok: true, sheets: ["13 LINE連携"] }) };
+      return { ok: true, json: async () => ({ ok: true, rows: [
+        ["連携-1", "U-secret-1", "表示名A", "EMP-1", "氏名A", "", "一般", "有効"],
+        ["連携-2", "U-secret-2", "表示名B", "", "", "", "一般", "未連携"],
+        ["連携-3", "", "表示名C", "EMP-3", "氏名C", "", "一般", "有効"]
+      ] }) };
+    }
+  });
+  await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${app.address().port}/health/sheets/link-status`);
+    const result = await response.json();
+    assert.equal(response.status, 200);
+    assert.deepEqual(result, { ok:true, sheetFound:true, sampleLimit:100, sampledRows:3, rowsWithLineUserId:2, rowsWithEmployeeId:2, linkedRows:1, missingEmployeeId:1, limitedToFirst100:true });
+    assert.equal(JSON.stringify(result).includes("U-secret"), false);
+    assert.equal(JSON.stringify(result).includes("EMP-"), false);
+  } finally {
+    await new Promise(resolve => app.close(resolve));
+  }
+});
