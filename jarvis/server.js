@@ -86,6 +86,25 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
           return json(res,503,{ok:false,error:"metadata check failed"});
         }
       }
+      if (req.method==="GET" && url.pathname==="/health/sheets/link-status") {
+        const now=Date.now();
+        if (now-lastPublicSheetsCheck<30000) return json(res,429,{ok:false,error:"check rate limited"});
+        lastPublicSheetsCheck=now;
+        try {
+          const listed=await callSheets("listSheets");
+          const sheetName=Array.isArray(listed.sheets)?listed.sheets.find(name=>name==="13 LINE連携"):null;
+          if (!sheetName) return json(res,200,{ok:true,sheetFound:false});
+          const read=await callSheets("readRows",{sheetName,startRow:2,numRows:100});
+          const rows=Array.isArray(read.rows)?read.rows:[];
+          const nonEmpty=value=>value!==null&&value!==undefined&&String(value).trim()!=="";
+          const withLineUserId=rows.filter(row=>Array.isArray(row)&&nonEmpty(row[1]));
+          const withEmployeeId=rows.filter(row=>Array.isArray(row)&&nonEmpty(row[3]));
+          const linked=rows.filter(row=>Array.isArray(row)&&nonEmpty(row[1])&&nonEmpty(row[3]));
+          return json(res,200,{ok:true,sheetFound:true,sampleLimit:100,sampledRows:rows.length,rowsWithLineUserId:withLineUserId.length,rowsWithEmployeeId:withEmployeeId.length,linkedRows:linked.length,missingEmployeeId:withLineUserId.length-linked.length,limitedToFirst100:true});
+        } catch {
+          return json(res,503,{ok:false,error:"link status check failed"});
+        }
+      }
       if (req.method==="GET" && url.pathname==="/health/sheets") {
         const now=Date.now();
         if (now-lastPublicSheetsCheck<30000) return json(res,429,{ok:false,googleSheets:"check rate limited"});
