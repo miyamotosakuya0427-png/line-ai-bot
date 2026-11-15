@@ -49,8 +49,8 @@ function createPaperTradingEngine({policy={}, clock=()=>new Date().toISOString()
   const seenIds=new Set();
   let equity=limits.startingCapitalYen;
   let peakEquity=equity;
-  let halted=false;
-  let haltReason=null;
+  let drawdownHalted=false;
+  let dailyHaltedDay=null;
 
   function currentDay() { return clock().slice(0,10); }
   function dayTrades(day=currentDay()) { return trades.filter(t=>t.closedAt.slice(0,10)===day); }
@@ -60,12 +60,13 @@ function createPaperTradingEngine({policy={}, clock=()=>new Date().toISOString()
     const day=currentDay();
     const dailyLossPct=Math.max(0,pct(-Math.min(0,dailyPnl(day)),limits.startingCapitalYen));
     const drawdownPct=Math.max(0,pct(peakEquity-equity,peakEquity));
-    const reasons=[];
-    if (dailyLossPct>=limits.maxDailyLossPct) reasons.push("DAILY_LOSS_LIMIT");
-    if (drawdownPct>=limits.maxPeakDrawdownPct) reasons.push("PEAK_DRAWDOWN_LIMIT");
-    if (openTrades().length>=limits.maxOpenPositions) reasons.push("OPEN_POSITION_LIMIT");
-    if (reasons.length && !halted) { halted=true; haltReason=reasons[0]; }
-    return {halted,haltReason,dailyLossPct,drawdownPct,openPositions:openTrades().length,limits:clone(limits)};
+    if (dailyLossPct>=limits.maxDailyLossPct) dailyHaltedDay=day;
+    if (drawdownPct>=limits.maxPeakDrawdownPct) drawdownHalted=true;
+    const dailyHalted=dailyHaltedDay===day;
+    const openPositions=openTrades().length;
+    const halted=drawdownHalted||dailyHalted;
+    const haltReason=drawdownHalted?"PEAK_DRAWDOWN_LIMIT":dailyHalted?"DAILY_LOSS_LIMIT":null;
+    return {halted,haltReason,dailyHalted,drawdownHalted,dailyLossPct,drawdownPct,openPositions,openPositionLimitReached:openPositions>=limits.maxOpenPositions,limits:clone(limits)};
   }
 
   return {
@@ -81,8 +82,9 @@ function createPaperTradingEngine({policy={}, clock=()=>new Date().toISOString()
       return clone(snapshots.filter(s=>!symbol||s.symbol===symbol).slice(-limit));
     },
     openPaperTrade(input) {
-      if (halted) throw new Error("Paper trading halted: "+haltReason);
-      if (openTrades().length>=limits.maxOpenPositions) throw new Error("Open-position limit reached");
+      const state=riskState();
+      if (state.halted) throw new Error("Paper trading halted: "+state.haltReason);
+      if (state.openPositions>=limits.maxOpenPositions) throw new Error("Open-position limit reached");
       if (trades.length>=MAX_TRADES) throw new Error("Trade capacity reached");
       const {id=crypto.randomUUID(),symbol,side,quantity,entryPrice,stopPrice,openedAt=clock(),strategyId,signalId="",sourceSnapshotId="",reason=""}=input||{};
       if (typeof id!=="string"||id.length<1||id.length>100||seenIds.has(id)) throw new Error("Invalid or duplicate trade id");
