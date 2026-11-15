@@ -7,6 +7,7 @@ const { createOpenAIHandler } = require("./core/openai-handler");
 const { dashboardPage } = require("./dashboard");
 const { EMPLOYEE_SHEET, DAILY_REPORT_SHEET, readEmployees, readDailyReports, buildCompanyOverview, filterDailyReports } = require("./core/company-reader");
 const { buildDailyReportAnalytics } = require("./core/company-analytics");
+const { SALES_SHEET, EXPENSE_SHEET, readFinancialSheets } = require("./core/financial-sheet-reader");
 const PORT = Number(process.env.PORT || 3000);
 const MAX_BODY_BYTES = 10 * 1024;
 const TOKEN = process.env.JARVIS_API_TOKEN || "";
@@ -336,10 +337,19 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         const daily=await callSheets("readRows",{sheetName:DAILY_REPORT_SHEET,startRow:1,numRows:100});
         const reports=readDailyReports(daily.rows);
         const companyContext={dailyReportAnalytics:buildDailyReportAnalytics(reports),source:"Google Sheets / 03 日報",sampleLimit:99};
+        if (listed.sheets.includes(SALES_SHEET) && listed.sheets.includes(EXPENSE_SHEET)) {
+          const [sales,expenses]=await Promise.all([
+            callSheets("readRows",{sheetName:SALES_SHEET,startRow:1,numRows:100}),
+            callSheets("readRows",{sheetName:EXPENSE_SHEET,startRow:1,numRows:100})
+          ]);
+          companyContext.financialSummary=readFinancialSheets({salesRows:sales.rows,expenseRows:expenses.rows});
+        } else {
+          companyContext.financialDataStatus="売上・経費シートが見つからないため、財務数値は回答対象外です。";
+        }
         const created=await jobStore.create({type:"assistant.company_question",payload:{request:d.request.trim(),companyContext},idempotencyKey:d.idempotencyKey||""});
         return json(res,created.created?201:200,{ok:true,created:created.created,job:created.job});
       }
-      if (url.pathname==="/v1/company/overview" || url.pathname==="/v1/company/daily-reports" || url.pathname==="/v1/company/employees" || url.pathname==="/v1/company/analytics") {
+      if (url.pathname==="/v1/company/overview" || url.pathname==="/v1/company/daily-reports" || url.pathname==="/v1/company/employees" || url.pathname==="/v1/company/analytics" || url.pathname==="/v1/company/financials") {
         if (req.method!=="GET") return json(res,405,{ok:false,error:"Method Not Allowed"},{Allow:"GET"});
         if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         try {
@@ -349,6 +359,14 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
             if (!listed.sheets.includes(EMPLOYEE_SHEET)) return json(res,404,{ok:false,error:"Employee sheet not found"});
             const read=await callSheets("readRows",{sheetName:EMPLOYEE_SHEET,startRow:1,numRows:100});
             return json(res,200,{ok:true,employees:readEmployees(read.rows),sampleLimit:99});
+          }
+          if (url.pathname==="/v1/company/financials") {
+            if (!listed.sheets.includes(SALES_SHEET) || !listed.sheets.includes(EXPENSE_SHEET)) return json(res,404,{ok:false,error:"売上・経費シートが見つかりません",availableSheets:listed.sheets});
+            const [sales,expenses]=await Promise.all([
+              callSheets("readRows",{sheetName:SALES_SHEET,startRow:1,numRows:100}),
+              callSheets("readRows",{sheetName:EXPENSE_SHEET,startRow:1,numRows:100})
+            ]);
+            return json(res,200,{ok:true,financials:readFinancialSheets({salesRows:sales.rows,expenseRows:expenses.rows})});
           }
           if (!listed.sheets.includes(DAILY_REPORT_SHEET)) return json(res,404,{ok:false,error:"Daily report sheet not found"});
           const daily=await callSheets("readRows",{sheetName:DAILY_REPORT_SHEET,startRow:1,numRows:100});
