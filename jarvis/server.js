@@ -420,6 +420,20 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         const d=await readJson(req), departmentId=url.pathname==="/v1/content/tasks"?"content":departmentTaskMatch[1];
         if (!DEPARTMENTS.some(item=>item.id===departmentId) || typeof d.request!=="string" || !d.request.trim() || d.request.length>4000 || (d.idempotencyKey!==undefined && (typeof d.idempotencyKey!=="string" || d.idempotencyKey.length>128))) return json(res,400,{ok:false,error:"Invalid department task"});
         let companyContext=null;
+        if (departmentId==="construction" && /日報|現場|作業|稼働|人数|機械|重機/.test(d.request)) {
+          try {
+            const listed=await callSheets("listSheets");
+            if (!Array.isArray(listed.sheets) || !listed.sheets.includes(DAILY_REPORT_SHEET)) {
+              companyContext={dailyReportDataStatus:"日報シートが未接続。現場実績を推測しないでください。"};
+            } else {
+              const daily=await callSheets("readRows",{sheetName:DAILY_REPORT_SHEET,startRow:1,numRows:100});
+              const reports=readDailyReports(daily.rows);
+              companyContext={dailyReportAnalytics:buildDailyReportAnalytics(reports)};
+            }
+          } catch(error) {
+            companyContext={dailyReportDataStatus:"日報の読み取りまたは見出し検証に失敗。実績値を推測しないでください。",schemaErrorCode:error.code||"UNAVAILABLE"};
+          }
+        }
         if ((departmentId==="tax"||departmentId==="management") && /売上|経費|請求|入金|利益|会計|税務|資金繰り/.test(d.request)) {
           try {
             const listed=await callSheets("listSheets");
