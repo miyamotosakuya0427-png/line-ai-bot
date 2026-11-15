@@ -10,6 +10,7 @@ const { buildDailyReportAnalytics } = require("./core/company-analytics");
 const { SALES_SHEET, EXPENSE_SHEET, INVOICE_SHEET, PAYMENT_SHEET, readFinancialSheets, readReceivablesSheets } = require("./core/financial-sheet-reader");
 const { DEPARTMENTS, APPROVAL } = require("./core/department-agents");
 const { SUBSIDY_SOURCES, PRIORITY_TOPICS, REPORT_FIELDS } = require("./core/subsidy-monitor");
+const { getVideoWorkflow } = require("./core/video-workflow");
 const PORT = Number(process.env.PORT || 3000);
 const MAX_BODY_BYTES = 10 * 1024;
 const TOKEN = process.env.JARVIS_API_TOKEN || "";
@@ -449,6 +450,10 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
           return json(res,409,{ok:false,error:"Job cannot be changed from its current state"});
         }
         return json(res,404,{ok:false,error:"Not Found"});
+      }
+      if (req.method==="GET" && url.pathname==="/v1/content/workflow") {
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        return json(res,200,{ok:true,workflow:getVideoWorkflow()});
       }
       if (req.method==="GET" && (url.pathname==="/v1/departments" || url.pathname==="/v1/subsidy/sources")) {
         if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
