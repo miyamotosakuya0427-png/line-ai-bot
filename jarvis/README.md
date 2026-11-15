@@ -7,6 +7,7 @@
 - Bearer-token protected API
 - Independent department-agent registry (management, tax/accounting, office/subsidies, construction, HR, procurement, recycling, safety/compliance, content, affiliate, investment, trading)
 - Explicit owner-approval policy for submissions, payments, contracts, publishing, deletion, and permission changes
+- Video production workflow for the `時をかける日本史` channel, including script/source review, Japanese pronunciation checks, narration, assets, editing, QA, owner review, publishing approval, and analytics
 - Official subsidy source registry for national, Okayama, Okayama City, Kurashiki, Tokushima, and Yoshinogawa programs
 - Persistent JSONL job journal with fsync
 - Idempotent job submission
@@ -57,6 +58,7 @@ All API endpoints except `GET /health` and the dashboard shell require `Authoriz
 - `GET /v1/company/financials` (read-only aggregate of up to 99 rows each from `売上` and `経費`; includes receivables when both invoice tabs exist)
 - `POST /v1/company/ask` with `{request}` (queues an AI question grounded in daily-report aggregates)
 - `GET /v1/departments` (authenticated department roles and approval policy)
+- `GET /v1/content/workflow` (authenticated video production stages, quality checklist, and approval gates)
 - `GET /v1/subsidy/sources` (authenticated official source catalog and One-specific priority topics)
 - `GET /v1/status`
 - `GET /v1/jobs`
@@ -94,3 +96,35 @@ Each department has a separate role definition and task scope. Routine research,
 ## Subsidy / grant monitoring sources
 
 The source catalog prioritizes construction equipment and ICT, battery/solar/electrical work, energy efficiency and GX, recycling/resource circulation, hiring, qualifications and training, wage increases, workplace safety, succession, new business, and AI/DX. It tracks national sources and official Okayama Prefecture, Okayama City, Kurashiki City, Tokushima Prefecture, and Yoshinogawa City pages. Each opportunity should be reported with the official URL, issuer, geography, eligibility, eligible costs, subsidy rate, cap, opening/closing dates, required documents, contact, last verified timestamp, changes, and unresolved eligibility questions. Cached snippets alone are not evidence; verify current official pages and guidelines before presenting an opportunity as open. This repository currently exposes only the source catalog; scheduled research and notifications are not active yet.
+
+
+## Video department: 時をかける日本史
+
+The content department uses a staged workflow: research, script and source verification, Japanese kanji/name reading and pronunciation review, narration, authorized visual assets, edit/captions, final QA, owner review, publication, and post-publication analytics. QA checks cover historical sourcing, dates/names/amounts, spoken-vs-script alignment, audible completeness, subtitle accuracy and mobile readability, asset rights, black frames/audio loss/export integrity, and honest titles/thumbnails. Paid voice/video generation requires explicit approval for that generation; subscription/purchases require owner approval; publication and scheduling are owner-only actions. The current implementation exposes the workflow and checklist at authenticated `GET /v1/content/workflow`; the opt-in scheduler queues a daily planning task only; it does not yet provide automatic narration generation, video rendering/editing, or autonomous publishing. Existing Descript projects must be inspected before marking any stage complete. The channel is `https://www.youtube.com/@samurai-b6i` and the working project is `江戸大名、借金まみれの真実`.
+
+
+### Video agent execution and scheduler
+
+The JARVIS worker registers an isolated role-scoped AI handler for each department (`department.<id>`). Authenticated `POST /v1/departments/:id/tasks` and `POST /v1/content/tasks` enqueue durable, idempotent tasks; results are visible in the job journal. ONE CONTENT has a dedicated Japanese-history prompt for 8–12 minute drafts, fact/source uncertainty handling, kanji readings, narration/subtitle alignment, and strict non-publication rules.
+
+The daily content planner is opt-in via `JARVIS_CONTENT_AUTOPLAN_ENABLED=true` and requires the persistent job store, `JARVIS_WORKER_ENABLED=true`, and a running service. It enqueues one idempotent planning task per Japan-local date at 08:45 JST. It creates a concept/outline/source-checklist draft only; it does not generate paid audio/video or publish. The flag is not enabled in the current Render environment and this PR is not deployed.
+
+Verified Descript projects are tracked separately: `072f8671-af62-480c-8072-bb253faf58b7` is `江戸大名、借金まみれの真実` (74-second composition, no publishes), and `5b28e058-e58b-41a7-9a26-0164aaea9ca6` is the separate `江戸の大火` project. The selected default voice preference is Hinata; the Edo-daimyo project's existing audio filename identifies Kenichi, so voice consistency remains a review item. Existing media is never overwritten automatically.
+
+
+### Daily subsidy monitoring
+
+ONE OFFICE has an official-source fetcher with an HTTPS host allowlist derived from the curated source catalog. It strips scripts/styles, captures bounded page excerpts and timestamps, labels fetch failures as unavailable (not as program closure), and asks the role-specific AI to distinguish source landing pages from verified program guidelines. The daily scheduler is opt-in via `JARVIS_SUBSIDY_AUTOMONITOR_ENABLED=true`; it queues one idempotent office task per Japan-local date at 08:30 JST and requires the persistent job store plus active worker. The environment flag is not enabled in Render yet. The independent ChatGPT daily report automation is separate from this JARVIS scheduler.
+
+
+### Tax and management agent context
+
+When a tax or management task asks about sales, expenses, invoices, collections, profit, accounting, tax, or cash flow, JARVIS attempts a read-only fetch of the allowlisted financial tabs. It validates exact headers, uses the bounded 99-row sample, and attaches only aggregates to the department task. Customer/payee names, invoice identifiers, receipt URLs, bank accounts, employee personal data, and free-text notes are not attached. If the tabs are missing or fail schema validation, the task receives an explicit unavailable status rather than invented figures. Invoice/collection reconciliation is included only when both optional invoice and payment tabs pass validation. The optional tab names `09 請求` and `10 入金` and their exact headers are implementation assumptions from the proposed sheet design, not a verified live spreadsheet schema; the reader fails closed if they are absent or differ. Do not treat receivables figures as live until the actual sheet names and headers are confirmed.
+
+
+The subsidy monitor also stores bounded SHA-256 fingerprints for successfully fetched official pages in each completed job result and compares them with the previous completed run. It classifies each source as new, changed, unchanged, or unverified; an unavailable page is never interpreted as a closed subsidy. Only source metadata/fingerprints are retained for comparison, not full page dumps.
+
+
+### Department-specific company context
+
+Construction tasks about site activity or daily reports receive read-only aggregate analytics from `03 日報` (maximum 99 sampled rows): site counts, worker-days, estimated person-hours, equipment, and recent work dates. Employee names, IDs, phone numbers, pay, free-text notes, and row-level reports are not passed to the construction agent. Missing or invalid sheet data is reported as unavailable rather than estimated.

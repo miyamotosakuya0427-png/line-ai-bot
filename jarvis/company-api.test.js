@@ -6,10 +6,11 @@ const token="t".repeat(64);
 const employeeHeaders=["従業員ID","氏名","LINE表示名","職種","役職","単価","電話番号","入社日","登録日","状態","備考"];
 const dailyHeaders=["日報ID","記録日時","作業日","従業員ID","氏名","現場名","作業内容","開始時刻","終了時刻","休憩（分）","作業人数","使用機械・車両","使用材料","連絡事項"];
 
-function fixture() {
+function fixture({jobStore=null}={}) {
   const calls=[];
   const app=createServer({
     token,
+    jobStore,
     sheetsUrl:"https://script.google.com/macros/s/test-id/exec",
     sheetsToken:"s".repeat(128),
     fetchImpl:async(url,options)=>{
@@ -203,5 +204,60 @@ test("department and subsidy source APIs require authentication and expose appro
   assert.equal(result.approvalPolicy.owner.includes("送金"),true);assert.equal(calls.length,0);
   const sources=await fetch(`http://127.0.0.1:${app.address().port}/v1/subsidy/sources`,{headers:{Authorization:`Bearer ${token}`}});
   const data=await sources.json();assert.equal(sources.status,200);assert.ok(data.sources.some(s=>s.id==="okayama-city"));assert.equal(data.monitoringEnabled,false);
+ }finally{await new Promise(resolve=>app.close(resolve));}
+});
+
+
+test("video department workflow is authenticated and keeps paid generation and publishing disabled",async()=>{
+ const {app,calls}=fixture();await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+ try{
+  const denied=await fetch(`http://127.0.0.1:${app.address().port}/v1/content/workflow`);assert.equal(denied.status,401);
+  const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/content/workflow`,{headers:{Authorization:`Bearer ${token}`}});
+  const result=await response.json();assert.equal(response.status,200);assert.equal(result.workflow.series.name,"時をかける日本史");
+  assert.equal(result.workflow.publicationEnabled,false);assert.equal(result.workflow.paidGenerationEnabled,false);
+  assert.ok(result.workflow.stages.some(s=>s.id==="pronunciation"));assert.equal(calls.length,0);
+ }finally{await new Promise(resolve=>app.close(resolve));}
+});
+
+
+test("department task submission is authenticated, scoped and persisted to the durable queue",async()=>{
+ const created=[];const jobStore={create:async value=>{created.push(value);return {created:true,job:{id:"11111111-1111-4111-8111-111111111111",...value,status:"queued"}};}};
+ const {app}=fixture({jobStore});await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+ try{
+  const url=`http://127.0.0.1:${app.address().port}/v1/content/tasks`;
+  const denied=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({request:"企画を作る"})});assert.equal(denied.status,401);
+  const response=await fetch(url,{method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},body:JSON.stringify({request:"10分動画の企画を作る",idempotencyKey:"video-plan-001"})});
+  const data=await response.json();assert.equal(response.status,201);assert.equal(data.departmentId,"content");assert.equal(created[0].type,"department.content");assert.equal(created[0].payload.request,"10分動画の企画を作る");
+  const invalid=await fetch(`http://127.0.0.1:${app.address().port}/v1/departments/unknown/tasks`,{method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},body:JSON.stringify({request:"bad"})});assert.equal(invalid.status,400);
+ }finally{await new Promise(resolve=>app.close(resolve));}
+});
+
+
+test("tax agent receives validated financial aggregates without customer or payee identifiers",async()=>{
+ const salesHeaders=["売上ID","日付","現場ID","現場名","得意先","内容","税抜売上","消費税","税込売上","請求ID","備考","登録日時"];
+ const expenseHeaders=["経費ID","日付","現場ID","現場名","区分","項目","支払先","税抜金額","消費税","税込金額","支払方法","領収書URL","備考","登録日時"];
+ let queued;
+ const jobStore={create:async value=>{queued=value;return {created:true,job:{id:"22222222-2222-4222-8222-222222222222",status:"queued"}};}};
+ const app=createServer({token,jobStore,sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"s".repeat(128),fetchImpl:async(url,options)=>{
+  const body=JSON.parse(options.body);
+  if(body.action==="listSheets")return {ok:true,json:async()=>({ok:true,sheets:["売上","経費"]})};
+  if(body.action==="readRows"&&body.sheetName==="売上")return {ok:true,json:async()=>({ok:true,rows:[salesHeaders,["S1","2026/11/15","P1","岡山現場","顧客A","工事","100000","10000","110000","I1","",""]]})};
+  if(body.action==="readRows"&&body.sheetName==="経費")return {ok:true,json:async()=>({ok:true,rows:[expenseHeaders,["E1","2026/11/15","P1","岡山現場","材料費","砕石","仕入先A","30000","3000","33000","振込","","",""]]})};
+  throw new Error("Unexpected Sheets action");
+ }});
+ await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+ try{
+  const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/departments/tax/tasks`,{method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},body:JSON.stringify({request:"今月の売上と経費を整理して"})});
+  assert.equal(response.status,201);assert.equal(queued.type,"department.tax");assert.equal(queued.payload.companyContext.financials.revenueYen,100000);assert.equal(queued.payload.companyContext.financials.expenseYen,30000);assert.equal(JSON.stringify(queued.payload.companyContext).includes("顧客A"),false);assert.equal(JSON.stringify(queued.payload.companyContext).includes("仕入先A"),false);
+ }finally{await new Promise(resolve=>app.close(resolve));}
+});
+
+test("construction agent receives aggregate daily-report analytics without employee identities",async()=>{
+ let queued;
+ const jobStore={create:async value=>{queued=value;return {created:true,job:{id:"33333333-3333-4333-8333-333333333333",status:"queued"}};}};
+ const {app}=fixture({jobStore});await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+ try{
+  const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/departments/construction/tasks`,{method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},body:JSON.stringify({request:"日報から現場別稼働と重機を分析して"})});
+  assert.equal(response.status,201);assert.equal(queued.type,"department.construction");assert.equal(queued.payload.companyContext.dailyReportAnalytics.reportCount,1);assert.equal(queued.payload.companyContext.dailyReportAnalytics.siteCount,1);assert.equal(JSON.stringify(queued.payload.companyContext).includes("宮本朔也"),false);assert.equal(JSON.stringify(queued.payload.companyContext).includes("非公開メモ"),false);
  }finally{await new Promise(resolve=>app.close(resolve));}
 });

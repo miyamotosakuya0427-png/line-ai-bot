@@ -10,6 +10,10 @@ const { buildDailyReportAnalytics } = require("./core/company-analytics");
 const { SALES_SHEET, EXPENSE_SHEET, INVOICE_SHEET, PAYMENT_SHEET, readFinancialSheets, readReceivablesSheets } = require("./core/financial-sheet-reader");
 const { DEPARTMENTS, APPROVAL } = require("./core/department-agents");
 const { SUBSIDY_SOURCES, PRIORITY_TOPICS, REPORT_FIELDS } = require("./core/subsidy-monitor");
+const { getVideoWorkflow } = require("./core/video-workflow");
+const { createDepartmentHandlers } = require("./core/department-agent-handlers");
+const { startDailyContentPlanner } = require("./core/video-scheduler");
+const { startDailySubsidyMonitor } = require("./core/subsidy-scheduler");
 const PORT = Number(process.env.PORT || 3000);
 const MAX_BODY_BYTES = 10 * 1024;
 const TOKEN = process.env.JARVIS_API_TOKEN || "";
@@ -408,7 +412,58 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
           return json(res,503,{ok:false,error:"Company data is temporarily unavailable"});
         }
       }
+      const departmentTaskMatch=/^\/v1\/departments\/([a-z]+)\/tasks$/.exec(url.pathname);
+      if ((departmentTaskMatch && req.method==="POST") || (url.pathname==="/v1/content/tasks" && req.method==="POST")) {
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        if (!jobStore) return json(res,503,{ok:false,error:"Persistent job storage is not configured"});
+        if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+        const d=await readJson(req), departmentId=url.pathname==="/v1/content/tasks"?"content":departmentTaskMatch[1];
+        if (!DEPARTMENTS.some(item=>item.id===departmentId) || typeof d.request!=="string" || !d.request.trim() || d.request.length>4000 || (d.idempotencyKey!==undefined && (typeof d.idempotencyKey!=="string" || d.idempotencyKey.length>128))) return json(res,400,{ok:false,error:"Invalid department task"});
+        let companyContext=null;
+        if (departmentId==="construction" && /日報|現場|作業|稼働|人数|機械|重機/.test(d.request)) {
+          try {
+            const listed=await callSheets("listSheets");
+            if (!Array.isArray(listed.sheets) || !listed.sheets.includes(DAILY_REPORT_SHEET)) {
+              companyContext={dailyReportDataStatus:"日報シートが未接続。現場実績を推測しないでください。"};
+            } else {
+              const daily=await callSheets("readRows",{sheetName:DAILY_REPORT_SHEET,startRow:1,numRows:100});
+              const reports=readDailyReports(daily.rows);
+              companyContext={dailyReportAnalytics:buildDailyReportAnalytics(reports)};
+            }
+          } catch(error) {
+            companyContext={dailyReportDataStatus:"日報の読み取りまたは見出し検証に失敗。実績値を推測しないでください。",schemaErrorCode:error.code||"UNAVAILABLE"};
+          }
+        }
+        if ((departmentId==="tax"||departmentId==="management") && /売上|経費|請求|入金|利益|会計|税務|資金繰り/.test(d.request)) {
+          try {
+            const listed=await callSheets("listSheets");
+            if (!Array.isArray(listed.sheets) || !listed.sheets.includes(SALES_SHEET) || !listed.sheets.includes(EXPENSE_SHEET)) {
+              companyContext={financialDataStatus:"売上・経費シートが未接続。数値を推測せず、必要なデータを明示してください。"};
+            } else {
+              const sales=await callSheets("readRows",{sheetName:SALES_SHEET,startRow:1,numRows:100});
+              const expenses=await callSheets("readRows",{sheetName:EXPENSE_SHEET,startRow:1,numRows:100});
+              const financials=readFinancialSheets({salesRows:sales.rows,expenseRows:expenses.rows});
+              companyContext={financials};
+              if (listed.sheets.includes(INVOICE_SHEET)&&listed.sheets.includes(PAYMENT_SHEET)) {
+                const invoices=await callSheets("readRows",{sheetName:INVOICE_SHEET,startRow:1,numRows:100});
+                const payments=await callSheets("readRows",{sheetName:PAYMENT_SHEET,startRow:1,numRows:100});
+                const asOfDate=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Tokyo",year:"numeric",month:"2-digit",day:"2-digit"}).format(now());
+                companyContext.receivables=readReceivablesSheets({invoiceRows:invoices.rows,paymentRows:payments.rows,asOfDate});
+              } else {
+                companyContext.receivablesStatus="請求・入金シートは未接続。売上・経費集計とは分けて確認してください。";
+              }
+            }
+          } catch(error) {
+            companyContext={financialDataStatus:"財務シートの読み取りまたは見出し検証に失敗。数値を推測せず、管理者確認が必要です。",schemaErrorCode:error.code||"UNAVAILABLE"};
+          }
+        }
+        const payload={request:d.request.trim(),departmentId};
+        if(companyContext)payload.companyContext=companyContext;
+        const result=await jobStore.create({type:"department."+departmentId,payload,idempotencyKey:d.idempotencyKey||""});
+        return json(res,result.created?201:200,{ok:true,created:result.created,departmentId,job:result.job});
+      }
       if (url.pathname.startsWith("/v1/jobs")) {
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         if (!jobStore) return json(res,503,{ok:false,error:"Persistent job storage is not configured"});
         if (req.method==="GET" && url.pathname==="/v1/jobs") {
           const status=url.searchParams.get("status")||undefined;
@@ -450,12 +505,16 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         }
         return json(res,404,{ok:false,error:"Not Found"});
       }
+      if (req.method==="GET" && url.pathname==="/v1/content/workflow") {
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        return json(res,200,{ok:true,workflow:getVideoWorkflow({autoplanEnabled:Boolean(worker&&process.env.JARVIS_CONTENT_AUTOPLAN_ENABLED==="true")})});
+      }
       if (req.method==="GET" && (url.pathname==="/v1/departments" || url.pathname==="/v1/subsidy/sources")) {
         if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         if (url.pathname==="/v1/departments") return json(res,200,{ok:true,departments:DEPARTMENTS,approvalPolicy:APPROVAL});
-        return json(res,200,{ok:true,sources:SUBSIDY_SOURCES,priorityTopics:PRIORITY_TOPICS,reportFields:REPORT_FIELDS,monitoringEnabled:false,monitoringNote:"情報源カタログのみ。定期調査・通知はスケジューラー接続後に有効化されます。"});
+        return json(res,200,{ok:true,sources:SUBSIDY_SOURCES,priorityTopics:PRIORITY_TOPICS,reportFields:REPORT_FIELDS,monitoringEnabled:Boolean(worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"),monitoringSchedule:"08:30 Asia/Tokyo",monitoringNote:worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"?"毎日公式サイトを取得し、担当AIが確認できる状態です。":"定期調査はJARVIS_WORKER_ENABLED=trueとJARVIS_SUBSIDY_AUTOMONITOR_ENABLED=trueの設定後に有効化されます。"});
       }
-      if (req.method==="GET" && url.pathname==="/v1/status") return json(res,200,{ok:true,system:"ONE JARVIS",version:"1.3.0",mode:"read-only",googleSheetsConfigured:Boolean(sheetsUrl&&sheetsToken),jobQueueConfigured:Boolean(jobStore),workerEnabled:Boolean(worker)});
+      if (req.method==="GET" && url.pathname==="/v1/status") return json(res,200,{ok:true,system:"ONE JARVIS",version:"1.3.0",mode:"read-only",googleSheetsConfigured:Boolean(sheetsUrl&&sheetsToken),jobQueueConfigured:Boolean(jobStore),workerEnabled:Boolean(worker),contentAutoplanEnabled:Boolean(worker&&process.env.JARVIS_CONTENT_AUTOPLAN_ENABLED==="true"),subsidyAutomonitorEnabled:Boolean(worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true")});
       if (req.method==="GET" && url.pathname==="/v1/sheets/list") {
         const r=await callSheets("listSheets"); return json(res,200,{ok:true,sheets:r.sheets});
       }
@@ -492,10 +551,12 @@ if (require.main===module) {
     const jobStore=JOB_STORE_PATH?createJobStore({filePath:JOB_STORE_PATH}):null;
     const workerEnabled=process.env.JARVIS_WORKER_ENABLED==="true";
     if (workerEnabled && (!jobStore || !process.env.OPENAI_API_KEY)) throw new Error("Worker requires JARVIS_JOB_STORE_PATH and OPENAI_API_KEY.");
-    const worker=workerEnabled?createWorker({store:jobStore,handlers:{"assistant.request":createOpenAIHandler(),"assistant.company_question":createOpenAIHandler()}}):null;
+    const worker=workerEnabled?createWorker({store:jobStore,handlers:{"assistant.request":createOpenAIHandler(),"assistant.company_question":createOpenAIHandler(),...createDepartmentHandlers({store:jobStore})}}):null;
     if (worker) { await worker.start(); worker.startPolling({intervalMs:Number(process.env.JARVIS_WORKER_POLL_MS||1500)}); }
+    const contentScheduler=worker&&process.env.JARVIS_CONTENT_AUTOPLAN_ENABLED==="true"?startDailyContentPlanner({store:jobStore}):null;
+    const subsidyScheduler=worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"?startDailySubsidyMonitor({store:jobStore}):null;
     const server=createServer({jobStore,worker}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
-    const shutdown=signal=>{ console.log(`Received ${signal}; shutting down.`); if(worker)worker.stop(); server.close(error=>{if(error){console.error("Graceful shutdown failed.");process.exit(1);}process.exit(0);}); setTimeout(()=>process.exit(1),10000).unref(); };
+    const shutdown=signal=>{ console.log(`Received ${signal}; shutting down.`); if(subsidyScheduler)subsidyScheduler.stop(); if(contentScheduler)contentScheduler.stop(); if(worker)worker.stop(); server.close(error=>{if(error){console.error("Graceful shutdown failed.");process.exit(1);}process.exit(0);}); setTimeout(()=>process.exit(1),10000).unref(); };
     process.on("SIGTERM",()=>shutdown("SIGTERM")); process.on("SIGINT",()=>shutdown("SIGINT"));
     server.listen(PORT,"0.0.0.0",()=>console.log(`ONE JARVIS running on port ${PORT}`));
   })().catch(error=>{console.error(error.message);process.exit(1);});
