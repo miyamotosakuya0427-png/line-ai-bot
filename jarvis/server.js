@@ -45,10 +45,22 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
     return result;
   }
 
+  let lastPublicSheetsCheck = 0;
   return http.createServer(async(req,res)=>{
     try {
       const url=new URL(req.url,"http://localhost");
       if (req.method==="GET" && url.pathname==="/health") return json(res,200,{ok:true,service:"ONE JARVIS",status:"running"});
+      if (req.method==="GET" && url.pathname==="/health/sheets") {
+        const now=Date.now();
+        if (now-lastPublicSheetsCheck<30000) return json(res,429,{ok:false,googleSheets:"check rate limited"});
+        lastPublicSheetsCheck=now;
+        try {
+          await callSheets("ping");
+          return json(res,200,{ok:true,googleSheets:"connected"});
+        } catch {
+          return json(res,503,{ok:false,googleSheets:"not connected"});
+        }
+      }
       if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
       if (req.method==="GET" && url.pathname==="/v1/status") return json(res,200,{ok:true,system:"ONE JARVIS",version:"1.2.0",mode:"read-only",googleSheetsConfigured:Boolean(sheetsUrl&&sheetsToken)});
       if (req.method==="GET" && url.pathname==="/v1/sheets/list") {
