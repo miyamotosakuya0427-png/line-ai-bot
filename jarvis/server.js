@@ -512,13 +512,13 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
           const pending=videos.filter(p=>p.status==="awaiting_owner_review");
           return json(res,200,{ok:true,pending,reviews:await videoBatchStore.listReviews(),actionApprovals:await videoBatchStore.listActionApprovals()});
         }
-        const reviewMatch=new RegExp("^/v1/content/videos/(V[0-9]{2,4})/review$").exec(url.pathname);
+        const reviewMatch=new RegExp("^/v1/content/videos/(V[0-9]{2,8})/review$").exec(url.pathname);
         if (req.method==="POST" && reviewMatch) {
           if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
           const d=await readJson(req),updated=await videoBatchStore.decideReview(reviewMatch[1],{decision:d.decision,note:d.note||"",actor:"owner-api"});
           return updated?json(res,200,{ok:true,video:updated}):json(res,404,{ok:false,error:"Video not found"});
         }
-        const actionMatch=new RegExp("^/v1/content/videos/(V[0-9]{2,4})/action-approval$").exec(url.pathname);
+        const actionMatch=new RegExp("^/v1/content/videos/(V[0-9]{2,8})/action-approval$").exec(url.pathname);
         if (req.method==="POST" && actionMatch) {
           if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
           const d=await readJson(req),approval=await videoBatchStore.approveAction(actionMatch[1],{action:d.action,provider:d.provider,costEstimate:d.costEstimate,destination:d.destination,actor:"owner-api"});
