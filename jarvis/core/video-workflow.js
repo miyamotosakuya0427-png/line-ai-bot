@@ -86,7 +86,7 @@ function setQualityCheck(plan,checkId,passed,notes="") {
  const checks=plan.qa.checks.map(x=>x.id===checkId?{...x,passed,notes}:x);
  return {...plan,qa:{checks}};
 }
-function getVideoWorkflow() {
- return {series:VIDEO_SERIES,projects:EXISTING_PROJECTS,stages:STAGES,qualityChecks:QA_CHECKS,approvalGates:APPROVAL_GATES,automationStatus:"workflow-defined-not-scheduled",publicationEnabled:false,paidGenerationEnabled:false,notes:["Existing production project is not automatically marked complete; inspect the real editor project and media before advancing stages.","Scheduled production requires a connected persistent worker and an approved budget."]};
+function getVideoWorkflow({autoplanEnabled=false}={}) {
+ return {series:VIDEO_SERIES,projects:EXISTING_PROJECTS,stages:STAGES,qualityChecks:QA_CHECKS,approvalGates:APPROVAL_GATES,automationStatus:autoplanEnabled?"daily-planner-enabled":"opt-in-not-enabled",autoplanEnabled,publicationEnabled:false,paidGenerationEnabled:false,notes:["Existing production project is not automatically marked complete; inspect the real editor project and media before advancing stages.","Scheduled production requires a connected persistent worker and an approved budget."]};
 }
 module.exports={VIDEO_SERIES,EXISTING_PROJECTS,STAGES,QA_CHECKS,APPROVAL_GATES,createVideoPlan,markStageComplete,setVoiceGenerationMode,setOwnerApproval,setQualityCheck,getVideoWorkflow};
