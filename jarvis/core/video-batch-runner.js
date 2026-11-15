@@ -35,12 +35,22 @@ function createVideoBatchContentHandler({contentHandler,videoBatchStore,jobStore
   const request=buildSourceReviewRequest(video);
   return jobStore.create({type:"department.content",payload:{request,departmentId:"content",videoId:video.id,taskKind:"video-batch-source-review"},idempotencyKey:"video-batch-source-review-"+video.id});
  }
- return async function handleVideoBatchContent(payload,context={}){
+ return async function enqueuePronunciationReview(video){if(!jobStore||typeof jobStore.create!=="function")return null;return jobStore.create({type:"department.content",payload:{request:buildPronunciationReviewRequest(video),departmentId:"content",videoId:video.id,taskKind:"video-batch-pronunciation-review"},idempotencyKey:"video-batch-pronunciation-review-"+video.id});}
+ async function handleVideoBatchContent(payload,context={}){
+  if(payload?.taskKind==="video-batch-pronunciation-review"){
+   if(typeof payload.videoId!=="string"||!/^V[0-9]{2,8}$/.test(payload.videoId)||typeof context.jobId!=="string"||!context.jobId)throw new Error("Invalid pronunciation-review task");
+   const video=await videoBatchStore.get(payload.videoId);if(!video||!video.script||!video.sourceReview)throw new Error("A saved script and source review are required");
+   if(video.pronunciationReview?.jobId===context.jobId)return {answer:video.pronunciationReview.answer,videoId:video.id,reused:true,pronunciationReviewSaved:true,verified:false};
+   const terms=extractPronunciationCandidates(video.script);const result=await contentHandler({...payload,request:buildPronunciationReviewRequest(video)},context);
+   if(!result||typeof result.answer!=="string"||!result.answer.trim())throw new Error("ONE CONTENT did not return a pronunciation checklist");
+   const saved=await videoBatchStore.savePronunciationChecklist(video.id,{answer:result.answer,jobId:context.jobId,terms});if(!saved||!saved.video)throw new Error("Pronunciation checklist could not be saved");
+   return {...result,videoId:video.id,pronunciationReviewSaved:true,verified:false,candidateCount:terms.length};
+  }
   if(payload?.taskKind==="video-batch-source-review"){
    if(typeof payload.videoId!=="string"||!/^V[0-9]{2,8}$/.test(payload.videoId)||typeof context.jobId!=="string"||!context.jobId)throw new Error("Invalid source-review task");
    const existing=await videoBatchStore.get(payload.videoId);
    if(!existing||!existing.script||existing.stage!=="script")throw new Error("A saved script at the script stage is required");
-   if(existing.sourceReview?.jobId===context.jobId)return {answer:existing.sourceReview.answer,videoId:payload.videoId,reused:true,sourceReviewSaved:true,verified:false,sourceCount:existing.sourceReview.sourceSnapshots?.length||0};
+   if(existing.sourceReview?.jobId===context.jobId){await enqueuePronunciationReview(existing);return {answer:existing.sourceReview.answer,videoId:payload.videoId,reused:true,sourceReviewSaved:true,pronunciationReviewEnqueued:Boolean(jobStore),verified:false,sourceCount:existing.sourceReview.sourceSnapshots?.length||0};}
    const sourceSnapshots=[];
    const candidates=[...new Set((existing.sources||[]).filter(x=>typeof x==="string"&&/^https:\/\//i.test(x)).slice(0,2))];
    for(const sourceUrl of candidates){
@@ -71,7 +81,8 @@ function createVideoBatchContentHandler({contentHandler,videoBatchStore,jobStore
    if(!result||typeof result.answer!=="string"||!result.answer.trim())throw new Error("ONE CONTENT did not return a source-review checklist");
    const saved=await videoBatchStore.saveSourceReview(payload.videoId,{answer:result.answer,jobId:context.jobId,sourceSnapshots});
    if(!saved||!saved.video)throw new Error("Source-review checklist could not be saved");
-   return {...result,videoId:payload.videoId,sourceReviewSaved:true,verified:false,sourceCount:sourceSnapshots.filter(s=>!s.error).length,sourceFetchFailures:sourceSnapshots.filter(s=>s.error).length};
+   await enqueuePronunciationReview(saved.video);
+   return {...result,videoId:payload.videoId,sourceReviewSaved:true,pronunciationReviewEnqueued:Boolean(jobStore),verified:false,sourceCount:sourceSnapshots.filter(s=>!s.error).length,sourceFetchFailures:sourceSnapshots.filter(s=>s.error).length};
   }
   if(payload?.taskKind!=="video-batch-plan")return contentHandler(payload,context);
   if(typeof payload.videoId!=="string"||!/^V[0-9]{2,8}$/.test(payload.videoId))throw new Error("Invalid video batch task ID");
@@ -90,4 +101,4 @@ function createVideoBatchContentHandler({contentHandler,videoBatchStore,jobStore
   return {...result,videoId:payload.videoId,draftPersisted:true,sourceReviewEnqueued:Boolean(jobStore)};
  };
 }
-module.exports={buildSourceReviewRequest,createVideoBatchContentHandler};
+module.exports={buildSourceReviewRequest,buildPronunciationReviewRequest,extractPronunciationCandidates,createVideoBatchContentHandler};
