@@ -38,7 +38,6 @@ function createWorker({ store, handlers = {} } = {}) {
         return { processed: true, job: failed };
       }
 
-      if (!running) return { processed: false, job: null };
       try {
         await handler(running.payload, { jobId: running.id, attempt: running.attempts });
         const succeeded = await store.transition(running.id, "succeeded");
