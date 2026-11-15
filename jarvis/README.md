@@ -61,7 +61,7 @@ All API endpoints except `GET /health` and the dashboard shell require `Authoriz
 - `GET /v1/content/workflow` (authenticated video production stages, quality checklist, and approval gates)
 - `GET /v1/subsidy/sources` (authenticated official source catalog and One-specific priority topics)
 - `GET /v1/status`
-- `GET /v1/approvals` (owner-authenticated approval journal)
+- `GET /v1/approvals` (authenticated approval journal; bearer-token access, without separate human identity proof)
 - `POST /v1/approvals` (record an owner approval request)
 - `POST /v1/approvals/:id/decision` (record approved/rejected decision; never executes external work)
 - `GET /v1/jobs`
@@ -141,3 +141,10 @@ The subsidy monitor also stores bounded SHA-256 fingerprints for successfully fe
 ### Department-specific company context
 
 Construction tasks about site activity or daily reports receive read-only aggregate analytics from `03 日報` (maximum 99 sampled rows): site counts, worker-days, estimated person-hours, equipment, and recent work dates. Employee names, IDs, phone numbers, pay, free-text notes, and row-level reports are not passed to the construction agent. Missing or invalid sheet data is reported as unavailable rather than estimated.
+\n\n- `GET /v1/content/batches` and `POST /v1/content/batches` (authenticated persistent video queue, up to 100 ideas per batch)\n- `GET /v1/content/approvals` (video owner-review inbox)\n- `POST /v1/content/videos/:id/stage`, `/review`, and `/action-approval` (ordered stage updates, review decisions, and scoped expiring action-approval records)\n
+
+### Video batch queue
+
+The video batch journal is stored at `<JARVIS_JOB_STORE_PATH>.video-batches.jsonl` and is initialized alongside the job journal. It supports up to 100 ideas per batch, separate channel identifiers, ordered production stages, owner review decisions (approve / request changes / hold), and scoped action-approval records with provider, cost estimate, destination, and expiry. The dashboard blocks finance-channel bulk registration until the channel destination and source/financial disclaimers are configured. Queue registration only creates ideas; it does not start research, paid generation, editing, uploads, scheduling, or publication. A provider executor is not connected. Approval actions are verified records only and must not be treated as completed external work.
+
+The general approval journal and video-specific review inbox are separate: `/v1/approvals` handles cross-department authorization records, while `/v1/content/approvals` is the video-batch review inbox. Both use the shared JARVIS bearer token. This authenticates API access but does not independently prove the human owner's identity. Add a separate owner identity control before enabling consequential external execution.
