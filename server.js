@@ -1,767 +1,246 @@
-const http = require("http");
+"use strict";
 
-const crypto = require("crypto");
+const http = require("node:http");
+const crypto = require("node:crypto");
 
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT || 3000);
+const MAX_BODY_BYTES = 1024 * 1024;
+const OPENAI_TIMEOUT_MS = 20_000;
+const LINE_TIMEOUT_MS = 10_000;
+const DEDUPE_TTL_MS = 24 * 60 * 60 * 1000;
+const MAX_DEDUPE_ENTRIES = 10_000;
+const recentEvents = new Map();
 
-/* =====================================================
+function verifySignature(body, signature, secret = process.env.LINE_CHANNEL_SECRET) {
+  if (!secret || typeof signature !== "string" || !signature) return false;
+  const expected = crypto.createHmac("sha256", secret).update(body).digest();
+  let supplied;
+  try {
+    supplied = Buffer.from(signature, "base64");
+  } catch {
+    return false;
+  }
+  return supplied.length === expected.length &&
+    crypto.timingSafeEqual(supplied, expected);
+}
 
-   OpenAI
+async function readRequestBody(req, maxBytes = MAX_BODY_BYTES) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > maxBytes) {
+      const error = new Error("Request body too large");
+      error.statusCode = 413;
+      throw error;
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
 
-===================================================== */
+function extractOutputText(data) {
+  if (typeof data?.output_text === "string" && data.output_text.trim()) {
+    return data.output_text.trim();
+  }
+  for (const item of data?.output || []) {
+    for (const content of item?.content || []) {
+      if (content?.type === "output_text" && typeof content.text === "string" && content.text.trim()) {
+        return content.text.trim();
+      }
+    }
+  }
+  return "";
+}
 
 async function getAIReply(message) {
-
   const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("OpenAI is not configured");
 
-  if (!apiKey) {
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": \`Bearer \${apiKey}\`
+    },
+    body: JSON.stringify({
+      model: process.env.OPENAI_MODEL || "gpt-5.6-luna",
+      input: [{
+        role: "user",
+        content: [{ type: "input_text", text: message }]
+      }]
+    }),
+    signal: AbortSignal.timeout(OPENAI_TIMEOUT_MS)
+  });
 
-    throw new Error("OPENAI_API_KEY が設定されていません");
-
+  if (!response.ok) {
+    console.error("OpenAI API request failed", { status: response.status });
+    throw new Error("OpenAI API request failed");
   }
-
-  const response = await fetch(
-
-    "https://api.openai.com/v1/responses",
-
-    {
-
-      method: "POST",
-
-      headers: {
-
-        "Content-Type": "application/json",
-
-        "Authorization": `Bearer ${apiKey}`
-
-      },
-
-      body: JSON.stringify({
-
-        model: "gpt-5.6-luna",
-
-        input: [
-
-          {
-
-            role: "user",
-
-            content: [
-
-              {
-
-                type: "input_text",
-
-                text: message
-
-              }
-
-            ]
-
-          }
-
-        ]
-
-      })
-
-    }
-
-  );
 
   const data = await response.json();
+  const answer = extractOutputText(data);
+  if (!answer) throw new Error("OpenAI returned no text");
+  return answer;
+}
 
-  console.log(
+async function replyToLINE(replyToken, text) {
+  const accessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (!accessToken) throw new Error("LINE is not configured");
 
-    "OpenAI STATUS:",
+  const replyText = String(text || "").trim().slice(0, 5000) ||
+    "申し訳ありません。回答を取得できませんでした。";
 
-    response.status
-
-  );
-
-  console.log(
-
-    "OpenAI RESPONSE:",
-
-    JSON.stringify(data)
-
-  );
-
-  /* ---------------------------------------------
-
-     OpenAI APIエラー
-
-  --------------------------------------------- */
+  const response = await fetch("https://api.line.me/v2/bot/message/reply", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": \`Bearer \${accessToken}\`
+    },
+    body: JSON.stringify({
+      replyToken,
+      messages: [{ type: "text", text: replyText }]
+    }),
+    signal: AbortSignal.timeout(LINE_TIMEOUT_MS)
+  });
 
   if (!response.ok) {
-
-    console.error(
-
-      "OpenAI API ERROR:",
-
-      JSON.stringify(data)
-
-    );
-
-    throw new Error(
-
-      data?.error?.message ||
-
-      "OpenAI API error"
-
-    );
-
+    console.error("LINE reply failed", { status: response.status });
+    throw new Error("LINE reply failed");
   }
+}
 
-  /* ---------------------------------------------
-
-     ① 新しいResponses APIのoutput_text
-
-  --------------------------------------------- */
-
-  if (
-
-    typeof data.output_text === "string" &&
-
-    data.output_text.trim()
-
-  ) {
-
-    return data.output_text.trim();
-
+function claimEvent(eventId, now = Date.now()) {
+  if (!eventId) return true;
+  for (const [key, expiresAt] of recentEvents) {
+    if (expiresAt <= now) recentEvents.delete(key);
   }
+  if (recentEvents.has(eventId)) return false;
+  if (recentEvents.size >= MAX_DEDUPE_ENTRIES) {
+    const oldest = recentEvents.keys().next().value;
+    if (oldest) recentEvents.delete(oldest);
+  }
+  recentEvents.set(eventId, now + DEDUPE_TTL_MS);
+  return true;
+}
 
-  /* ---------------------------------------------
+async function processEvents(events) {
+  for (const event of events) {
+    if (event?.type !== "message" || event?.message?.type !== "text" || !event.replyToken) {
+      continue;
+    }
 
-     ② output → message → content → text
+    const eventId = event.webhookEventId;
+    if (!claimEvent(eventId)) {
+      console.info("Duplicate LINE event ignored");
+      continue;
+    }
 
-  --------------------------------------------- */
-
-  if (Array.isArray(data.output)) {
-
-    for (const outputItem of data.output) {
-
-      if (
-
-        outputItem &&
-
-        outputItem.type === "message" &&
-
-        Array.isArray(outputItem.content)
-
-      ) {
-
-        for (const contentItem of outputItem.content) {
-
-          if (
-
-            contentItem &&
-
-            contentItem.type === "output_text" &&
-
-            typeof contentItem.text === "string"
-
-          ) {
-
-            if (contentItem.text.trim()) {
-
-              return contentItem.text.trim();
-
-            }
-
-          }
-
-        }
-
+    try {
+      const message = String(event.message.text || "").trim();
+      if (!message) continue;
+      const answer = await getAIReply(message);
+      await replyToLINE(event.replyToken, answer);
+      console.info("LINE event processed", { type: event.type });
+    } catch (error) {
+      if (eventId) recentEvents.delete(eventId);
+      console.error("LINE event processing failed", {
+        name: error?.name || "Error"
+      });
+      try {
+        await replyToLINE(
+          event.replyToken,
+          "申し訳ありません。AIの回答処理中にエラーが発生しました。時間をおいて再度お試しください。"
+        );
+      } catch (replyError) {
+        console.error("LINE fallback reply failed", {
+          name: replyError?.name || "Error"
+        });
       }
-
     }
-
   }
-
-  /* ---------------------------------------------
-
-     ③ 念のためoutput全体からtextを探す
-
-  --------------------------------------------- */
-
-  if (Array.isArray(data.output)) {
-
-    for (const outputItem of data.output) {
-
-      if (
-
-        outputItem &&
-
-        Array.isArray(outputItem.content)
-
-      ) {
-
-        for (const contentItem of outputItem.content) {
-
-          if (
-
-            contentItem &&
-
-            typeof contentItem.text === "string" &&
-
-            contentItem.text.trim()
-
-          ) {
-
-            return contentItem.text.trim();
-
-          }
-
-        }
-
-      }
-
-    }
-
-  }
-
-  /* ---------------------------------------------
-
-     回答が見つからない
-
-  --------------------------------------------- */
-
-  console.error(
-
-    "OpenAIの回答テキストを取得できませんでした:",
-
-    JSON.stringify(data)
-
-  );
-
-  throw new Error(
-
-    "OpenAI response text not found"
-
-  );
-
 }
 
-/* =====================================================
-
-   LINE署名確認
-
-===================================================== */
-
-function verifySignature(body, signature) {
-
-  const secret = process.env.LINE_CHANNEL_SECRET;
-
-  if (!secret) {
-
-    console.error(
-
-      "LINE_CHANNEL_SECRET が設定されていません"
-
-    );
-
-    return false;
-
-  }
-
-  const hash = crypto
-
-    .createHmac(
-
-      "sha256",
-
-      secret
-
-    )
-
-    .update(body)
-
-    .digest("base64");
-
-  return hash === signature;
-
-}
-
-/* =====================================================
-
-   LINEへ返信
-
-===================================================== */
-
-async function replyToLINE(
-
-  replyToken,
-
-  text
-
-) {
-
-  const accessToken =
-
-    process.env.LINE_CHANNEL_ACCESS_TOKEN;
-
-  if (!accessToken) {
-
-    throw new Error(
-
-      "LINE_CHANNEL_ACCESS_TOKEN が設定されていません"
-
-    );
-
-  }
-
-  const replyText =
-
-    String(text || "")
-
-      .trim()
-
-      .slice(0, 5000);
-
-  const response = await fetch(
-
-    "https://api.line.me/v2/bot/message/reply",
-
-    {
-
-      method: "POST",
-
-      headers: {
-
-        "Content-Type": "application/json",
-
-        "Authorization":
-
-          `Bearer ${accessToken}`
-
-      },
-
-      body: JSON.stringify({
-
-        replyToken: replyToken,
-
-        messages: [
-
-          {
-
-            type: "text",
-
-            text:
-
-              replyText ||
-
-              "申し訳ありません。回答を取得できませんでした。"
-
-          }
-
-        ]
-
-      })
-
-    }
-
-  );
-
-  const data = await response.text();
-
-  console.log(
-
-    "LINE STATUS:",
-
-    response.status
-
-  );
-
-  console.log(
-
-    "LINE RESPONSE:",
-
-    data
-
-  );
-
-  if (!response.ok) {
-
-    throw new Error(
-
-      `LINE API error: ${response.status} ${data}`
-
-    );
-
-  }
-
-  return data;
-
-}
-
-/* =====================================================
-
-   HTTPサーバー
-
-===================================================== */
-
-const server = http.createServer(
-
-  (req, res) => {
-
-    /* ---------------------------------------------
-
-       GET
-
-    --------------------------------------------- */
-
-    if (req.method === "GET") {
-
-      res.writeHead(
-
-        200,
-
-        {
-
-          "Content-Type":
-
-            "text/plain; charset=utf-8"
-
-        }
-
-      );
-
-      res.end(
-
-        "株式会社One LINE AI Bot is running"
-
-      );
-
+function createServer() {
+  return http.createServer(async (req, res) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Cache-Control", "no-store");
+
+    if (req.method === "GET" && (req.url === "/" || req.url === "/health")) {
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("株式会社One LINE AI Bot is running");
       return;
-
     }
 
-    /* ---------------------------------------------
-
-       POST /webhook 以外
-
-    --------------------------------------------- */
-
-    if (
-
-      req.method !== "POST" ||
-
-      req.url !== "/webhook"
-
-    ) {
-
+    if (req.method !== "POST" || req.url !== "/webhook") {
       res.writeHead(404);
-
       res.end("Not Found");
-
       return;
-
     }
 
-    /* ---------------------------------------------
-
-       POST本文取得
-
-    --------------------------------------------- */
-
-    let body = "";
-
-    req.on(
-
-      "data",
-
-      chunk => {
-
-        body += chunk.toString();
-
-        /* LINE webhookのサイズ制限対策 */
-
-        if (body.length > 1000000) {
-
-          req.destroy();
-
-          return;
-
-        }
-
+    try {
+      const body = await readRequestBody(req);
+      const signature = req.headers["x-line-signature"];
+      if (!verifySignature(body, signature)) {
+        res.writeHead(401);
+        res.end("Unauthorized");
+        return;
       }
 
-    );
-
-    req.on(
-
-      "end",
-
-      async () => {
-
-        try {
-
-          /* ---------------------------------------
-
-             LINE署名確認
-
-          --------------------------------------- */
-
-          const signature =
-
-            req.headers["x-line-signature"];
-
-          if (
-
-            !signature ||
-
-            !verifySignature(
-
-              body,
-
-              signature
-
-            )
-
-          ) {
-
-            console.error(
-
-              "LINE signature verification failed"
-
-            );
-
-            res.writeHead(401);
-
-            res.end("Unauthorized");
-
-            return;
-
-          }
-
-          /* ---------------------------------------
-
-             LINEにはすぐ200を返す
-
-          --------------------------------------- */
-
-          res.writeHead(
-
-            200,
-
-            {
-
-              "Content-Type":
-
-                "text/plain; charset=utf-8"
-
-            }
-
-          );
-
-          res.end("OK");
-
-          /* ---------------------------------------
-
-             JSON解析
-
-          --------------------------------------- */
-
-          const data =
-
-            JSON.parse(body);
-
-          console.log(
-
-            "LINE WEBHOOK:",
-
-            JSON.stringify(data)
-
-          );
-
-          /* ---------------------------------------
-
-             イベント処理
-
-          --------------------------------------- */
-
-          for (
-
-            const event
-
-            of data.events || []
-
-          ) {
-
-            /* -------------------------------------
-
-               テキストメッセージだけ処理
-
-            ------------------------------------- */
-
-            if (
-
-              event.type !== "message" ||
-
-              !event.message ||
-
-              event.message.type !== "text"
-
-            ) {
-
-              continue;
-
-            }
-
-            const userMessage =
-
-              event.message.text;
-
-            console.log(
-
-              "LINE MESSAGE:",
-
-              userMessage
-
-            );
-
-            /* -------------------------------------
-
-               replyToken確認
-
-            ------------------------------------- */
-
-            if (!event.replyToken) {
-
-              console.error(
-
-                "replyToken がありません"
-
-              );
-
-              continue;
-
-            }
-
-            /* -------------------------------------
-
-               AI回答取得
-
-            ------------------------------------- */
-
-            try {
-
-              const aiReply =
-
-                await getAIReply(
-
-                  userMessage
-
-                );
-
-              console.log(
-
-                "AI REPLY:",
-
-                aiReply
-
-              );
-
-              /* -----------------------------------
-
-                 LINE返信
-
-              ----------------------------------- */
-
-              await replyToLINE(
-
-                event.replyToken,
-
-                aiReply
-
-              );
-
-              console.log(
-
-                "LINEへの返信成功"
-
-              );
-
-            } catch (error) {
-
-              console.error(
-
-                "AI PROCESSING ERROR:",
-
-                error
-
-              );
-
-              /* -----------------------------------
-
-                 エラー時もLINEへ通知
-
-              ----------------------------------- */
-
-              try {
-
-                await replyToLINE(
-
-                  event.replyToken,
-
-                  "申し訳ありません。AIの回答処理中にエラーが発生しました。"
-
-                );
-
-              } catch (lineError) {
-
-                console.error(
-
-                  "LINE ERROR:",
-
-                  lineError
-
-                );
-
-              }
-
-            }
-
-          }
-
-        } catch (error) {
-
-          console.error(
-
-            "SERVER ERROR:",
-
-            error
-
-          );
-
-        }
-
+      let payload;
+      try {
+        payload = JSON.parse(body.toString("utf8"));
+      } catch {
+        res.writeHead(400);
+        res.end("Invalid JSON");
+        return;
       }
 
-    );
+      if (!payload || !Array.isArray(payload.events)) {
+        res.writeHead(400);
+        res.end("Invalid webhook payload");
+        return;
+      }
 
-  }
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("OK");
 
-);
+      console.info("LINE webhook accepted", {
+        eventCount: payload.events.length
+      });
 
-/* =====================================================
+      void processEvents(payload.events).catch((error) => {
+        console.error("Webhook background processing failed", {
+          name: error?.name || "Error"
+        });
+      });
+    } catch (error) {
+      if (res.headersSent) return;
+      const status = Number.isInteger(error.statusCode) ? error.statusCode : 500;
+      res.writeHead(status, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end(status === 413 ? "Payload Too Large" : "Request Failed");
+      console.error("Webhook request rejected", { status });
+    }
+  });
+}
 
-   サーバー起動
+if (require.main === module) {
+  const server = createServer();
+  server.requestTimeout = 30_000;
+  server.headersTimeout = 15_000;
+  server.keepAliveTimeout = 5_000;
+  server.listen(PORT, "0.0.0.0", () => {
+    console.info(\`LINE AI Bot running on port \${PORT}\`);
+  });
+  const shutdown = () => server.close(() => process.exit(0));
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
+}
 
-===================================================== */
-
-server.listen(
-
-  PORT,
-
-  () => {
-
-    console.log(
-
-      `Server running on port ${PORT}`
-
-    );
-
-  }
-
-);
+module.exports = {
+  createServer,
+  verifySignature,
+  readRequestBody,
+  extractOutputText,
+  claimEvent
+};
