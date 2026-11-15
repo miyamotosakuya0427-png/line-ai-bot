@@ -11,7 +11,7 @@ test("estimates Japanese runtime from character pace and requires recorded timin
  const m=createScriptMetrics(text);
  assert.equal(m.characters,3360);
  assert.equal(m.status,"estimated_range_ok");
- assert.deepEqual(m.estimatedMinutes,{min:8,max:9.6});
+ assert.deepEqual(m.estimatedMinutes,{min:8.4,max:10.2});
  assert.equal(m.requiresRecordedTiming,true);
 });
 test("flags short, long, and ambiguous narration instead of claiming a finished runtime",()=>{
