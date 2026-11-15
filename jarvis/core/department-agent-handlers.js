@@ -2,6 +2,7 @@
 
 const {DEPARTMENTS}=require("./department-agents");
 const {createOpenAIHandler}=require("./openai-handler");
+const {createSubsidyResearchHandler}=require("./subsidy-research-handler");
 
 const INSTRUCTIONS=Object.freeze({
  jarvis:"あなたはONE JARVIS統括室の独立AIエージェントです。全部署の成果を統合し、優先順位・依存関係・リスク・未確認事項を整理してください。実行していない作業を完了と表現せず、外部操作は行わず、承認待ちとして明確にしてください。",
@@ -19,12 +20,14 @@ const INSTRUCTIONS=Object.freeze({
  trader:"あなたはONE TRADERトレード研究部の独立AIエージェントです。相場分析、バックテスト、ペーパートレードとリスク監視を行い、実資金注文・レバレッジ変更はしません。"
 });
 function createDepartmentHandlers(options={}) {
+ const {researchFetchImpl=fetch,...openAIOptions}=options;
  const handlers={};
  for(const department of DEPARTMENTS) {
   const instructions=INSTRUCTIONS[department.id];
   if(!instructions) throw new Error("Missing department agent instructions: "+department.id);
-  handlers["department."+department.id]=createOpenAIHandler({...options,instructions});
+  handlers["department."+department.id]=createOpenAIHandler({...openAIOptions,instructions});
  }
+ handlers["department.office"]=createSubsidyResearchHandler({...openAIOptions,researchFetchImpl});
  return handlers;
 }
 module.exports={INSTRUCTIONS,createDepartmentHandlers};
