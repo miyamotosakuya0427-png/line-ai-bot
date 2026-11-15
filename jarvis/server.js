@@ -2,6 +2,7 @@
 const http = require("node:http");
 const crypto = require("node:crypto");
 const { createJobStore } = require("./core/job-store");
+const { createApprovalStore } = require("./core/approval-store");
 const { createWorker } = require("./core/worker");
 const { createOpenAIHandler } = require("./core/openai-handler");
 const { dashboardPage } = require("./dashboard");
@@ -22,6 +23,7 @@ const SHEETS_TOKEN = process.env.JARVIS_SHEETS_TOKEN || "";
 const LINE_LOGIN_CHANNEL_ID = process.env.LINE_LOGIN_CHANNEL_ID || "";
 const LIFF_ID = process.env.LIFF_ID || "";
 const JOB_STORE_PATH = process.env.JARVIS_JOB_STORE_PATH || "";
+const APPROVAL_STORE_PATH = process.env.JARVIS_APPROVAL_STORE_PATH || (JOB_STORE_PATH ? JOB_STORE_PATH + ".approvals" : "");
 
 function json(res, status, payload, extraHeaders = {}) {
   res.writeHead(status, {"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer",...extraHeaders});
@@ -90,7 +92,7 @@ dailyForm.addEventListener("submit",async(event)=>{event.preventDefault();if(!id
 </script></body></html>`;
 }
 
-function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,worker=null,now=()=>new Date()}={}) {
+function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,approvalStore=null,worker=null,now=()=>new Date()}={}) {
   async function callSheets(action, fields={}) {
     if (!sheetsUrl || !sheetsToken) { const e=new Error("Google Sheets integration is not configured"); e.statusCode=503; throw e; }
     const u=new URL(sheetsUrl);
@@ -462,6 +464,38 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         const result=await jobStore.create({type:"department."+departmentId,payload,idempotencyKey:d.idempotencyKey||""});
         return json(res,result.created?201:200,{ok:true,created:result.created,departmentId,job:result.job});
       }
+      if (url.pathname==="/v1/approvals" || /^\/v1\/approvals\/[0-9a-f-]{36}\/decision$/.test(url.pathname)) {
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        if (!approvalStore) return json(res,503,{ok:false,error:"Persistent approval storage is not configured"});
+        if (req.method==="GET" && url.pathname==="/v1/approvals") {
+          const status=url.searchParams.get("status")||undefined;
+          const limit=Number(url.searchParams.get("limit")||50);
+          if ((status&&!["pending","approved","rejected"].includes(status))||!Number.isInteger(limit)||limit<1||limit>200) return json(res,400,{ok:false,error:"Invalid approval list parameters"});
+          const approvals=await approvalStore.list({status,limit});
+          return json(res,200,{ok:true,approvals,executionEnabled:false});
+        }
+        if (req.method==="POST" && url.pathname==="/v1/approvals") {
+          if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+          const d=await readJson(req);
+          if (typeof d.departmentId!=="string"||!DEPARTMENTS.some(item=>item.id===d.departmentId)||typeof d.actionClass!=="string"||
+              typeof d.summary!=="string"||!d.summary.trim()||d.summary.length>300||
+              (d.details!==undefined&&(typeof d.details!=="string"||d.details.length>8000))||
+              (d.idempotencyKey!==undefined&&(typeof d.idempotencyKey!=="string"||d.idempotencyKey.length>128))) return json(res,400,{ok:false,error:"Invalid approval request"});
+          if (!APPROVAL.requiresOwnerApproval.includes(d.actionClass) && !["unknown","unknown_action"].includes(d.actionClass)) return json(res,400,{ok:false,error:"This action class does not require owner approval"});
+          const result=await approvalStore.create({departmentId:d.departmentId,actionClass:d.actionClass,summary:d.summary,details:d.details||"",idempotencyKey:d.idempotencyKey||""});
+          return json(res,result.created?201:200,{ok:true,created:result.created,approval:result.approval,executionEnabled:false,message:"承認記録のみを保存しました。外部送信・公開・支払い等は実行していません。"});
+        }
+        const match=/^\/v1\/approvals\/([0-9a-f-]{36})\/decision$/.exec(url.pathname);
+        if (req.method==="POST"&&match) {
+          if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+          const d=await readJson(req);
+          if (!["approved","rejected"].includes(d.decision)||(d.reason!==undefined&&(typeof d.reason!=="string"||d.reason.length>1000))) return json(res,400,{ok:false,error:"Invalid approval decision"});
+          const approval=await approvalStore.decide(match[1],d.decision,{reason:d.reason||""});
+          if (!approval) return json(res,404,{ok:false,error:"Approval not found"});
+          return json(res,200,{ok:true,approval,executionEnabled:false,message:d.decision==="approved"?"承認を記録しました。外部処理は別途接続・実行が必要です。":"却下を記録しました。外部処理は実行していません。"});
+        }
+        return json(res,404,{ok:false,error:"Not Found"});
+      }
       if (url.pathname.startsWith("/v1/jobs")) {
         if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         if (!jobStore) return json(res,503,{ok:false,error:"Persistent job storage is not configured"});
@@ -514,7 +548,7 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         if (url.pathname==="/v1/departments") return json(res,200,{ok:true,departments:DEPARTMENTS,approvalPolicy:APPROVAL});
         return json(res,200,{ok:true,sources:SUBSIDY_SOURCES,priorityTopics:PRIORITY_TOPICS,reportFields:REPORT_FIELDS,monitoringEnabled:Boolean(worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"),monitoringSchedule:"08:30 Asia/Tokyo",monitoringNote:worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"?"毎日公式サイトを取得し、担当AIが確認できる状態です。":"定期調査はJARVIS_WORKER_ENABLED=trueとJARVIS_SUBSIDY_AUTOMONITOR_ENABLED=trueの設定後に有効化されます。"});
       }
-      if (req.method==="GET" && url.pathname==="/v1/status") return json(res,200,{ok:true,system:"ONE JARVIS",version:"1.3.0",mode:"read-only",googleSheetsConfigured:Boolean(sheetsUrl&&sheetsToken),jobQueueConfigured:Boolean(jobStore),workerEnabled:Boolean(worker),contentAutoplanEnabled:Boolean(worker&&process.env.JARVIS_CONTENT_AUTOPLAN_ENABLED==="true"),subsidyAutomonitorEnabled:Boolean(worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true")});
+      if (req.method==="GET" && url.pathname==="/v1/status") return json(res,200,{ok:true,system:"ONE JARVIS",version:"1.3.0",mode:"read-only",googleSheetsConfigured:Boolean(sheetsUrl&&sheetsToken),jobQueueConfigured:Boolean(jobStore),workerEnabled:Boolean(worker),contentAutoplanEnabled:Boolean(worker&&process.env.JARVIS_CONTENT_AUTOPLAN_ENABLED==="true"),subsidyAutomonitorEnabled:Boolean(worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"),approvalsConfigured:Boolean(approvalStore)});
       if (req.method==="GET" && url.pathname==="/v1/sheets/list") {
         const r=await callSheets("listSheets"); return json(res,200,{ok:true,sheets:r.sheets});
       }
@@ -549,13 +583,15 @@ if (require.main===module) {
   (async()=>{
     if (!TOKEN||Buffer.byteLength(TOKEN,"utf8")<32) throw new Error("JARVIS_API_TOKEN must be configured with at least 32 bytes.");
     const jobStore=JOB_STORE_PATH?createJobStore({filePath:JOB_STORE_PATH}):null;
+    const approvalStore=APPROVAL_STORE_PATH?createApprovalStore({filePath:APPROVAL_STORE_PATH}):null;
     const workerEnabled=process.env.JARVIS_WORKER_ENABLED==="true";
     if (workerEnabled && (!jobStore || !process.env.OPENAI_API_KEY)) throw new Error("Worker requires JARVIS_JOB_STORE_PATH and OPENAI_API_KEY.");
     const worker=workerEnabled?createWorker({store:jobStore,handlers:{"assistant.request":createOpenAIHandler(),"assistant.company_question":createOpenAIHandler(),...createDepartmentHandlers({store:jobStore})}}):null;
     if (worker) { await worker.start(); worker.startPolling({intervalMs:Number(process.env.JARVIS_WORKER_POLL_MS||1500)}); }
     const contentScheduler=worker&&process.env.JARVIS_CONTENT_AUTOPLAN_ENABLED==="true"?startDailyContentPlanner({store:jobStore}):null;
     const subsidyScheduler=worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"?startDailySubsidyMonitor({store:jobStore}):null;
-    const server=createServer({jobStore,worker}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
+    if (approvalStore) await approvalStore.init();
+    const server=createServer({jobStore,approvalStore,worker}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
     const shutdown=signal=>{ console.log(`Received ${signal}; shutting down.`); if(subsidyScheduler)subsidyScheduler.stop(); if(contentScheduler)contentScheduler.stop(); if(worker)worker.stop(); server.close(error=>{if(error){console.error("Graceful shutdown failed.");process.exit(1);}process.exit(0);}); setTimeout(()=>process.exit(1),10000).unref(); };
     process.on("SIGTERM",()=>shutdown("SIGTERM")); process.on("SIGINT",()=>shutdown("SIGINT"));
     server.listen(PORT,"0.0.0.0",()=>console.log(`ONE JARVIS running on port ${PORT}`));
