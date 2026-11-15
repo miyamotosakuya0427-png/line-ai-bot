@@ -58,12 +58,18 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
           const listed=await callSheets("listSheets");
           if (!Array.isArray(listed.sheets)) return json(res,502,{ok:false,error:"invalid sheet list"});
           const dailyName=listed.sheets.find(name=>name==="日報");
+          const numberedDailyName=listed.sheets.find(name=>name==="03 日報");
           let dailyReportHeaders=null;
+          let numberedDailyReportHeaders=null;
           if (dailyName) {
             const read=await callSheets("readRows",{sheetName:dailyName,startRow:1,numRows:1});
             dailyReportHeaders=Array.isArray(read.rows)&&Array.isArray(read.rows[0])?read.rows[0]:[];
           }
-          return json(res,200,{ok:true,sheets:listed.sheets,dailyReportSheetFound:Boolean(dailyName),dailyReportHeaders});
+          if (numberedDailyName) {
+            const read=await callSheets("readRows",{sheetName:numberedDailyName,startRow:1,numRows:1});
+            numberedDailyReportHeaders=Array.isArray(read.rows)&&Array.isArray(read.rows[0])?read.rows[0]:[];
+          }
+          return json(res,200,{ok:true,sheets:listed.sheets,dailyReportSheetFound:Boolean(dailyName),dailyReportHeaders,numberedDailyReportSheetFound:Boolean(numberedDailyName),numberedDailyReportHeaders});
         } catch {
           return json(res,503,{ok:false,error:"metadata check failed"});
         }
