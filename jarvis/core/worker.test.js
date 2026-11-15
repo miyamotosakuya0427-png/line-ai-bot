@@ -95,3 +95,25 @@ test("worker polling can be started and stopped", async () => {
     assert.throws(() => worker.startPolling({ intervalMs: 50 }), /Invalid polling interval/);
   } finally { await f.cleanup(); }
 });
+
+test("worker retries transient errors and succeeds on a later attempt", async () => {
+  const f = await fixture();
+  try {
+    const { job } = await f.store.create({ type: "task.transient", payload: {} });
+    let calls = 0;
+    const worker = createWorker({ store: f.store, handlers: { "task.transient": async () => {
+      calls += 1;
+      if (calls === 1) { const error = new Error("rate limited"); error.retryable = true; throw error; }
+      return { answer: "recovered" };
+    } } });
+    await worker.start();
+    const first = await worker.runNext();
+    assert.equal(first.retryScheduled, true);
+    assert.equal(first.job.status, "queued");
+    const second = await worker.runNext();
+    assert.equal(second.job.id, job.id);
+    assert.equal(second.job.status, "succeeded");
+    assert.equal(second.job.attempts, 2);
+    assert.deepEqual(second.job.result, { answer: "recovered" });
+  } finally { await f.cleanup(); }
+});
