@@ -333,7 +333,7 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
           const result=await jobStore.create({type:d.type,payload:{request:d.payload.request.trim()},idempotencyKey:d.idempotencyKey||""});
           return json(res,result.created?201:200,{ok:true,created:result.created,job:result.job});
         }
-        const match=/^\\/v1\\/jobs\\/([0-9a-f-]{36})(?:\\/(cancel|retry))?$/.exec(url.pathname);
+        const match=/^\/v1\/jobs\/([0-9a-f-]{36})(?:\/(cancel|retry))?$/.exec(url.pathname);
         if (match && req.method==="GET" && !match[2]) {
           const job=await jobStore.get(match[1]);
           return job?json(res,200,{ok:true,job}):json(res,404,{ok:false,error:"Job not found"});
