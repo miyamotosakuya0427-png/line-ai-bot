@@ -247,7 +247,7 @@ test("tax agent receives validated financial aggregates without customer or paye
  }});
  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
  try{
-  const response=await fetch(\`http://127.0.0.1:\${app.address().port}/v1/departments/tax/tasks\`,{method:"POST",headers:{Authorization:\`Bearer \${token}\`,"Content-Type":"application/json"},body:JSON.stringify({request:"今月の売上と経費を整理して"})});
+  const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/departments/tax/tasks`,{method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},body:JSON.stringify({request:"今月の売上と経費を整理して"})});
   assert.equal(response.status,201);assert.equal(queued.type,"department.tax");assert.equal(queued.payload.companyContext.financials.revenueYen,100000);assert.equal(queued.payload.companyContext.financials.expenseYen,30000);assert.equal(JSON.stringify(queued.payload.companyContext).includes("顧客A"),false);assert.equal(JSON.stringify(queued.payload.companyContext).includes("仕入先A"),false);
  }finally{await new Promise(resolve=>app.close(resolve));}
 });
