@@ -105,7 +105,7 @@ test("LINE linking verifies ID token and stores only a pending approval", async 
       if(url==="https://api.line.me/oauth2/v2.1/verify") {
         assert.equal(options.method,"POST");
         const form=new URLSearchParams(options.body);
-        assert.equal(form.get("id_token"),"verified-test-token");
+        assert.equal(form.get("id_token"),"verified-test-token-1");
         assert.equal(form.get("client_id"),"1234567890");
         return {ok:true,json:async()=>({iss:"https://access.line.me",aud:"1234567890",sub:"U"+"a".repeat(32),exp:Math.floor(Date.now()/1000)+300,name:"テスト利用者"})};
       }
@@ -120,7 +120,7 @@ test("LINE linking verifies ID token and stores only a pending approval", async 
   try {
     const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/line/link`,{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({idToken:"verified-test-token",employeeId:"EMP001"})
+      body:JSON.stringify({idToken:"verified-test-token-1",employeeId:"EMP001"})
     });
     const result=await response.json();
     assert.equal(response.status,201);
@@ -166,7 +166,7 @@ test("LINE employee list verifies ID token without the JARVIS bearer token", asy
   try {
     const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/line/employees`,{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({idToken:"verified-test-token"})
+      body:JSON.stringify({idToken:"verified-test-token-1"})
     });
     assert.equal(response.status,200);
     assert.deepEqual((await response.json()).employees,[{employeeId:"EMP001",name:"テスト従業員"}]);
