@@ -126,7 +126,7 @@ test("financials API reads only approved sales and expense sheets and returns ta
  }});
  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
  try{
-  const response=await fetch(\`http://127.0.0.1:\${app.address().port}/v1/company/financials\`,{headers:{Authorization:\`Bearer \${token}\`}});
+  const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/company/financials`,{headers:{Authorization:`Bearer ${token}`}});
   const result=await response.json();
   assert.equal(response.status,200);assert.equal(result.financials.revenueYen,850000);assert.equal(result.financials.expenseYen,400000);assert.equal(result.financials.profitYen,450000);
   assert.equal(JSON.stringify(result).includes("顧客"),false);assert.equal(JSON.stringify(result).includes("業者"),false);
@@ -138,7 +138,7 @@ test("financial API fails closed if either financial sheet is absent",async()=>{
  const app=createServer({token,sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"s".repeat(128),fetchImpl:async()=>({ok:true,json:async()=>({ok:true,sheets:["売上"]})})});
  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
  try{
-  const response=await fetch(\`http://127.0.0.1:\${app.address().port}/v1/company/financials\`,{headers:{Authorization:\`Bearer \${token}\`}});
+  const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/company/financials`,{headers:{Authorization:`Bearer ${token}`}});
   assert.equal(response.status,404);
  }finally{await new Promise(resolve=>app.close(resolve));}
 });
@@ -157,7 +157,7 @@ test("company AI question receives bounded financial aggregates but no customer 
  }});
  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
  try{
-  const response=await fetch(\`http://127.0.0.1:\${app.address().port}/v1/company/ask\`,{method:"POST",headers:{Authorization:\`Bearer \${token}\`,"Content-Type":"application/json"},body:JSON.stringify({request:"今月の売上と差引を教えて"})});
+  const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/company/ask`,{method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},body:JSON.stringify({request:"今月の売上と差引を教えて"})});
   assert.equal(response.status,201);
   const context=created.payload.companyContext;
   assert.equal(context.financialSummary.revenueYen,500000);
