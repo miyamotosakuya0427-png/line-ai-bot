@@ -35,7 +35,7 @@ function decodeEntities(value) {
 function htmlToText(html) {
   return decodeEntities(String(html || "")
     .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<(script|style|noscript|svg|template)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<(head|script|style|noscript|svg|template)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
     .replace(/<\/(p|div|li|tr|h[1-6]|section|article|br)\s*>/gi, "\n")
     .replace(/<[^>]+>/g, " "))
     .replace(/[\t\f\v ]+/g, " ")
