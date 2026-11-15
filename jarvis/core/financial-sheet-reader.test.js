@@ -7,7 +7,7 @@ const expenses=[EXPENSE_HEADERS,["E-1","2026/11/02","P1","岡山現場","工事�
 test("reads only exact approved financial headers and aggregates tax-exclusive yen",()=>{
  const result=readFinancialSheets({salesRows:sales,expenseRows:expenses});
  assert.equal(result.revenueYen,1000000);assert.equal(result.expenseYen,400000);assert.equal(result.profitYen,600000);
- assert.equal(result.profitMargin,60);assert.equal(result.byProject[0].name,"岡山現場");
+ assert.equal(result.profitMargin,60);assert.equal(result.byProject[0].name,"P1");
  assert.deepEqual(result.sourceSheets,["売上","経費"]);
 });
 test("fails closed on unknown headers, invalid amounts, and malformed dates",()=>{
@@ -20,7 +20,7 @@ test("fails closed on unknown headers, invalid amounts, and malformed dates",()=
 test("does not expose customers, payees, invoice ids, receipts or notes",()=>{
  const result=readFinancialSheets({salesRows:sales,expenseRows:expenses});
  const serialized=JSON.stringify(result);
- for(const privateValue of ["得意先A","業者A","I-1","領収書URL"]) assert.equal(serialized.includes(privateValue),false);
+ for(const privateValue of ["得意先A","業者A","I-1","領収書URL","岡山現場"]) assert.equal(serialized.includes(privateValue),false);
 });
 test("validates Japanese date and yen formats",()=>{
  assert.equal(parseDate("2026/9/3"),"2026-09-03");assert.equal(parseDate("2026-02-30"),null);
@@ -44,7 +44,7 @@ test("summarizes invoices, collections, outstanding and overdue balances without
  assert.equal(result.overdueInvoiceCount,1);assert.equal(result.overdueYen,350000);
  assert.equal(result.paymentReconciliationDifferenceYen,0);
  const text=JSON.stringify(result);
- for(const secret of ["顧客秘密","口座秘密","備考秘密","INV-001"])assert.equal(text.includes(secret),false);
+ for(const secret of ["顧客秘密","口座秘密","備考秘密","INV-001","岡山現場","倉敷現場"])assert.equal(text.includes(secret),false);
 });
 
 test("fails closed on duplicate invoice ids and invalid due dates",()=>{
