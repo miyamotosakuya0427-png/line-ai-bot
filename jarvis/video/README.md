@@ -15,6 +15,14 @@
 5. published — YouTube投稿済み
 6. analyzed — 分析完了
 
+## 標準ナレーション設定
+- Provider: vidIQ AI Voiceover
+- Voice: Hinata（日本語・男性・落ち着いた語り）
+- Voice ID: `j210dv0vWm7fCknyQpbA`
+- 出力形式: MP3
+
+この設定は動画ジョブの初期値として保存します。ChatGPT内で利用できるvidIQ音声生成機能があることは確認済みですが、JARVISサーバーから直接生成するためのAPI認証・利用許諾・接続方式は別途確認が必要です。連携済みという意味ではありません。
+
 ## 現在の実装
 `workflow.js` は動画ジョブの入力検証と工程遷移を行う純粋なNode.jsモジュールです。状態はまだメモリにも外部DBにも保存しません。JARVIS APIへの接続、永続化、AI台本生成、音声・画像生成、CapCut操作、YouTube投稿、Metricool分析は、認証方式と実行権限を確認してから段階的に追加します。
 
