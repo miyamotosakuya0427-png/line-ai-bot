@@ -61,7 +61,7 @@ async function getAIReply(message) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": \`Bearer \${apiKey}\`
+      "Authorization": "Bearer " + apiKey
     },
     body: JSON.stringify({
       model: process.env.OPENAI_MODEL || "gpt-5.6-luna",
@@ -95,7 +95,7 @@ async function replyToLINE(replyToken, text) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": \`Bearer \${accessToken}\`
+      "Authorization": "Bearer " + accessToken
     },
     body: JSON.stringify({
       replyToken,
@@ -230,7 +230,7 @@ if (require.main === module) {
   server.headersTimeout = 15_000;
   server.keepAliveTimeout = 5_000;
   server.listen(PORT, "0.0.0.0", () => {
-    console.info(\`LINE AI Bot running on port \${PORT}\`);
+    console.info("LINE AI Bot running on port " + PORT);
   });
   const shutdown = () => server.close(() => process.exit(0));
   process.on("SIGTERM", shutdown);
