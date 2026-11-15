@@ -7,6 +7,7 @@
 - Bearer-token protected API
 - Independent department-agent registry (management, tax/accounting, office/subsidies, construction, HR, procurement, recycling, safety/compliance, content, affiliate, investment, trading)
 - Explicit owner-approval policy for submissions, payments, contracts, publishing, deletion, and permission changes
+- Video production workflow for the `時をかける日本史` channel, including script/source review, Japanese pronunciation checks, narration, assets, editing, QA, owner review, publishing approval, and analytics
 - Official subsidy source registry for national, Okayama, Okayama City, Kurashiki, Tokushima, and Yoshinogawa programs
 - Persistent JSONL job journal with fsync
 - Idempotent job submission
@@ -57,6 +58,7 @@ All API endpoints except `GET /health` and the dashboard shell require `Authoriz
 - `GET /v1/company/financials` (read-only aggregate of up to 99 rows each from `売上` and `経費`; includes receivables when both invoice tabs exist)
 - `POST /v1/company/ask` with `{request}` (queues an AI question grounded in daily-report aggregates)
 - `GET /v1/departments` (authenticated department roles and approval policy)
+- `GET /v1/content/workflow` (authenticated video production stages, quality checklist, and approval gates)
 - `GET /v1/subsidy/sources` (authenticated official source catalog and One-specific priority topics)
 - `GET /v1/status`
 - `GET /v1/jobs`
@@ -94,3 +96,8 @@ Each department has a separate role definition and task scope. Routine research,
 ## Subsidy / grant monitoring sources
 
 The source catalog prioritizes construction equipment and ICT, battery/solar/electrical work, energy efficiency and GX, recycling/resource circulation, hiring, qualifications and training, wage increases, workplace safety, succession, new business, and AI/DX. It tracks national sources and official Okayama Prefecture, Okayama City, Kurashiki City, Tokushima Prefecture, and Yoshinogawa City pages. Each opportunity should be reported with the official URL, issuer, geography, eligibility, eligible costs, subsidy rate, cap, opening/closing dates, required documents, contact, last verified timestamp, changes, and unresolved eligibility questions. Cached snippets alone are not evidence; verify current official pages and guidelines before presenting an opportunity as open. This repository currently exposes only the source catalog; scheduled research and notifications are not active yet.
+
+
+## Video department: 時をかける日本史
+
+The content department uses a staged workflow: research, script and source verification, Japanese kanji/name reading and pronunciation review, narration, authorized visual assets, edit/captions, final QA, owner review, publication, and post-publication analytics. QA checks cover historical sourcing, dates/names/amounts, spoken-vs-script alignment, audible completeness, subtitle accuracy and mobile readability, asset rights, black frames/audio loss/export integrity, and honest titles/thumbnails. Paid voice/video generation requires explicit approval for that generation; subscription/purchases require owner approval; publication and scheduling are owner-only actions. The current implementation exposes the workflow and checklist at authenticated `GET /v1/content/workflow`; it does not yet provide scheduled production or autonomous publishing. Existing Descript projects must be inspected before marking any stage complete. The channel is `https://www.youtube.com/@samurai-b6i` and the working project is `江戸大名、借金まみれの真実`.
