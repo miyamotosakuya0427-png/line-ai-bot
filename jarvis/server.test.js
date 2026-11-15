@@ -141,7 +141,7 @@ test("LINE linking rejects an unverified ID token", async () => {
   try {
     const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/line/link`,{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({idToken:"fake-token",employeeId:"EMP001"})
+      body:JSON.stringify({idToken:"unverified-test-token-1",employeeId:"EMP001"})
     });
     assert.equal(response.status,401);
   } finally { await new Promise(resolve=>app.close(resolve)); }
