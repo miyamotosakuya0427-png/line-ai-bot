@@ -12,6 +12,7 @@ const { DEPARTMENTS, APPROVAL } = require("./core/department-agents");
 const { SUBSIDY_SOURCES, PRIORITY_TOPICS, REPORT_FIELDS } = require("./core/subsidy-monitor");
 const { getVideoWorkflow } = require("./core/video-workflow");
 const { createDepartmentHandlers } = require("./core/department-agent-handlers");
+const { startDailyContentPlanner } = require("./core/video-scheduler");
 const PORT = Number(process.env.PORT || 3000);
 const MAX_BODY_BYTES = 10 * 1024;
 const TOKEN = process.env.JARVIS_API_TOKEN || "";
@@ -472,7 +473,7 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         if (url.pathname==="/v1/departments") return json(res,200,{ok:true,departments:DEPARTMENTS,approvalPolicy:APPROVAL});
         return json(res,200,{ok:true,sources:SUBSIDY_SOURCES,priorityTopics:PRIORITY_TOPICS,reportFields:REPORT_FIELDS,monitoringEnabled:false,monitoringNote:"情報源カタログのみ。定期調査・通知はスケジューラー接続後に有効化されます。"});
       }
-      if (req.method==="GET" && url.pathname==="/v1/status") return json(res,200,{ok:true,system:"ONE JARVIS",version:"1.3.0",mode:"read-only",googleSheetsConfigured:Boolean(sheetsUrl&&sheetsToken),jobQueueConfigured:Boolean(jobStore),workerEnabled:Boolean(worker)});
+      if (req.method==="GET" && url.pathname==="/v1/status") return json(res,200,{ok:true,system:"ONE JARVIS",version:"1.3.0",mode:"read-only",googleSheetsConfigured:Boolean(sheetsUrl&&sheetsToken),jobQueueConfigured:Boolean(jobStore),workerEnabled:Boolean(worker),contentAutoplanEnabled:Boolean(worker&&process.env.JARVIS_CONTENT_AUTOPLAN_ENABLED==="true")});
       if (req.method==="GET" && url.pathname==="/v1/sheets/list") {
         const r=await callSheets("listSheets"); return json(res,200,{ok:true,sheets:r.sheets});
       }
@@ -511,8 +512,9 @@ if (require.main===module) {
     if (workerEnabled && (!jobStore || !process.env.OPENAI_API_KEY)) throw new Error("Worker requires JARVIS_JOB_STORE_PATH and OPENAI_API_KEY.");
     const worker=workerEnabled?createWorker({store:jobStore,handlers:{"assistant.request":createOpenAIHandler(),"assistant.company_question":createOpenAIHandler(),...createDepartmentHandlers()}}):null;
     if (worker) { await worker.start(); worker.startPolling({intervalMs:Number(process.env.JARVIS_WORKER_POLL_MS||1500)}); }
+    const contentScheduler=worker&&process.env.JARVIS_CONTENT_AUTOPLAN_ENABLED==="true"?startDailyContentPlanner({store:jobStore}):null;
     const server=createServer({jobStore,worker}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
-    const shutdown=signal=>{ console.log(`Received ${signal}; shutting down.`); if(worker)worker.stop(); server.close(error=>{if(error){console.error("Graceful shutdown failed.");process.exit(1);}process.exit(0);}); setTimeout(()=>process.exit(1),10000).unref(); };
+    const shutdown=signal=>{ console.log(`Received ${signal}; shutting down.`); if(contentScheduler)contentScheduler.stop(); if(worker)worker.stop(); server.close(error=>{if(error){console.error("Graceful shutdown failed.");process.exit(1);}process.exit(0);}); setTimeout(()=>process.exit(1),10000).unref(); };
     process.on("SIGTERM",()=>shutdown("SIGTERM")); process.on("SIGINT",()=>shutdown("SIGINT"));
     server.listen(PORT,"0.0.0.0",()=>console.log(`ONE JARVIS running on port ${PORT}`));
   })().catch(error=>{console.error(error.message);process.exit(1);});
