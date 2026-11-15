@@ -27,7 +27,7 @@ test("authenticated trading API is paper-only and persists a complete simulated 
  const opened=await (await post("/v1/trading/trades",{id:"api-trade-1",symbol:"7203",side:"long",quantity:100,entryPrice:1000,stopPrice:995,strategyId:"api-test-v1"})).json();
  assert.equal(opened.trade.status,"open");
  const closed=await (await post("/v1/trading/trades/api-trade-1/close",{exitPrice:1010,feesYen:20,slippageYen:10})).json();
- assert.equal(closed.report.netPnlYen,970);
+ assert.equal(closed.report.trade.netPnlYen,970);
  const report=await (await get("/v1/trading/report")).json();
  assert.equal(report.report.sampleSize,1);
  assert.equal((await get("/v1/trading/orders")).status,404);
