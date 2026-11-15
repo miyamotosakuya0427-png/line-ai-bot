@@ -13,6 +13,8 @@
 - Stored AI results and transient-error retries
 - Mobile-friendly web dashboard at `/`
 - Optional read-only Google Sheets API routes already present in the service
+- Authenticated read-only company APIs for approved employee and daily-report sheets
+- Schema validation and field filtering (employee pay, phone, and notes are excluded from the employee API)
 
 ## Run locally
 
@@ -39,6 +41,9 @@ Open the service root URL, enter the JARVIS API token, connect, and submit a req
 
 All API endpoints except `GET /health` and the dashboard shell require `Authorization: Bearer <token>`.
 
+- `GET /v1/company/overview` (read-only counts and five recent reports)
+- `GET /v1/company/employees` (approved non-sensitive employee fields)
+- `GET /v1/company/daily-reports?from=YYYY-MM-DD&to=YYYY-MM-DD&limit=20`
 - `GET /v1/status`
 - `GET /v1/jobs`
 - `POST /v1/jobs`
