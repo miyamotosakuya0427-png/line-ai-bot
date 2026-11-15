@@ -115,13 +115,14 @@ function createPaperTradingEngine({policy={}, clock=()=>new Date().toISOString()
       const state=riskState();
       return {trade:clone(trade),equityYen:equity,peakEquityYen:peakEquity,risk:state};
     },
-    recordLesson({id=crypto.randomUUID(),tradeId,category,rootCause,preventiveRule,evidence=""}={}) {
+    recordLesson({id=crypto.randomUUID(),tradeId,category,rootCause,preventiveRule,evidence="",createdAt=clock()}={}) {
       if (typeof id!=="string"||id.length>100||mistakes.some(m=>m.id===id)) throw new Error("Invalid or duplicate lesson id");
       const trade=trades.find(t=>t.id===tradeId&&t.status==="closed");
       if (!trade) throw new Error("Lesson must reference a closed paper trade");
       if (!["process","data","risk","execution","strategy","discipline"].includes(category)) throw new Error("Invalid lesson category");
       for (const [key,value] of Object.entries({rootCause,preventiveRule})) if (typeof value!=="string"||value.trim().length<8||value.length>1000) throw new Error("Lesson "+key+" must be 8-1000 characters");
-      const lesson={id,tradeId,category,rootCause:rootCause.trim(),preventiveRule:preventiveRule.trim(),evidence:String(evidence).slice(0,1000),createdAt:clock(),repeatCount:0};
+      if(typeof createdAt!=="string"||Number.isNaN(Date.parse(createdAt)))throw new Error("Invalid lesson timestamp");
+      const lesson={id,tradeId,category,rootCause:rootCause.trim(),preventiveRule:preventiveRule.trim(),evidence:String(evidence).slice(0,1000),createdAt,repeatCount:0};
       const signature=lesson.category+"|"+lesson.preventiveRule.toLowerCase();
       for (const prior of mistakes) if ((prior.category+"|"+prior.preventiveRule.toLowerCase())===signature) lesson.repeatCount++;
       mistakes.push(lesson);trade.lessonIds.push(id);
