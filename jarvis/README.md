@@ -120,3 +120,6 @@ ONE OFFICE has an official-source fetcher with an HTTPS host allowlist derived f
 ### Tax and management agent context
 
 When a tax or management task asks about sales, expenses, invoices, collections, profit, accounting, tax, or cash flow, JARVIS attempts a read-only fetch of the allowlisted financial tabs. It validates exact headers, uses the bounded 99-row sample, and attaches only aggregates to the department task. Customer/payee names, invoice identifiers, receipt URLs, bank accounts, employee personal data, and free-text notes are not attached. If the tabs are missing or fail schema validation, the task receives an explicit unavailable status rather than invented figures. Invoice/collection reconciliation is included only when both optional invoice and payment tabs pass validation.
+
+
+The subsidy monitor also stores bounded SHA-256 fingerprints for successfully fetched official pages in each completed job result and compares them with the previous completed run. It classifies each source as new, changed, unchanged, or unverified; an unavailable page is never interpreted as a closed subsidy. Only source metadata/fingerprints are retained for comparison, not full page dumps.
