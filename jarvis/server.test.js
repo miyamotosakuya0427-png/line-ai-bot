@@ -545,3 +545,37 @@ test("job API stays unavailable when persistent storage is not configured", asyn
     assert.equal(response.status,503);
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
+
+test("end-to-end job API queues, executes, and returns a persisted assistant answer", async () => {
+  const fs=require("node:fs/promises"), os=require("node:os"), path=require("node:path");
+  const { createJobStore }=require("./core/job-store");
+  const { createWorker }=require("./core/worker");
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-e2e-"));
+  const store=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
+  const worker=createWorker({store,handlers:{"assistant.request":async payload=>({answer:"確認結果："+payload.request})}});
+  await worker.start();
+  const app=createServer({token,jobStore:store,worker});
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  const root=`http://127.0.0.1:${app.address().port}`;
+  const headers={Authorization:`Bearer ${token}`,"Content-Type":"application/json"};
+  try {
+    const body=JSON.stringify({type:"assistant.request",payload:{request:"今日の予定"} ,idempotencyKey:"e2e-test-001"});
+    const first=await fetch(root+"/v1/jobs",{method:"POST",headers,body});
+    assert.equal(first.status,201);
+    const created=(await first.json()).job;
+    const duplicate=await fetch(root+"/v1/jobs",{method:"POST",headers,body});
+    assert.equal(duplicate.status,200);
+    assert.equal((await duplicate.json()).created,false);
+    const execution=await worker.runNext();
+    assert.equal(execution.job.status,"succeeded");
+    const detail=await fetch(root+"/v1/jobs/"+created.id,{headers:{Authorization:headers.Authorization}});
+    const saved=(await detail.json()).job;
+    assert.deepEqual(saved.result,{answer:"確認結果：今日の予定"});
+    const status=await fetch(root+"/v1/status",{headers:{Authorization:headers.Authorization}});
+    assert.equal((await status.json()).workerEnabled,true);
+  } finally {
+    worker.stop();
+    await new Promise(resolve=>app.close(resolve));
+    await fs.rm(dir,{recursive:true,force:true});
+  }
+});
