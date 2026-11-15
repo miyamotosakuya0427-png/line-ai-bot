@@ -28,3 +28,10 @@ test("Kameyama episode includes pronunciation, voice identity, and publication s
  assert.match(script,/publication|publishing/);
  assert.match(script,/No paid generation|有料生成/);
 });
+
+
+test("Kameyama narration draft is sized for an 8–12 minute spoken video",()=>{
+ const body=script.split("## Narration script")[1].split("## Pronunciation / narration checklist")[0];
+ const characters=[...body.replace(/### .*/g,"").replace(/\s/g,"")].length;
+ assert.ok(characters>=3000&&characters<=3400,"narration character count was "+characters);
+});
