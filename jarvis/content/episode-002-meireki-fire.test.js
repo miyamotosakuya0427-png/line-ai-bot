@@ -12,7 +12,8 @@ test("Meireki fire episode attributes casualty and date claims to official disas
  assert.match(script,/内閣府/);
  assert.match(script,/三つの大規模火災/);
  assert.match(script,/破壊消防/);
- assert.match(script,/全域が焼けた|全域が焼けた/);
+ assert.match(script,/「江戸の全域が焼けた」と表現するのは正確ではありません/);
+ assert.doesNotMatch(script,/江戸の全域が焼けた(?:のです|とされています)/);
  assert.match(script,/https:\/\/www\.bousai\.go\.jp\/kyoiku\/kyokun\/kyoukunnokeishou\/rep\/1657_meireki_edotaika\//);
 });
 
@@ -34,5 +35,5 @@ test("Meireki fire script distinguishes firefighter command systems and includes
 test("Meireki fire narration is sized for an 8–12 minute spoken video",()=>{
  const body=script.split("## Narration script")[1].split("## Pronunciation / narration checklist")[0];
  const characters=[...body.replace(/### .*/g,"").replace(/\s/g,"")].length;
- assert.ok(characters>=3000&&characters<=3400,"narration character count was "+characters);
+ assert.ok(characters>=3360&&characters<=4200,"narration character count was "+characters);
 });
