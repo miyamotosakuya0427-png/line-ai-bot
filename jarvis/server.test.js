@@ -439,3 +439,41 @@ test("public record counts report employee and daily report totals without expos
     await new Promise(resolve => app.close(resolve));
   }
 });
+
+
+test("LINE admin pending endpoint only exposes pending requests to an active verified admin", async () => {
+  const adminId="U"+"a".repeat(32);
+  const pendingId="U"+"b".repeat(32);
+  const app=createServer({
+    token,
+    lineLoginChannelId:"1234567890",
+    sheetsUrl:"https://script.google.com/macros/s/test-id/exec",
+    sheetsToken:"p".repeat(128),
+    fetchImpl:async(url,options)=>{
+      if(url==="https://api.line.me/oauth2/v2.1/verify"){
+        const form=new URLSearchParams(options.body);
+        const isAdmin=form.get("id_token")==="admin-id-token";
+        return {ok:true,json:async()=>({iss:"https://access.line.me",aud:"1234567890",sub:isAdmin?adminId:pendingId,exp:Math.floor(Date.now()/1000)+300,name:"テスト"})};
+      }
+      const body=JSON.parse(options.body);
+      if(body.action==="listSheets") return {ok:true,json:async()=>({ok:true,sheets:["13 LINE連携"]})};
+      return {ok:true,json:async()=>({ok:true,rows:[
+        ["連携ID","LINEユーザーID","LINE表示名","従業員ID","氏名","","権限","状態","申請日時"],
+        ["ADMIN-1",adminId,"管理者LINE","EMP003","宮本朔也","","管理者","有効",""],
+        ["PENDING-1",pendingId,"申請者LINE","EMP004","従業員A","","一般","確認待ち","2026-11-15"]
+      ]})};
+    }
+  });
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  try {
+    const url=`http://127.0.0.1:${app.address().port}/v1/line/admin/pending`;
+    const allowed=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({idToken:"admin-id-token"})});
+    assert.equal(allowed.status,200);
+    const result=await allowed.json();
+    assert.equal(result.requests.length,1);
+    assert.deepEqual(result.requests[0],{linkId:"PENDING-1",displayName:"申請者LINE",employeeId:"EMP004",employeeName:"従業員A",createdAt:"2026-11-15"});
+    assert.equal(JSON.stringify(result).includes(pendingId),false);
+    const denied=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({idToken:"not-admin-token"})});
+    assert.equal(denied.status,403);
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
