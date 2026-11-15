@@ -17,6 +17,7 @@ const { startDailyContentPlanner } = require("./core/video-scheduler");
 const { startDailySubsidyMonitor } = require("./core/subsidy-scheduler");
 const { createVideoBatchStore } = require("./core/video-batch-store");
 const { createVideoBatchContentHandler } = require("./core/video-batch-runner");
+const { createScriptMetrics } = require("./core/script-metrics");
 const PORT = Number(process.env.PORT || 3000);
 const MAX_BODY_BYTES = 10 * 1024;
 const TOKEN = process.env.JARVIS_API_TOKEN || "";
@@ -590,6 +591,14 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         const result=await jobStore.create({type:"department.content",payload:{request,departmentId:"content",videoId:video.id,taskKind:"video-batch-plan"},idempotencyKey:"video-batch-plan-"+video.id});
         return json(res,result.created?201:200,{ok:true,created:result.created,videoId:video.id,job:result.job,workerEnabled:Boolean(worker),externalActionsEnabled:false});
       }
+      const scriptMetricsMatch=/^\\/v1\\/content\\/videos\\/(V[0-9]{2,8})\\/script-metrics$/.exec(url.pathname);
+      if(req.method==="GET"&&scriptMetricsMatch){
+        if(!isAuthorized(req,token))return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        if(!videoBatchStore)return json(res,503,{ok:false,error:"Persistent video batch storage is not configured"});
+        const video=await videoBatchStore.get(scriptMetricsMatch[1]);
+        if(!video)return json(res,404,{ok:false,error:"Video not found"});
+        return json(res,200,{ok:true,videoId:video.id,scriptMetrics:createScriptMetrics(video.script||"")});
+      }
       if (url.pathname.startsWith("/v1/content/batches") || url.pathname.startsWith("/v1/content/approvals") || url.pathname.startsWith("/v1/content/videos/")) {
         if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         if (!videoBatchStore) return json(res,503,{ok:false,error:"Persistent video batch storage is not configured"});
@@ -597,7 +606,7 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
           const limit=Number(url.searchParams.get("limit")||200),channelId=url.searchParams.get("channelId")||undefined,status=url.searchParams.get("status")||undefined;
           if (!Number.isInteger(limit)||limit<1||limit>200) return json(res,400,{ok:false,error:"Invalid video list limit"});
           const [videos,summary]=await Promise.all([videoBatchStore.list({limit,channelId,status}),videoBatchStore.summary()]);
-          const withJobs=jobStore?await Promise.all(videos.map(async video=>({...video,planJob:await jobStore.getByIdempotencyKey("video-batch-plan-"+video.id)}))):videos;
+          const withJobs=await Promise.all(videos.map(async video=>({...video,planJob:jobStore?await jobStore.getByIdempotencyKey("video-batch-plan-"+video.id):null,scriptMetrics:createScriptMetrics(video.script||"")})));
           return json(res,200,{ok:true,videos:withJobs,summary});
         }
         if (req.method==="POST" && url.pathname==="/v1/content/batches") {
