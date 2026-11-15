@@ -1,4 +1,5 @@
 "use strict";
+const crypto=require("node:crypto");
 
 const {SUBSIDY_SOURCES}=require("./subsidy-monitor");
 const {createOpenAIHandler}=require("./openai-handler");
@@ -35,13 +36,22 @@ async function fetchOfficialSourceSnapshots({sources=SUBSIDY_SOURCES,fetchImpl=f
   }
  }));
 }
-function createSubsidyResearchHandler({apiKey,model,fetchImpl=fetch,researchFetchImpl=fetch}={}) {
+function createSubsidyResearchHandler({apiKey,model,fetchImpl=fetch,researchFetchImpl=fetch,store=null}={}) {
  const summarize=createOpenAIHandler({apiKey,model,fetchImpl,instructions:"あなたはONE OFFICEの補助金・助成金調査担当です。提供された公式サイト取得結果を根拠として、制度名・実施主体・対象地域・対象事業者・対象経費・補助率・上限額・開始日・締切・必要書類・窓口・公式URL・確認日時・変更点・株式会社Oneとの適合度・不足情報を整理してください。入口ページしか取得できていない場合、募集状況・締切・金額・適格性を推測せず「個別公募要領未確認」と明記してください。404や取得失敗を制度終了と解釈しないでください。検索結果や古い記事を最新の公式要件と扱わないでください。申請提出・誓約・外部送信・契約・納税は行いません。"});
  return async payload=>{
   const request=typeof payload?.request==="string"?payload.request:"";
   if(!/補助金|助成金|支援制度|公募|雇用助成/i.test(request))return summarize(payload);
   const sources=await fetchOfficialSourceSnapshots({fetchImpl:researchFetchImpl});
-  return summarize({...payload,companyContext:{researchTimestamp:new Date().toISOString(),sources}});
+  let previous={};
+  if(store&&typeof store.list==="function") {
+   const jobs=await store.list({status:"succeeded",limit:200});
+   const last=jobs.find(job=>job.type==="department.office"&&job.result&&job.result.sourceFingerprints);
+   previous=last?.result?.sourceFingerprints||{};
+  }
+  const sourceFingerprints=Object.fromEntries(sources.filter(x=>x.status==="verified-page-fetched").map(x=>[x.id,crypto.createHash("sha256").update(x.title+"|"+x.excerpt).digest("hex")]));
+  const changes=sources.map(source=>({id:source.id,status:source.status==="unavailable"?"unverified":!previous[source.id]?"new":previous[source.id]===sourceFingerprints[source.id]?"unchanged":"changed"}));
+  const summary=await summarize({...payload,companyContext:{researchTimestamp:new Date().toISOString(),sources,changes}});
+  return {...summary,sourceFingerprints,sourceStatuses:sources.map(x=>({id:x.id,status:x.status})),changes};
  };
 }
 module.exports={stripHtml,fetchOfficialSourceSnapshots,createSubsidyResearchHandler};
