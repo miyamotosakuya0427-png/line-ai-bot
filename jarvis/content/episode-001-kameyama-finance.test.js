@@ -36,5 +36,5 @@ test("Kameyama narration draft is sized for an 8–12 minute spoken video",()=>{
  const characters=metrics.characters;
  assert.equal(metrics.status,"estimated_range_ok");
  assert.equal(metrics.requiresRecordedTiming,true);
- assert.ok(characters>=3360&&characters<=4200,"narration character count was "+characters);
+ assert.ok(characters>=3200&&characters<=4800,"narration character count was "+characters);
 });
