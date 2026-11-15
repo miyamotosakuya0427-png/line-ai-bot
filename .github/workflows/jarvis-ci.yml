@@ -28,3 +28,4 @@ jobs:
       - run: npm install
       - run: npm test
       - run: node --check < ../apps-script/Code.gs
+      - run: node --test ../apps-script/Code.test.js
