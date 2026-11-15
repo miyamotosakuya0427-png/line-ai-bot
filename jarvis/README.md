@@ -110,3 +110,8 @@ The JARVIS worker registers an isolated role-scoped AI handler for each departme
 The daily content planner is opt-in via `JARVIS_CONTENT_AUTOPLAN_ENABLED=true` and requires the persistent job store, `JARVIS_WORKER_ENABLED=true`, and a running service. It enqueues one idempotent planning task per Japan-local date at 08:45 JST. It creates a concept/outline/source-checklist draft only; it does not generate paid audio/video or publish. The flag is not enabled in the current Render environment and this PR is not deployed.
 
 Verified Descript projects are tracked separately: `072f8671-af62-480c-8072-bb253faf58b7` is `江戸大名、借金まみれの真実` (74-second composition, no publishes), and `5b28e058-e58b-41a7-9a26-0164aaea9ca6` is the separate `江戸の大火` project. The selected default voice preference is Hinata; the Edo-daimyo project's existing audio filename identifies Kenichi, so voice consistency remains a review item. Existing media is never overwritten automatically.
+
+
+### Daily subsidy monitoring
+
+ONE OFFICE has an official-source fetcher with an HTTPS host allowlist derived from the curated source catalog. It strips scripts/styles, captures bounded page excerpts and timestamps, labels fetch failures as unavailable (not as program closure), and asks the role-specific AI to distinguish source landing pages from verified program guidelines. The daily scheduler is opt-in via `JARVIS_SUBSIDY_AUTOMONITOR_ENABLED=true`; it queues one idempotent office task per Japan-local date at 08:30 JST and requires the persistent job store plus active worker. The environment flag is not enabled in Render yet. The independent ChatGPT daily report automation is separate from this JARVIS scheduler.
