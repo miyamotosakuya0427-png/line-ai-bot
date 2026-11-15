@@ -26,3 +26,30 @@ test("validates Japanese date and yen formats",()=>{
  assert.equal(parseDate("2026/9/3"),"2026-09-03");assert.equal(parseDate("2026-02-30"),null);
  assert.equal(parseYen("￥1,234"),1234);assert.equal(parseYen("-1"),null);assert.equal(parseYen("1.5"),null);
 });
+
+
+test("summarizes invoices, collections, outstanding and overdue balances without customer or bank data",()=>{
+ const {readReceivablesSheets,INVOICE_HEADERS,PAYMENT_HEADERS}=require("./financial-sheet-reader");
+ const result=readReceivablesSheets({
+  asOfDate:"2026-11-16",
+  invoiceRows:[INVOICE_HEADERS,
+   ["I-1","INV-001","2026/10/01","2026/10/31","P1","岡山現場","顧客秘密","500000","50000","550000","200000","350000","一部入金","備考秘密"],
+   ["I-2","INV-002","2026/11/01","2026/11/30","P2","倉敷現場","顧客B","100000","10000","110000","0","110000","未入金",""]
+  ],
+  paymentRows:[PAYMENT_HEADERS,
+   ["P-1","2026/11/05","I-1","P1","岡山現場","顧客秘密","200000","振込","口座秘密",""]
+  ]
+ });
+ assert.equal(result.billedYen,660000);assert.equal(result.receivedYen,200000);assert.equal(result.outstandingYen,460000);
+ assert.equal(result.overdueInvoiceCount,1);assert.equal(result.overdueYen,350000);
+ assert.equal(result.paymentReconciliationDifferenceYen,0);
+ const text=JSON.stringify(result);
+ for(const secret of ["顧客秘密","口座秘密","備考秘密","INV-001"])assert.equal(text.includes(secret),false);
+});
+
+test("fails closed on duplicate invoice ids and invalid due dates",()=>{
+ const {readReceivablesSheets,INVOICE_HEADERS,PAYMENT_HEADERS}=require("./financial-sheet-reader");
+ const invoice=["I-1","INV","2026/10/01","2026/02/30","P1","現場","","100","0","100","0","100","",""];
+ const payments=PAYMENT_HEADERS;
+ assert.throws(()=>readReceivablesSheets({asOfDate:"2026-11-16",invoiceRows:[INVOICE_HEADERS,invoice],paymentRows:[payments]}),/不正データ/);
+});
