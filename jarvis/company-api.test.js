@@ -167,3 +167,25 @@ test("company AI question receives bounded financial aggregates but no customer 
   for(const secret of ["顧客秘密","業者秘密","備考秘密","氏名非公開","I-1","url"])assert.equal(serialized.includes(secret),false);
  }finally{await new Promise(resolve=>app.close(resolve));}
 });
+
+
+test("financials API includes receivables, collections and overdue amounts when both approved tabs exist",async()=>{
+ const {SALES_HEADERS,EXPENSE_HEADERS,INVOICE_HEADERS,PAYMENT_HEADERS}=require("./core/financial-sheet-reader");
+ const app=createServer({token,sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"s".repeat(128),now:()=>new Date("2026-11-16T00:00:00Z"),fetchImpl:async(url,options)=>{
+  const body=JSON.parse(options.body);
+  if(body.action==="listSheets")return{ok:true,json:async()=>({ok:true,sheets:["売上","経費","09 請求","10 入金"]})};
+  if(body.sheetName==="売上")return{ok:true,json:async()=>({ok:true,rows:[SALES_HEADERS]})};
+  if(body.sheetName==="経費")return{ok:true,json:async()=>({ok:true,rows:[EXPENSE_HEADERS]})};
+  if(body.sheetName==="09 請求")return{ok:true,json:async()=>({ok:true,rows:[INVOICE_HEADERS,["I-1","INV-1","2026/10/01","2026/10/31","P1","岡山現場","顧客秘密","500000","50000","550000","200000","350000","一部入金",""]]})};
+  if(body.sheetName==="10 入金")return{ok:true,json:async()=>({ok:true,rows:[PAYMENT_HEADERS,["P-1","2026/11/05","I-1","P1","岡山現場","顧客秘密","200000","振込","口座秘密",""]]})};
+  throw new Error("Unexpected sheet");
+ }});
+ await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+ try{
+  const response=await fetch(\`http://127.0.0.1:\${app.address().port}/v1/company/financials\`,{headers:{Authorization:\`Bearer \${token}\`}});
+  const result=await response.json();const rec=result.financials.receivables;
+  assert.equal(response.status,200);assert.equal(rec.billedYen,550000);assert.equal(rec.receivedYen,200000);
+  assert.equal(rec.outstandingYen,350000);assert.equal(rec.overdueInvoiceCount,1);assert.equal(rec.overdueYen,350000);
+  assert.equal(JSON.stringify(rec).includes("顧客秘密"),false);assert.equal(JSON.stringify(rec).includes("口座秘密"),false);
+ }finally{await new Promise(resolve=>app.close(resolve));}
+});
