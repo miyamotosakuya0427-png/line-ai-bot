@@ -81,21 +81,70 @@ test("unknown routes are not found", async () => {
 });
 
 
-test("LINE linking is disabled until LIFF identity verification is implemented", async () => {
-  const response = await fetch(`${base}/v1/line/link`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      lineUserId: "U" + "a".repeat(32),
-      displayName: "test",
-      employeeId: "EMP001"
-    })
+test("LIFF page is served without exposing server credentials", async () => {
+  const app=createServer({token, liffId:"1234567890-AbCdEfGh"});
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  try {
+    const response=await fetch(`http://127.0.0.1:${app.address().port}/line-link`);
+    const html=await response.text();
+    assert.equal(response.status,200);
+    assert.match(html,/株式会社One LINE連携/);
+    assert.match(html,/1234567890-AbCdEfGh/);
+    assert.doesNotMatch(html,/JARVIS_API_TOKEN|JARVIS_SHEETS_TOKEN/);
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
+
+test("LINE linking verifies ID token and stores only a pending approval", async () => {
+  const sent=[];
+  const app=createServer({
+    token,
+    lineLoginChannelId:"1234567890",
+    sheetsUrl:"https://script.google.com/macros/s/test-id/exec",
+    sheetsToken:"h".repeat(128),
+    fetchImpl:async(url,options)=>{
+      if(url==="https://api.line.me/oauth2/v2.1/verify") {
+        assert.equal(options.method,"POST");
+        const form=new URLSearchParams(options.body);
+        assert.equal(form.get("id_token"),"verified-test-token");
+        assert.equal(form.get("client_id"),"1234567890");
+        return {ok:true,json:async()=>({iss:"https://access.line.me",aud:"1234567890",sub:"U"+"a".repeat(32),exp:Math.floor(Date.now()/1000)+300,name:"テスト利用者"})};
+      }
+      const body=JSON.parse(options.body); sent.push(body);
+      if(body.action==="listSheets") return {ok:true,json:async()=>({ok:true,sheets:["01 従業員","13 LINE連携"]})};
+      if(body.action==="readRows"&&body.sheetName==="01 従業員") return {ok:true,json:async()=>({ok:true,rows:[["従業員ID","氏名"],["EMP001","信原 晴"]]})};
+      if(body.action==="readRows"&&body.sheetName==="13 LINE連携") return {ok:true,json:async()=>({ok:true,rows:[["連携ID","LINEユーザーID","LINE表示名","従業員ID"]]})};
+      return {ok:true,json:async()=>({ok:true,appended:1})};
+    }
   });
-  assert.equal(response.status, 410);
-  assert.match((await response.json()).error, /LIFF authentication/);
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  try {
+    const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/line/link`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({idToken:"verified-test-token",employeeId:"EMP001"})
+    });
+    const result=await response.json();
+    assert.equal(response.status,201);
+    assert.equal(result.status,"確認待ち");
+    const write=sent.find(x=>x.action==="appendRows");
+    assert.equal(write.rows[0][1],"U"+"a".repeat(32));
+    assert.equal(write.rows[0][3],"EMP001");
+    assert.equal(write.rows[0][7],"確認待ち");
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
+
+test("LINE linking rejects an unverified ID token", async () => {
+  const app=createServer({
+    token,lineLoginChannelId:"1234567890",
+    fetchImpl:async()=>({ok:false,json:async()=>({})})
+  });
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  try {
+    const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/line/link`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({idToken:"fake-token",employeeId:"EMP001"})
+    });
+    assert.equal(response.status,401);
+  } finally { await new Promise(resolve=>app.close(resolve)); }
 });
 
 test("Google Sheets list route forwards authenticated request to Apps Script", async () => {
