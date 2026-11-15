@@ -10,11 +10,11 @@ function createVideoBatchContentHandler({contentHandler,videoBatchStore,sourceFe
    if(!existing||!existing.script||existing.stage!=="script")throw new Error("A saved script at the script stage is required");
    if(existing.sourceReview?.jobId===context.jobId)return {answer:existing.sourceReview.answer,videoId:payload.videoId,reused:true,sourceReviewSaved:true,verified:false,sourceCount:existing.sourceReview.sourceSnapshots?.length||0};
    const sourceSnapshots=[];
-   const candidates=[...new Set((existing.sources||[]).filter(x=>typeof x==="string"&&/^https:\/\//i.test(x)).slice(0,10))];
+   const candidates=[...new Set((existing.sources||[]).filter(x=>typeof x==="string"&&/^https:\/\//i.test(x)).slice(0,2))];
    for(const sourceUrl of candidates){
     try{
      const snapshot=await sourceFetcher(sourceUrl,{allowedHosts:allowedSourceHosts});
-     sourceSnapshots.push({...snapshot,text:String(snapshot.text||"").slice(0,40000),error:""});
+     sourceSnapshots.push({...snapshot,text:String(snapshot.text||"").slice(0,1200),error:""});
     }catch(error){
      sourceSnapshots.push({requestedUrl:sourceUrl,finalUrl:"",fetchedAt:new Date().toISOString(),httpStatus:0,title:"",contentSha256:"",text:"",error:String(error?.message||"Source fetch failed").slice(0,500),verification:"source_fetch_failed"});
     }
