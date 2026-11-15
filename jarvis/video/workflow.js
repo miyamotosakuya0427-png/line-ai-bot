@@ -60,7 +60,7 @@ function advanceVideoJob(job, nextStage, details = {}) {
     }
     patch.assets = details.assets.map((asset) => cleanText(asset, "asset", 1000));
   }
-  if (nextStage === "edited" && details.editProjectUrl) {
+  if (nextStage === "edited") {
     patch.editProjectUrl = cleanText(details.editProjectUrl, "editProjectUrl", 2000);
   }
   if (nextStage === "published") {
