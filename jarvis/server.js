@@ -540,6 +540,20 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         }
         return json(res,404,{ok:false,error:"Not Found"});
       }
+      const videoDraftMatch=new RegExp("^/v1/content/videos/(V[0-9]{2,8})/draft$").exec(url.pathname);
+      if(req.method==="POST"&&videoDraftMatch){
+        if(!isAuthorized(req,token))return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        if(!videoBatchStore||!jobStore)return json(res,503,{ok:false,error:"Persistent video and job storage are required"});
+        if(!req.headers["content-type"]?.toLowerCase().startsWith("application/json"))return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+        const d=await readJson(req);
+        if(typeof d.jobId!=="string"||d.jobId.length>200)return json(res,400,{ok:false,error:"A valid draft job ID is required"});
+        const job=await jobStore.get(d.jobId);
+        if(!job||job.type!=="department.content"||job.payload?.videoId!==videoDraftMatch[1]||job.payload?.taskKind!=="video-batch-plan")return json(res,404,{ok:false,error:"Matching ONE CONTENT draft job not found"});
+        if(job.status!=="succeeded"||typeof job.result?.answer!=="string")return json(res,409,{ok:false,error:"Draft job must succeed before its result can be saved"});
+        const result=await videoBatchStore.saveDraft(videoDraftMatch[1],{script:job.result.answer,jobId:job.id});
+        if(!result)return json(res,404,{ok:false,error:"Video not found"});
+        return json(res,result.created?201:200,{ok:true,created:result.created,video:result.video,sourceVerificationStatus:"needs_source_review",externalActionsEnabled:false});
+      }
       const videoPlanMatch=/^\/v1\/content\/videos\/(V[0-9]{2,8})\/plan$/.exec(url.pathname);
       if (videoPlanMatch && req.method==="GET") {
         if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
