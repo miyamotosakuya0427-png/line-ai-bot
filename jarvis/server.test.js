@@ -10,7 +10,7 @@ const {createVideoBatchStore,STAGES}=require("./core/video-batch-store");
 
 const token = "test-token-that-is-at-least-32-bytes-long";
 const STAGE_EVIDENCE={
- sourceQa:{status:"passed",allClaimsVerified:true,verifiedClaimCount:4,primarySourceCount:2,reviewedBy:"test-reviewer"},
+ sourceQa:{status:"passed",allClaimsVerified:true,verifiedClaimCount:1,primarySourceCount:1,reviewedBy:"test-reviewer",sources:[{url:"https://www.bousai.go.jp/primary-source",title:"内閣府 防災資料",sourceType:"primary",accessedAt:"2026-11-16T00:00:00.000Z",excerpt:"一次資料の原文に基づく確認済みの記述を含む抜粋です。"}],claims:[{claim:"明暦の大火に関する確認済みの記述",status:"verified",sourceUrls:["https://www.bousai.go.jp/primary-source"]}]},
  pronunciation:{status:"passed",readingsReviewed:true,termsChecked:8,reviewedBy:"test-reviewer"},
  narration:{status:"recorded",durationSeconds:600,voiceName:"Hinata",voiceConfirmed:true,recordedBy:"test-recorder"},
  assets:{status:"cleared",assetCount:5,rightsConfirmed:true,clearedBy:"test-editor"},
@@ -18,7 +18,7 @@ const STAGE_EVIDENCE={
  finalQa:{status:"passed",checklistPassed:true,openIssues:0,durationSeconds:600,checkedBy:"test-reviewer"}
 };
 async function advanceToOwnerReview(store,id,{fromSourceQa=false}={}){
- if(!fromSourceQa){await store.saveDraft(id,{script:"台本初稿。出典と読みを確認する。",jobId:"server-test-"+id});await store.updateStage(id,"source_qa");}
+ if(!fromSourceQa){await store.saveDraft(id,{script:"台本初稿。出典と読みを確認する。",jobId:"server-test-"+id});await store.updateStage(id,"source_qa",{evidence:{sourceQa:STAGE_EVIDENCE.sourceQa}});}
  await store.updateStage(id,"pronunciation",{evidence:{sourceQa:STAGE_EVIDENCE.sourceQa}});
  await store.updateStage(id,"narration",{evidence:{pronunciation:STAGE_EVIDENCE.pronunciation}});
  await store.updateStage(id,"assets",{evidence:{narration:STAGE_EVIDENCE.narration}});
