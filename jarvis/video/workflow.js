@@ -1,6 +1,6 @@
 "use strict";
 
-const STAGES = Object.freeze([
+const DEFAULT_NARRATION = Object.freeze({\n  provider: "vidiq",\n  voiceName: "Hinata",\n  voiceId: "j210dv0vWm7fCknyQpbA",\n  language: "ja",\n  output: "mp3"\n});\n\nconst STAGES = Object.freeze([
   "planned",
   "scripted",
   "assets_ready",
@@ -86,4 +86,4 @@ function advanceVideoJob(job, nextStage, details = {}) {
   });
 }
 
-module.exports = { STAGES, STAGE_LABELS, createVideoJob, advanceVideoJob };
+module.exports = { DEFAULT_NARRATION, STAGES, STAGE_LABELS, createVideoJob, advanceVideoJob };
