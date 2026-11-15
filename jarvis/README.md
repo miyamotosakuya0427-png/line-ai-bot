@@ -146,11 +146,16 @@ Construction tasks about site activity or daily reports receive read-only aggreg
 - `GET /v1/content/batches` and `POST /v1/content/batches` (authenticated persistent video queue, up to 100 ideas per batch)
 - `GET /v1/content/approvals` (video owner-review inbox)
 - `GET /v1/content/videos/:id/plan` (read the associated ONE CONTENT draft-job status/result)
-- `POST /v1/content/videos/:id/plan` (enqueue an authenticated ONE CONTENT research/script draft job; completed output is shown in the video queue but is not automatically saved into the script field or advanced to the next stage)
+- `POST /v1/content/videos/:id/plan` (enqueue an authenticated ONE CONTENT research/script draft job; the worker saves a successful result into the video record and marks it `needs_source_review`)
 - `POST /v1/content/videos/:id/draft` (save the matching successful ONE CONTENT result into the video script field and mark it `needs_source_review`; this does not mark the sources as verified)
+- `GET /v1/content/videos/:id/script-metrics` (authenticated Japanese spoken-character count and estimated duration range; the result explicitly requires recorded timing)
+- `GET /v1/content/batches` includes the same script metrics for dashboard display.
 - `POST /v1/content/videos/:id/stage`, `/review`, and `/action-approval` (ordered stage updates, review decisions, and scoped expiring action-approval records)
 
 ### Video batch queue
+
+Japanese narration timing is estimated using a configurable 350–420 spoken-character/minute range. This is a planning estimate only; the dashboard labels it as such and requires the actual recorded narration duration before the episode can be treated as finished. An English-oriented word counter is not used to determine Japanese runtime.
+
 
 The video batch journal is stored at `<JARVIS_JOB_STORE_PATH>.video-batches.jsonl` and is initialized alongside the job journal. It supports up to 100 ideas per batch, separate channel identifiers, ordered production stages, owner review decisions (approve / request changes / hold), and scoped action-approval records with provider, cost estimate, destination, and expiry. Finance-channel bulk registration is blocked in both the dashboard and store/API until a verified destination and financial controls are configured. Queue registration only creates ideas; it does not start research, paid generation, editing, uploads, scheduling, or publication. A provider executor is not connected. Approval actions are verified records only and must not be treated as completed external work.
 
