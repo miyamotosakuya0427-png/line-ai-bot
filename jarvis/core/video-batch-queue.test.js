@@ -39,6 +39,8 @@ test("batch queue enqueues up to 100 eligible history drafts and is safe to retr
   const payload = (await jobStore.list({ status: "queued", limit: 20 }))[0].payload;
   assert.equal(payload.taskKind, "video-batch-plan");
   assert.match(payload.request, /要一次資料確認/);
+  assert.match(payload.request, /\\n動画ID：/);
+  assert.equal(payload.request.includes("\\\\n動画ID："), false);
   assert.match(payload.request, /YouTube公開/);
 });
 
