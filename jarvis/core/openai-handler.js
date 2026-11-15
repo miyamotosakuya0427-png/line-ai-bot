@@ -1,6 +1,6 @@
 "use strict";
 
-function createOpenAIHandler({ apiKey = process.env.OPENAI_API_KEY || "", model = process.env.JARVIS_OPENAI_MODEL || "gpt-5.6-luna", fetchImpl = fetch } = {}) {
+function createOpenAIHandler({ apiKey = process.env.OPENAI_API_KEY || "", model = process.env.JARVIS_OPENAI_MODEL || "gpt-5.6-luna", fetchImpl = fetch, instructions = "" } = {}) {
   return async function handleAssistantRequest(payload) {
     if (!apiKey) throw new Error("OpenAI API is not configured");
     const request = typeof payload?.request === "string" ? payload.request.trim() : "";
@@ -15,7 +15,7 @@ function createOpenAIHandler({ apiKey = process.env.OPENAI_API_KEY || "", model 
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + apiKey },
       body: JSON.stringify({
         model,
-        instructions: "あなたは株式会社Oneの業務アシスタントJARVISです。日本語で簡潔かつ正確に回答してください。確認できない情報を事実のように述べず、実行していない操作を完了したと主張しないでください。外部システムの変更、送信、購入、予約、削除などは、明示的な承認なしに実行したと主張してはいけません。この処理では回答文の作成だけを行い、外部操作は行いません。集計データに含まれない売上・経費・利益・原価・給与などの数値は推測しないでください。データが最大99件のサンプルである場合は、その制限を必ず説明してください。",
+        instructions: instructions || "あなたは株式会社Oneの業務アシスタントJARVISです。日本語で簡潔かつ正確に回答してください。確認できない情報を事実のように述べず、実行していない操作を完了したと主張しないでください。外部システムの変更、送信、購入、予約、削除などは、明示的な承認なしに実行したと主張してはいけません。この処理では回答文の作成だけを行い、外部操作は行いません。集計データに含まれない売上・経費・利益・原価・給与などの数値は推測しないでください。データが最大99件のサンプルである場合は、その制限を必ず説明してください。",
         input,
         max_output_tokens: 1200
       }),
