@@ -6,10 +6,11 @@ const token="t".repeat(64);
 const employeeHeaders=["従業員ID","氏名","LINE表示名","職種","役職","単価","電話番号","入社日","登録日","状態","備考"];
 const dailyHeaders=["日報ID","記録日時","作業日","従業員ID","氏名","現場名","作業内容","開始時刻","終了時刻","休憩（分）","作業人数","使用機械・車両","使用材料","連絡事項"];
 
-function fixture() {
+function fixture({jobStore=null}={}) {
   const calls=[];
   const app=createServer({
     token,
+    jobStore,
     sheetsUrl:"https://script.google.com/macros/s/test-id/exec",
     sheetsToken:"s".repeat(128),
     fetchImpl:async(url,options)=>{
@@ -215,5 +216,18 @@ test("video department workflow is authenticated and keeps paid generation and p
   const result=await response.json();assert.equal(response.status,200);assert.equal(result.workflow.series.name,"時をかける日本史");
   assert.equal(result.workflow.publicationEnabled,false);assert.equal(result.workflow.paidGenerationEnabled,false);
   assert.ok(result.workflow.stages.some(s=>s.id==="pronunciation"));assert.equal(calls.length,0);
+ }finally{await new Promise(resolve=>app.close(resolve));}
+});
+
+
+test("department task submission is authenticated, scoped and persisted to the durable queue",async()=>{
+ const created=[];const jobStore={create:async value=>{created.push(value);return {created:true,job:{id:"11111111-1111-4111-8111-111111111111",...value,status:"queued"}};}};
+ const {app}=fixture({jobStore});await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+ try{
+  const url=\`http://127.0.0.1:\${app.address().port}/v1/content/tasks\`;
+  const denied=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({request:"企画を作る"})});assert.equal(denied.status,401);
+  const response=await fetch(url,{method:"POST",headers:{Authorization:\`Bearer \${token}\`,"Content-Type":"application/json"},body:JSON.stringify({request:"10分動画の企画を作る",idempotencyKey:"video-plan-001"})});
+  const data=await response.json();assert.equal(response.status,201);assert.equal(data.departmentId,"content");assert.equal(created[0].type,"department.content");assert.equal(created[0].payload.request,"10分動画の企画を作る");
+  const invalid=await fetch(\`http://127.0.0.1:\${app.address().port}/v1/departments/unknown/tasks\`,{method:"POST",headers:{Authorization:\`Bearer \${token}\`,"Content-Type":"application/json"},body:JSON.stringify({request:"bad"})});assert.equal(invalid.status,400);
  }finally{await new Promise(resolve=>app.close(resolve));}
 });
