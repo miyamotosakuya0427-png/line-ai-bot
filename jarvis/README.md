@@ -16,6 +16,7 @@
 - Authenticated read-only company APIs for approved employee and daily-report sheets
 - Daily-report aggregation (site counts, worker-days, estimated person-hours, equipment counts)
 - Company-context AI Q&A job that sends aggregate data only, not employee personal data
+- Validated financial aggregation primitives for revenue, expenses, project/month/category totals, profit, and margin (not connected to live sheets until their schema is confirmed)
 - Schema validation and field filtering (employee pay, phone, and notes are excluded from the employee API)
 
 ## Run locally
@@ -59,6 +60,6 @@ See [core design and deployment](./core/README.md) and [deployment checklist](./
 
 ## Not yet complete
 
-This is a tested foundation, not a fully autonomous office system. Daily-report analytics and aggregate-grounded AI Q&A are limited to the first 99 daily-report rows returned by Apps Script; they are not complete historical financial or profitability reports. Sales, expenses, cost, gross profit, payroll analytics, arbitrary office actions, Google Sheets writes from the AI worker, desktop control, video generation/publishing, and multiple worker instances are not implemented. Those integrations require separate allowlists, permissions, and end-to-end tests.
+This is a tested foundation, not a fully autonomous office system. Daily-report analytics and aggregate-grounded AI Q&A are limited to the first 99 daily-report rows returned by Apps Script; they are not complete historical financial or profitability reports. Live sales/expense sheet ingestion, invoicing/receivables, tax/accounting adjustments, cost allocation, payroll analytics, arbitrary office actions, Google Sheets writes from the AI worker, desktop control, video generation/publishing, and multiple worker instances are not implemented. Those integrations require separate allowlists, permissions, and end-to-end tests.
 
 Production deployment remains intentionally disabled until the paid persistent disk and service configuration are approved.
