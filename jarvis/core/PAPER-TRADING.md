@@ -15,6 +15,9 @@ The owner's research hypotheses are: 1,000,000 JPY starting capital, 500,000 JPY
 - A stop price is mandatory.
 - Duplicate trade IDs are rejected.
 - Fees and slippage are included in net P/L.
+- A daily realized-loss halt blocks new paper trades for the current market-local day and expires on the next market day; the clock must use the configured market timezone.
+- A peak-drawdown halt is latched and requires manual review; reaching the open-position cap blocks additional entries but does not permanently halt the engine.
+- Current daily-loss monitoring is based on realized P/L only; unrealized losses are not yet marked to market, so this is not a live-risk control.
 - A halt blocks new paper trades; it is not an instruction to reverse or liquidate any real position.
 
 These are conservative research defaults, not personalized financial advice or a live trading policy. They should be stress-tested before any future deployment.
@@ -43,7 +46,7 @@ Passing a backtest or paper phase does not guarantee future performance. A 20% d
 
 ## Authenticated paper-only API
 
-When JARVIS is configured with `JARVIS_JOB_STORE_PATH` on a persistent mounted disk, the server also initializes a separate append-only journal at `JARVIS_JOB_STORE_PATH.paper-trading.jsonl`. The journal uses fsync-backed append records, replay validation, serialized writes, a bounded event count and file size, and fail-closed recovery on corruption. A disk write error poisons the in-process store; restart and journal recovery are required before further writes.
+When JARVIS is configured with `JARVIS_JOB_STORE_PATH` on a persistent mounted disk, the server also initializes a separate append-only journal at `JARVIS_JOB_STORE_PATH.paper-trading.jsonl`. The journal uses fsync-backed append records, replay validation, serialized writes, a bounded event count and file size checked before each append, and fail-closed recovery on corruption. A disk write error poisons the in-process store; restart and journal recovery are required before further writes.
 
 All endpoints below require the JARVIS bearer token:
 - `GET /v1/trading/status`
