@@ -555,7 +555,7 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         if (req.method==="POST" && url.pathname==="/v1/signals/influence/events") {
           if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
           const d=await readJson(req);
-          const result=await influenceEventStore.add(d);
+          const result=await influenceEventStore.add({...d,verification:"unverified"});
           return json(res,result.created?201:200,{ok:true,created:result.created,event:result.event,analysisQueued:false,realMoneyTradingEnabled:false});
         }
         return json(res,404,{ok:false,error:"Not Found"});
