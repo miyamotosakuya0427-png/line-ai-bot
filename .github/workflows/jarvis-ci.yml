@@ -5,11 +5,13 @@ on:
     branches: [one-jarvis-foundation]
     paths:
       - "jarvis/**"
+      - "apps-script/**"
       - ".github/workflows/jarvis-ci.yml"
   pull_request:
     branches: [one-jarvis-foundation]
     paths:
       - "jarvis/**"
+      - "apps-script/**"
       - ".github/workflows/jarvis-ci.yml"
 
 jobs:
@@ -25,3 +27,4 @@ jobs:
           node-version: 20
       - run: npm install
       - run: npm test
+      - run: node --check < ../apps-script/Code.gs
