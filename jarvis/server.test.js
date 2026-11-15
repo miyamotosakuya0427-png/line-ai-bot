@@ -74,6 +74,8 @@ test("unknown commands are rejected", async () => {
 });
 
 test("unknown routes are not found", async () => {
-  const response = await fetch(`${base}/missing`);
+  const response = await fetch(`${base}/missing`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
   assert.equal(response.status, 404);
 });
