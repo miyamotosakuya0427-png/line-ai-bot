@@ -56,7 +56,8 @@ async function verifyLineIdToken(idToken, channelId, fetchImpl=fetch) {
 
 function lineLinkPage(liffId) {
   const safeLiffId=JSON.stringify(liffId||"");
-  return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>株式会社One LINE連携</title><style>body{font-family:system-ui,sans-serif;background:#f5f6f8;color:#17202a;margin:0;padding:24px}main{max-width:440px;margin:8vh auto;background:#fff;padding:24px;border-radius:16px;box-shadow:0 4px 24px #0001}h1{font-size:22px}p{line-height:1.7}.muted{color:#667085;font-size:14px}select,button{width:100%;padding:14px;margin-top:12px;border-radius:9px;border:1px solid #ccd2da;font-size:16px}button{background:#182b49;color:white;border:0}button:disabled{opacity:.45}#msg{white-space:pre-wrap;margin-top:16px}</style><script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script></head><body><main><h1>株式会社One LINE連携</h1><p>自分の氏名を選んで連携申請してください。申請後、管理者が本人確認して有効化します。</p><label for="employee">従業員名</label><select id="employee" disabled><option>読み込み中…</option></select><button id="send" disabled>連携を申請</button><button id="bootstrap-admin" disabled style="background:#344054">EMP003 初回管理者登録</button><p class="muted">初回管理者登録はEMP003本人のみ実行できます。LINE公式のIDトークンをサーバーで検証します。</p><section style="margin-top:24px;border-top:1px solid #e4e7ec;padding-top:16px"><h2 style="font-size:18px">管理者メニュー</h2><button id="refresh-pending" disabled>連携申請を確認</button><div id="pending-list" aria-live="polite"></div></section><p class="muted">LINEアカウント情報はLINE公式のIDトークンをサーバーで検証して取得します。</p><div id="msg" role="status"></div></main><script>
+  return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>株式会社One LINE連携</title><style>body{font-family:system-ui,sans-serif;background:#f5f6f8;color:#17202a;margin:0;padding:24px}main{max-width:440px;margin:8vh auto;background:#fff;padding:24px;border-radius:16px;box-shadow:0 4px 24px #0001}h1{font-size:22px}p{line-height:1.7}.muted{color:#667085;font-size:14px}select,button{width:100%;padding:14px;margin-top:12px;border-radius:9px;border:1px solid #ccd2da;font-size:16px}button{background:#182b49;color:white;border:0}button:disabled{opacity:.45}#msg{white-space:pre-wrap;margin-top:16px}</style><script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script></head><body><main><h1>株式会社One LINE連携</h1><p>自分の氏名を選んで連携申請してください。申請後、管理者が本人確認して有効化します。</p><label for="employee">従業員名</label><select id="employee" disabled><option>読み込み中…</option></select><button id="send" disabled>連携を申請</button><button id="bootstrap-admin" disabled style="background:#344054">EMP003 初回管理者登録</button><p class="muted">初回管理者登録はEMP003本人のみ実行できます。LINE公式のIDトークンをサーバーで検証します。</p><section style="margin-top:24px;border-top:1px solid #e4e7ec;padding-top:16px"><h2 style="font-size:18px">日報入力</h2><p class="muted">連携済みの本人情報を使って記録します。</p><form id="daily-report-form"><label>作業日</label><input name="workDate" type="date" required><label>現場名</label><input name="siteName" maxlength="100" required placeholder="例：岡山市○○現場"><label>作業内容</label><textarea name="workDetails" maxlength="2000" required placeholder="今日行った作業"></textarea><label>開始時刻</label><input name="startTime" type="time" required><label>終了時刻</label><input name="endTime" type="time" required><label>休憩（分）</label><input name="breakMinutes" type="number" min="0" max="600" value="60" required><label>作業人数</label><input name="workerCount" type="number" min="1" max="100" value="1" required><label>使用機械・車両</label><input name="equipment" maxlength="300" placeholder="例：バックホウ、ダンプ"><label>使用材料</label><input name="materials" maxlength="500" placeholder="例：RC30、生コン"><label>連絡事項</label><textarea name="notes" maxlength="1000"></textarea><button id="daily-report-submit" type="submit">日報を保存</button></form><p id="daily-report-message" role="status"></p></section>
+<section style="margin-top:24px;border-top:1px solid #e4e7ec;padding-top:16px"><h2 style="font-size:18px">管理者メニュー</h2><button id="refresh-pending" disabled>連携申請を確認</button><div id="pending-list" aria-live="polite"></div></section><p class="muted">LINEアカウント情報はLINE公式のIDトークンをサーバーで検証して取得します。</p><div id="msg" role="status"></div></main><script>
 const LIFF_ID=${safeLiffId};
 const msg=document.getElementById("msg"),select=document.getElementById("employee"),button=document.getElementById("send");
 const adminButton=document.getElementById("bootstrap-admin");
@@ -69,6 +70,9 @@ button.addEventListener("click",async()=>{button.disabled=true;try{await api("/v
 adminButton.addEventListener("click",async()=>{if(select.value!=="EMP003"){msg.textContent="EMP003を選択してください。";return;}if(!window.confirm("LINEで本人確認を行い、EMP003を株式会社Oneの初回管理者として登録します。続行しますか？"))return;adminButton.disabled=true;try{const result=await api("/v1/line/admin/bootstrap",{idToken});msg.textContent="管理者登録が完了しました。権限："+result.role+"／状態："+result.status;}catch(e){msg.textContent=e.message;adminButton.disabled=false;}});
 async function loadPending(){refreshPendingButton.disabled=true;pendingList.textContent="申請を確認しています…";try{const result=await api("/v1/line/admin/pending",{idToken});pendingList.replaceChildren();if(!result.requests.length){pendingList.textContent="承認待ちの申請はありません。";return;}for(const item of result.requests){const card=document.createElement("div");card.style.cssText="border:1px solid #d0d5dd;border-radius:10px;padding:12px;margin-top:10px";const info=document.createElement("p");info.textContent=(item.employeeName||item.employeeId)+"（"+item.employeeId+"）／LINE表示名："+(item.displayName||"未設定")+"／申請："+(item.createdAt||"日時不明");card.appendChild(info);for(const decision of ["approve","reject"]){const action=document.createElement("button");action.textContent=decision==="approve"?"承認する":"却下する";action.style.background=decision==="approve"?"#175cd3":"#b42318";action.addEventListener("click",async()=>{const label=decision==="approve"?"承認":"却下";if(!window.confirm((item.employeeName||item.employeeId)+"さんのLINE連携申請を"+label+"しますか？"))return;action.disabled=true;try{const outcome=await api("/v1/line/admin/review",{idToken,linkId:item.linkId,decision});msg.textContent="申請を"+(outcome.status==="有効"?"承認":"却下")+"しました。";await loadPending();}catch(e){msg.textContent=e.message;action.disabled=false;}});card.appendChild(action);}pendingList.appendChild(card);}}catch(e){pendingList.textContent=e.message;}finally{refreshPendingButton.disabled=false;}}
 refreshPendingButton.addEventListener("click",loadPending);
+const dailyForm=document.getElementById("daily-report-form"),dailySubmit=document.getElementById("daily-report-submit"),dailyMessage=document.getElementById("daily-report-message");
+dailyForm.querySelector('[name="workDate"]').value=new Date().toLocaleDateString("sv-SE");
+dailyForm.addEventListener("submit",async(event)=>{event.preventDefault();if(!idToken){dailyMessage.textContent="LINEの本人確認ができていません。画面を再読み込みしてください。";return;}dailySubmit.disabled=true;dailyMessage.textContent="保存しています…";const values=Object.fromEntries(new FormData(dailyForm).entries());try{const result=await api("/v1/daily-report",{idToken,...values});dailyMessage.textContent="日報を保存しました。"+result.employeeName+"さん／"+result.workDate;dailyForm.reset();dailyForm.querySelector('[name="workDate"]').value=new Date().toLocaleDateString("sv-SE");dailyForm.querySelector('[name="breakMinutes"]').value="60";dailyForm.querySelector('[name="workerCount"]').value="1";}catch(e){dailyMessage.textContent=e.message;}finally{dailySubmit.disabled=false;}});
 </script></body></html>`;
 }
 
@@ -227,6 +231,46 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         const row=["PENDING-"+crypto.randomUUID(),identity.lineUserId,identity.displayName,employeeId,String(employee[1]||"").trim(),"","一般","確認待ち",new Date().toISOString(),new Date().toISOString()];
         const appended=await callSheets("appendRows",{sheetName:"13 LINE連携",rows:[row]});
         return json(res,201,{ok:true,submitted:true,alreadySubmitted:false,status:"確認待ち",appended:appended.appended||1});
+      }
+      // 日報保存: LINE本人確認に加え、13 LINE連携で有効な本人の従業員IDを照合する。
+      if (req.method==="POST" && url.pathname==="/v1/daily-report") {
+        if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+        if (!lineLoginChannelId) return json(res,503,{ok:false,error:"LINE Login channel is not configured"});
+        const d=await readJson(req);
+        const identity=await verifyLineIdToken(d.idToken,lineLoginChannelId,fetchImpl);
+        const workDate=typeof d.workDate==="string"?d.workDate.trim():"";
+        const siteName=typeof d.siteName==="string"?d.siteName.trim():"";
+        const workDetails=typeof d.workDetails==="string"?d.workDetails.trim():"";
+        const startTime=typeof d.startTime==="string"?d.startTime.trim():"";
+        const endTime=typeof d.endTime==="string"?d.endTime.trim():"";
+        const breakMinutes=Number(d.breakMinutes);
+        const workerCount=Number(d.workerCount);
+        const equipment=typeof d.equipment==="string"?d.equipment.trim():"";
+        const materials=typeof d.materials==="string"?d.materials.trim():"";
+        const notes=typeof d.notes==="string"?d.notes.trim():"";
+        if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(workDate)||Number.isNaN(Date.parse(workDate))||
+            !siteName||siteName.length>100||!workDetails||workDetails.length>2000||
+            !/^([01]\\d|2[0-3]):[0-5]\\d$/.test(startTime)||!/^([01]\\d|2[0-3]):[0-5]\\d$/.test(endTime)||
+            !Number.isInteger(breakMinutes)||breakMinutes<0||breakMinutes>600||
+            !Number.isInteger(workerCount)||workerCount<1||workerCount>100||
+            equipment.length>300||materials.length>500||notes.length>1000) {
+          return json(res,400,{ok:false,error:"入力内容を確認してください"});
+        }
+        const linked=await callSheets("readRows",{sheetName:"13 LINE連携",startRow:1,numRows:100});
+        const rows=Array.isArray(linked.rows)?linked.rows:[];
+        const header=rows[0]||[];
+        const lineCol=header.indexOf("LINEユーザーID"),employeeCol=header.indexOf("従業員ID"),nameCol=header.indexOf("氏名"),statusCol=header.indexOf("状態");
+        if ([lineCol,employeeCol,nameCol,statusCol].some(i=>i<0)) return json(res,503,{ok:false,error:"LINE連携シートの見出しを確認してください"});
+        const ownLink=rows.slice(1).find(row=>Array.isArray(row)&&String(row[lineCol]||"").trim()===identity.lineUserId&&String(row[statusCol]||"").trim()==="有効");
+        if (!ownLink) return json(res,403,{ok:false,error:"有効な従業員LINE連携が必要です。管理者に確認してください。"});
+        const employeeId=String(ownLink[employeeCol]||"").trim(),employeeName=String(ownLink[nameCol]||"").trim();
+        if (!employeeId||!employeeName) return json(res,403,{ok:false,error:"従業員情報を確認できません。管理者に確認してください。"});
+        const reportId="DR-"+crypto.randomUUID();
+        const saved=await callSheets("appendDailyReport",{report:{
+          reportId,recordedAt:new Date().toISOString(),workDate,employeeId,employeeName,siteName,workDetails,
+          startTime,endTime,breakMinutes,workerCount,equipment,materials,notes
+        }});
+        return json(res,201,{ok:true,reportId,employeeName,workDate,saved:saved.saved===true});
       }
       // 初回管理者登録: LINE公式IDトークンで本人確認し、EMP003の本人の申請だけを対象にする。
       if (req.method==="POST" && url.pathname==="/v1/line/admin/bootstrap") {
