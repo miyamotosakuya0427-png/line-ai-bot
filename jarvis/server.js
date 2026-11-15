@@ -512,6 +512,12 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
           const pending=videos.filter(p=>p.status==="awaiting_owner_review");
           return json(res,200,{ok:true,pending,reviews:await videoBatchStore.listReviews(),actionApprovals:await videoBatchStore.listActionApprovals()});
         }
+        const stageMatch=new RegExp("^/v1/content/videos/(V[0-9]{2,8})/stage$").exec(url.pathname);
+        if (req.method==="POST" && stageMatch) {
+          if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+          const d=await readJson(req),updated=await videoBatchStore.updateStage(stageMatch[1],d.stage,{notes:d.notes||""});
+          return updated?json(res,200,{ok:true,video:updated}):json(res,404,{ok:false,error:"Video not found"});
+        }
         const reviewMatch=new RegExp("^/v1/content/videos/(V[0-9]{2,8})/review$").exec(url.pathname);
         if (req.method==="POST" && reviewMatch) {
           if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
