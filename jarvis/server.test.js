@@ -132,6 +132,37 @@ test("LINE linking verifies ID token and stores only a pending approval", async 
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
 
+test("daily report requires an active LINE link and appends a validated report", async () => {
+  const sent=[];
+  const app=createServer({
+    token,lineLoginChannelId:"1234567890",
+    sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"r".repeat(128),
+    fetchImpl:async(url,options)=>{
+      if(url==="https://api.line.me/oauth2/v2.1/verify") return {ok:true,json:async()=>({iss:"https://access.line.me",aud:"1234567890",sub:"U"+"a".repeat(32),exp:Math.floor(Date.now()/1000)+300,name:"テスト"})};
+      const body=JSON.parse(options.body);sent.push(body);
+      if(body.action==="readRows") return {ok:true,json:async()=>({ok:true,rows:[
+        ["連携ID","LINEユーザーID","LINE表示名","従業員ID","氏名","","権限","状態"],
+        ["LINK-1","U"+"a".repeat(32),"テスト","EMP003","宮本朔也","","管理者","有効"]
+      ]})};
+      if(body.action==="appendDailyReport") return {ok:true,json:async()=>({ok:true,saved:true})};
+      throw new Error("unexpected action");
+    }
+  });
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  try {
+    const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/daily-report`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({idToken:"verified-test-token-123456",workDate:"2026-11-15",siteName:"岡山現場",workDetails:"掘削作業",startTime:"08:00",endTime:"17:00",breakMinutes:"60",workerCount:"3",equipment:"バックホウ",materials:"RC30",notes:""})
+    });
+    const result=await response.json();
+    assert.equal(response.status,201);
+    assert.equal(result.employeeName,"宮本朔也");
+    const write=sent.find(x=>x.action==="appendDailyReport");
+    assert.equal(write.report.employeeId,"EMP003");
+    assert.equal(write.report.workDetails,"掘削作業");
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
+
 test("LINE linking rejects an unverified ID token", async () => {
   const app=createServer({
     token,lineLoginChannelId:"1234567890",
