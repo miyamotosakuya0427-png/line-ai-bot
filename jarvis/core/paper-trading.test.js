@@ -36,6 +36,11 @@ test("rejects duplicate trades, missing stops, invalid direction, and excess ris
  assert.throws(()=>engine.openPaperTrade({symbol:"7203",side:"long",quantity:100,entryPrice:1000,strategyId:"s"}),/stop price/);
  assert.throws(()=>engine.openPaperTrade({symbol:"7203",side:"long",quantity:1000,entryPrice:1000,stopPrice:900,strategyId:"s"}),/risk/);
 });
+test("open-position cap is enforced before accepting another paper trade",()=>{
+ const engine=createPaperTradingEngine({policy:{maxOpenPositions:1}});
+ open(engine);
+ assert.throws(()=>open(engine,{id:"trade-2"}),/Open-position limit/);
+});
 test("a daily loss threshold halts further paper trades",()=>{
  const {engine}=setup();open(engine);
  engine.closePaperTrade({id:"trade-1",exitPrice:790,feesYen:0,slippageYen:0});
