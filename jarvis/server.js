@@ -59,8 +59,10 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
           if (!Array.isArray(listed.sheets)) return json(res,502,{ok:false,error:"invalid sheet list"});
           const dailyName=listed.sheets.find(name=>name==="日報");
           const numberedDailyName=listed.sheets.find(name=>name==="03 日報");
+          const employeeName=listed.sheets.find(name=>name==="01 従業員");
           let dailyReportHeaders=null;
           let numberedDailyReportHeaders=null;
+          let employeeHeaders=null;
           if (dailyName) {
             const read=await callSheets("readRows",{sheetName:dailyName,startRow:1,numRows:1});
             dailyReportHeaders=Array.isArray(read.rows)&&Array.isArray(read.rows[0])?read.rows[0]:[];
@@ -69,7 +71,11 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
             const read=await callSheets("readRows",{sheetName:numberedDailyName,startRow:1,numRows:1});
             numberedDailyReportHeaders=Array.isArray(read.rows)&&Array.isArray(read.rows[0])?read.rows[0]:[];
           }
-          return json(res,200,{ok:true,sheets:listed.sheets,dailyReportSheetFound:Boolean(dailyName),dailyReportHeaders,numberedDailyReportSheetFound:Boolean(numberedDailyName),numberedDailyReportHeaders});
+          if (employeeName) {
+            const read=await callSheets("readRows",{sheetName:employeeName,startRow:1,numRows:1});
+            employeeHeaders=Array.isArray(read.rows)&&Array.isArray(read.rows[0])?read.rows[0]:[];
+          }
+          return json(res,200,{ok:true,sheets:listed.sheets,dailyReportSheetFound:Boolean(dailyName),dailyReportHeaders,numberedDailyReportSheetFound:Boolean(numberedDailyName),numberedDailyReportHeaders,employeeSheetFound:Boolean(employeeName),employeeHeaders});
         } catch {
           return json(res,503,{ok:false,error:"metadata check failed"});
         }
