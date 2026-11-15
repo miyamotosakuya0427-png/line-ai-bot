@@ -222,6 +222,27 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         const appended=await callSheets("appendRows",{sheetName:"13 LINE連携",rows:[row]});
         return json(res,201,{ok:true,submitted:true,alreadySubmitted:false,status:"確認待ち",appended:appended.appended||1});
       }
+      // 初回管理者登録: LINE公式IDトークンで本人確認し、EMP003の本人の申請だけを対象にする。
+      if (req.method==="POST" && url.pathname==="/v1/line/admin/bootstrap") {
+        if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+        if (!lineLoginChannelId) return json(res,503,{ok:false,error:"LINE Login channel is not configured"});
+        const d=await readJson(req);
+        const identity=await verifyLineIdToken(d.idToken,lineLoginChannelId,fetchImpl);
+        const result=await callSheets("bootstrapAdmin",{lineUserId:identity.lineUserId,employeeId:"EMP003"});
+        return json(res,200,{ok:true,status:result.status,role:result.role});
+      }
+      // 審査: 管理者のLINE公式IDトークンを検証し、検証済みsubだけをApps Scriptへ渡す。
+      if (req.method==="POST" && url.pathname==="/v1/line/admin/review") {
+        if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+        if (!lineLoginChannelId) return json(res,503,{ok:false,error:"LINE Login channel is not configured"});
+        const d=await readJson(req);
+        const identity=await verifyLineIdToken(d.idToken,lineLoginChannelId,fetchImpl);
+        const linkId=typeof d.linkId==="string"?d.linkId.trim():"";
+        const decision=typeof d.decision==="string"?d.decision.trim():"";
+        if (!linkId || linkId.length>100 || !["approve","reject"].includes(decision)) return json(res,400,{ok:false,error:"Invalid review request"});
+        const result=await callSheets("reviewLineLink",{adminLineUserId:identity.lineUserId,linkId,decision});
+        return json(res,200,{ok:true,linkId:result.linkId,status:result.status});
+      }
       if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
       if (req.method==="GET" && url.pathname==="/v1/status") return json(res,200,{ok:true,system:"ONE JARVIS",version:"1.2.0",mode:"read-only",googleSheetsConfigured:Boolean(sheetsUrl&&sheetsToken)});
       if (req.method==="GET" && url.pathname==="/v1/sheets/list") {
