@@ -147,6 +147,32 @@ test("LINE linking rejects an unverified ID token", async () => {
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
 
+test("LINE employee list verifies ID token without the JARVIS bearer token", async () => {
+  const app=createServer({
+    token,
+    lineLoginChannelId:"1234567890",
+    sheetsUrl:"https://script.google.com/macros/s/test-id/exec",
+    sheetsToken:"h".repeat(128),
+    fetchImpl:async(url,options)=>{
+      if(url==="https://api.line.me/oauth2/v2.1/verify") {
+        return {ok:true,json:async()=>({iss:"https://access.line.me",aud:"1234567890",sub:"U"+"b".repeat(32),exp:Math.floor(Date.now()/1000)+300})};
+      }
+      const body=JSON.parse(options.body);
+      if(body.action==="listSheets") return {ok:true,json:async()=>({ok:true,sheets:["01 従業員"]})};
+      return {ok:true,json:async()=>({ok:true,rows:[["従業員ID","氏名","","","","","","","","状態"],["EMP001","テスト従業員","","","","","","","","有効"],["EMP002","無効従業員","","","","","","","","無効"]]})};
+    }
+  });
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  try {
+    const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/line/employees`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({idToken:"verified-test-token"})
+    });
+    assert.equal(response.status,200);
+    assert.deepEqual((await response.json()).employees,[{employeeId:"EMP001",name:"テスト従業員"}]);
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
+
 test("Google Sheets list route forwards authenticated request to Apps Script", async () => {
   let sent;
   const sheetsUrl = "https://script.google.com/macros/s/test-id/exec";
