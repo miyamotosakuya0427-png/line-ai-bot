@@ -40,7 +40,7 @@ async function fetchOfficialPage(url,host,fetchImpl) {
  if(type&&!/text\/html|application\/xhtml\+xml/i.test(type))throw new Error("Unexpected official source content type");
  const html=(await response.text()).slice(0,500000);
  const title=(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)||[])[1]||"";
- return {html,title:stripHtml(title).slice(0,200),excerpt:stripHtml(html).slice(0,900),httpStatus:response.status};
+ return {html,title:stripHtml(title).slice(0,200),excerpt:stripHtml(html).slice(0,500),httpStatus:response.status};
 }
 async function fetchOfficialSourceSnapshots({sources=SUBSIDY_SOURCES,fetchImpl=fetch,now=()=>new Date()}={}) {
  if(!Array.isArray(sources)||sources.length>20)throw new Error("Invalid official source list");
@@ -84,4 +84,4 @@ function createSubsidyResearchHandler({apiKey,model,fetchImpl=fetch,researchFetc
   return {...summary,sourceFingerprints,sourceStatuses:sources.map(x=>({id:x.id,status:x.status})),changes};
  };
 }
-module.exports={stripHtml,fetchOfficialSourceSnapshots,createSubsidyResearchHandler};
+module.exports={stripHtml,extractRelatedLinks,fetchOfficialSourceSnapshots,createSubsidyResearchHandler};
