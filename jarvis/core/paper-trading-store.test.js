@@ -46,7 +46,7 @@ test("corrupt journal fails closed instead of silently resetting history",async 
  const f=await fixture(t);
  await fs.writeFile(f.filePath,'{"type":"snapshot"}\nnot-json\n');
  const store=createPaperTradingStore({filePath:f.filePath,clock:f.clock});
- await assert.rejects(store.init(),/corrupt at line 2/);
+ await assert.rejects(store.init(),/invalid event at line 1/);
 });
 test("journal requires an absolute path",()=>{
  assert.throws(()=>createPaperTradingStore({filePath:"relative.jsonl"}),/absolute/);
