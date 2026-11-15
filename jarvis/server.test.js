@@ -579,3 +579,18 @@ test("end-to-end job API queues, executes, and returns a persisted assistant ans
     await fs.rm(dir,{recursive:true,force:true});
   }
 });
+
+test("JARVIS dashboard is served with restrictive security headers and no server token", async () => {
+  const app=createServer({token});
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  try {
+    const response=await fetch(`http://127.0.0.1:${app.address().port}/`);
+    const html=await response.text();
+    assert.equal(response.status,200);
+    assert.match(response.headers.get("content-security-policy"),/default-src 'self'/);
+    assert.equal(response.headers.get("x-frame-options"),"DENY");
+    assert.match(html,/ONE JARVIS/);
+    assert.match(html,/sessionStorage|memory/);
+    assert.doesNotMatch(html,new RegExp(token));
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
