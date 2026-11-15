@@ -9,7 +9,8 @@ const MAX_EVENTS=500000;
 const MAX_JOURNAL_BYTES=256*1024*1024;
 function clone(v){return JSON.parse(JSON.stringify(v));}
 function createPaperTradingStore({filePath,policy={},clock=()=>new Date().toISOString(),maxJournalBytes=MAX_JOURNAL_BYTES,maxEvents=MAX_EVENTS}={}){
- if(typeof filePath!=="string"||!path.isAbsolute(filePath))throw new Error("Paper trading store requires an absolute persistent file path");\n if(!Number.isInteger(maxJournalBytes)||maxJournalBytes<1024||maxJournalBytes>MAX_JOURNAL_BYTES||!Number.isInteger(maxEvents)||maxEvents<1||maxEvents>MAX_EVENTS)throw new Error("Invalid paper trading journal limits");
+ if(typeof filePath!=="string"||!path.isAbsolute(filePath))throw new Error("Paper trading store requires an absolute persistent file path");
+ if(!Number.isInteger(maxJournalBytes)||maxJournalBytes<1024||maxJournalBytes>MAX_JOURNAL_BYTES||!Number.isInteger(maxEvents)||maxEvents<1||maxEvents>MAX_EVENTS)throw new Error("Invalid paper trading journal limits");
  let events=[];let engine=createPaperTradingEngine({policy,clock});let initialized=false;let poisoned=false;let queue=Promise.resolve();
  async function serialize(fn){const p=queue.then(fn);queue=p.catch(()=>{});return p;}
  async function ready(){if(poisoned)throw new Error("Paper trading journal write failed; restart and recover from durable journal before continuing");if(!initialized)await store.init();}
