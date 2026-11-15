@@ -1,4 +1,4 @@
-# ONE CONTENT Episode 001 — 亀山藩、借金3万両の真相
+# ONE CONTENT Episode 001 — 亀山藩、赤字3万両の真実
 
 - Channel: 時をかける日本史
 - Target runtime: 8–12 minutes (draft narration target: about 2,700–3,200 Japanese characters; verify actual read speed after recording)
@@ -206,7 +206,7 @@
 
 ## Visual / edit plan
 
-1. 0:00–0:30 — Kameyama Castle silhouette, old account book, headline「借金3万両の真相」
+1. 0:00–0:30 — Kameyama Castle silhouette, old account book, headline「赤字3万両の真相」
 2. 0:30–1:30 — Kameyama Domain map; label Ise and Bitchu detached territory separately
 3. 1:30–2:40 — Archival document close-up; animate 24,000 koku / 2,900 ryo / 16,900 ryo
 4. 2:40–4:00 — Edo, Kyoto, Osaka map and residence illustrations; cost figures appear one by one
