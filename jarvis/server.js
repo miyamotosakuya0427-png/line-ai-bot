@@ -419,7 +419,33 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
         const d=await readJson(req), departmentId=url.pathname==="/v1/content/tasks"?"content":departmentTaskMatch[1];
         if (!DEPARTMENTS.some(item=>item.id===departmentId) || typeof d.request!=="string" || !d.request.trim() || d.request.length>4000 || (d.idempotencyKey!==undefined && (typeof d.idempotencyKey!=="string" || d.idempotencyKey.length>128))) return json(res,400,{ok:false,error:"Invalid department task"});
-        const result=await jobStore.create({type:"department."+departmentId,payload:{request:d.request.trim(),departmentId},idempotencyKey:d.idempotencyKey||""});
+        let companyContext=null;
+        if ((departmentId==="tax"||departmentId==="management") && /売上|経費|請求|入金|利益|会計|税務|資金繰り/.test(d.request)) {
+          try {
+            const listed=await callSheets("listSheets");
+            if (!Array.isArray(listed.sheets) || !listed.sheets.includes(SALES_SHEET) || !listed.sheets.includes(EXPENSE_SHEET)) {
+              companyContext={financialDataStatus:"売上・経費シートが未接続。数値を推測せず、必要なデータを明示してください。"};
+            } else {
+              const sales=await callSheets("readRows",{sheetName:SALES_SHEET,startRow:1,numRows:100});
+              const expenses=await callSheets("readRows",{sheetName:EXPENSE_SHEET,startRow:1,numRows:100});
+              const financials=readFinancialSheets({salesRows:sales.rows,expenseRows:expenses.rows});
+              companyContext={financials};
+              if (listed.sheets.includes(INVOICE_SHEET)&&listed.sheets.includes(PAYMENT_SHEET)) {
+                const invoices=await callSheets("readRows",{sheetName:INVOICE_SHEET,startRow:1,numRows:100});
+                const payments=await callSheets("readRows",{sheetName:PAYMENT_SHEET,startRow:1,numRows:100});
+                const asOfDate=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Tokyo",year:"numeric",month:"2-digit",day:"2-digit"}).format(now());
+                companyContext.receivables=readReceivablesSheets({invoiceRows:invoices.rows,paymentRows:payments.rows,asOfDate});
+              } else {
+                companyContext.receivablesStatus="請求・入金シートは未接続。売上・経費集計とは分けて確認してください。";
+              }
+            }
+          } catch(error) {
+            companyContext={financialDataStatus:"財務シートの読み取りまたは見出し検証に失敗。数値を推測せず、管理者確認が必要です。",schemaErrorCode:error.code||"UNAVAILABLE"};
+          }
+        }
+        const payload={request:d.request.trim(),departmentId};
+        if(companyContext)payload.companyContext=companyContext;
+        const result=await jobStore.create({type:"department."+departmentId,payload,idempotencyKey:d.idempotencyKey||""});
         return json(res,result.created?201:200,{ok:true,created:result.created,departmentId,job:result.job});
       }
       if (url.pathname.startsWith("/v1/jobs")) {
