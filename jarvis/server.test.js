@@ -79,3 +79,44 @@ test("unknown routes are not found", async () => {
   });
   assert.equal(response.status, 404);
 });
+
+
+test("Google Sheets list route forwards authenticated request to Apps Script", async () => {
+  let sent;
+  const sheetsUrl = "https://script.google.com/macros/s/test-id/exec";
+  const app = createServer({
+    token,
+    sheetsUrl,
+    sheetsToken: "a".repeat(128),
+    fetchImpl: async (url, options) => {
+      sent = { url, body: JSON.parse(options.body) };
+      return { ok: true, json: async () => ({ ok: true, sheets: ["01従業員", "日報"] }) };
+    }
+  });
+  await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${app.address().port}/v1/sheets/list`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual((await response.json()).sheets, ["01従業員", "日報"]);
+    assert.equal(sent.url, sheetsUrl);
+    assert.equal(sent.body.action, "listSheets");
+    assert.equal(sent.body.token, "a".repeat(128));
+  } finally {
+    await new Promise(resolve => app.close(resolve));
+  }
+});
+
+test("Google Sheets routes reject invalid sheet names", async () => {
+  const app = createServer({ token, sheetsUrl: "https://script.google.com/macros/s/test-id/exec", sheetsToken: "b".repeat(128) });
+  await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${app.address().port}/v1/sheets/read?sheetName=missing`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    assert.equal(response.status, 400);
+  } finally {
+    await new Promise(resolve => app.close(resolve));
+  }
+});
