@@ -465,7 +465,7 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         const result=await jobStore.create({type:"department."+departmentId,payload,idempotencyKey:d.idempotencyKey||""});
         return json(res,result.created?201:200,{ok:true,created:result.created,departmentId,job:result.job});
       }
-      if (url.pathname==="/v1/approvals" || /^\\/v1\\/approvals\\/[0-9a-f-]{36}\\/decision$/.test(url.pathname)) {
+      if (url.pathname==="/v1/approvals" || new RegExp("^/v1/approvals/[0-9a-f-]{36}/decision$").test(url.pathname)) {
         if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         if (!approvalStore) return json(res,503,{ok:false,error:"Persistent approval storage is not configured"});
         if (req.method==="GET" && url.pathname==="/v1/approvals") {
