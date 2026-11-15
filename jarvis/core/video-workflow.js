@@ -6,11 +6,16 @@ const VIDEO_SERIES=Object.freeze({
   channelUrl:"https://www.youtube.com/@samurai-b6i",
   language:"ja",
   defaultFormat:"illustrated-history-voiceover",
-  defaultNarration:"Kenichi (Japanese male, calm)",
+  defaultNarration:"Hinata (Japanese male, calm; previously selected)",
   reviewLimit:2,
   publicationMode:"owner-publishes-after-approval",
   noPaidGenerationWithoutCurrentApproval:true
 });
+
+const EXISTING_PROJECTS=Object.freeze([
+ {id:"072f8671-af62-480c-8072-bb253faf58b7",title:"江戸大名、借金まみれの真実",compositionId:"cd7b6796-23cc-43a7-ae7c-c2e3cfb50d32",durationSeconds:74,media:{images:5,audio:"HeyGen音声_Kenichi_江戸大名借金.wav"},publishCount:0,verification:"Descript project inspected; existing audio voice label differs from selected Hinata preference; do not overwrite without review"},
+ {id:"5b28e058-e58b-41a7-9a26-0164aaea9ca6",title:"時をかける日本史｜江戸の大火",compositionId:"8a30994f-210a-4dd7-aa85-31904ea6368b",durationSeconds:24,media:{images:5,audio:"江戸の大火_ナレーション_Kenichi_読み修正版.wav"},publishCount:0,verification:"Separate Descript project; not the Edo-daimyo video"}
+]);
 
 const STAGES=Object.freeze([
  {id:"research",label:"企画・最新情報調査",owner:"content",mode:"autonomous"},
@@ -53,19 +58,24 @@ function createVideoPlan({id,title,topic,format=VIDEO_SERIES.defaultFormat,scrip
  if(typeof topic!=="string"||!topic.trim()||topic.length>500)throw new Error("Invalid video topic");
  if(typeof script!=="string"||script.length>12000)throw new Error("Invalid video script");
  if(!Array.isArray(sources)||sources.length>30||!sources.every(x=>typeof x==="string"&&x.length<=1000))throw new Error("Invalid source list");
- return {id,title:title.trim(),topic:topic.trim(),format,script,sources:[...sources],status:"planned",currentStage:"research",completedStages:[],qa:{checks:QA_CHECKS.map((label,index)=>({id:index,label,passed:false,notes:""}))},approval:{paidGeneration:false,publish:false},createdAt:null,updatedAt:null};
+ return {id,title:title.trim(),topic:topic.trim(),format,script,sources:[...sources],status:"planned",currentStage:"research",completedStages:[],qa:{checks:QA_CHECKS.map((label,index)=>({id:index,label,passed:false,notes:""}))},voiceGeneration:{mode:"existing_asset"},approval:{paidGeneration:false,publish:false},createdAt:null,updatedAt:null};
 }
 function markStageComplete(plan,stageId) {
  if(!plan||!STAGES.some(s=>s.id===stageId))throw new Error("Unknown video plan or stage");
  const index=STAGES.findIndex(s=>s.id===stageId);
  const currentIndex=STAGES.findIndex(s=>s.id===plan.currentStage);
  if(index!==currentIndex)throw new Error("Video stages must be completed in order");
- if(stageId==="voice"&&!plan.approval.paidGeneration)throw new Error("Owner approval required before paid voice/video generation");
+ if(stageId==="voice"&&plan.voiceGeneration?.mode==="paid_generation"&&!plan.approval.paidGeneration)throw new Error("Owner approval required before paid voice/video generation");
  if(stageId==="review"&&plan.qa.checks.some(x=>!x.passed))throw new Error("All quality checks must pass before owner review");
  if(stageId==="publish"&&!plan.approval.publish)throw new Error("Owner approval required before publication");
  const completedStages=[...new Set([...plan.completedStages,stageId])];
  const next=STAGES[index+1];
  return {...plan,completedStages,currentStage:next?next.id:"done",status:stageId==="review"?"awaiting-owner-review":stageId==="publish"?"published":next?"in-progress":"ready-for-owner-approval"};
+}
+function setVoiceGenerationMode(plan,mode) {
+ if(!plan||!["existing_asset","free_generation","paid_generation"].includes(mode))throw new Error("Invalid voice generation mode");
+ if(mode==="paid_generation"&&!plan.approval.paidGeneration) return {...plan,voiceGeneration:{mode},status:"awaiting-paid-generation-approval"};
+ return {...plan,voiceGeneration:{mode}};
 }
 function setOwnerApproval(plan,kind,approved) {
  if(!plan||!["paidGeneration","publish"].includes(kind)||typeof approved!=="boolean")throw new Error("Invalid approval");
@@ -77,6 +87,6 @@ function setQualityCheck(plan,checkId,passed,notes="") {
  return {...plan,qa:{checks}};
 }
 function getVideoWorkflow() {
- return {series:VIDEO_SERIES,stages:STAGES,qualityChecks:QA_CHECKS,approvalGates:APPROVAL_GATES,automationStatus:"workflow-defined-not-scheduled",publicationEnabled:false,paidGenerationEnabled:false,notes:["Existing production project is not automatically marked complete; inspect the real editor project and media before advancing stages.","Scheduled production requires a connected persistent worker and an approved budget."]};
+ return {series:VIDEO_SERIES,projects:EXISTING_PROJECTS,stages:STAGES,qualityChecks:QA_CHECKS,approvalGates:APPROVAL_GATES,automationStatus:"workflow-defined-not-scheduled",publicationEnabled:false,paidGenerationEnabled:false,notes:["Existing production project is not automatically marked complete; inspect the real editor project and media before advancing stages.","Scheduled production requires a connected persistent worker and an approved budget."]};
 }
-module.exports={VIDEO_SERIES,STAGES,QA_CHECKS,APPROVAL_GATES,createVideoPlan,markStageComplete,setOwnerApproval,setQualityCheck,getVideoWorkflow};
+module.exports={VIDEO_SERIES,EXISTING_PROJECTS,STAGES,QA_CHECKS,APPROVAL_GATES,createVideoPlan,markStageComplete,setVoiceGenerationMode,setOwnerApproval,setQualityCheck,getVideoWorkflow};
