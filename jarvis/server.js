@@ -591,7 +591,7 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         const result=await jobStore.create({type:"department.content",payload:{request,departmentId:"content",videoId:video.id,taskKind:"video-batch-plan"},idempotencyKey:"video-batch-plan-"+video.id});
         return json(res,result.created?201:200,{ok:true,created:result.created,videoId:video.id,job:result.job,workerEnabled:Boolean(worker),externalActionsEnabled:false});
       }
-      const scriptMetricsMatch=/^\\/v1\\/content\\/videos\\/(V[0-9]{2,8})\\/script-metrics$/.exec(url.pathname);
+      const scriptMetricsMatch=/^\/v1\/content\/videos\/(V[0-9]{2,8})\/script-metrics$/.exec(url.pathname);
       if(req.method==="GET"&&scriptMetricsMatch){
         if(!isAuthorized(req,token))return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         if(!videoBatchStore)return json(res,503,{ok:false,error:"Persistent video batch storage is not configured"});
