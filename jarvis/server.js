@@ -319,6 +319,9 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         if (req.method==="GET" && url.pathname==="/v1/jobs") {
           const status=url.searchParams.get("status")||undefined;
           const limit=Number(url.searchParams.get("limit")||50);
+          if ((status && !["queued","running","succeeded","failed","cancelled"].includes(status)) || !Number.isInteger(limit) || limit<1 || limit>200) {
+            return json(res,400,{ok:false,error:"Invalid job list parameters"});
+          }
           const jobs=await jobStore.list({status,limit});
           return json(res,200,{ok:true,jobs});
         }
