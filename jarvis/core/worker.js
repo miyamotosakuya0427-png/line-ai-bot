@@ -15,21 +15,27 @@ function createWorker({ store, handlers = {}, maxAttempts = 3 } = {}) {
   let active = Promise.resolve();
   let started = false;
   let poller = null;
+  let polling = false;
 
   async function recoverInterrupted() {
-    const interrupted = await store.list({ status: "running", limit: 200 });
-    for (const job of interrupted) {
-      await store.transition(job.id, "queued");
+    let recovered = 0;
+    while (true) {
+      const interrupted = await store.list({ status: "running", limit: 200 });
+      for (const job of interrupted) {
+        await store.transition(job.id, "queued");
+        recovered += 1;
+      }
+      if (interrupted.length < 200) break;
     }
-    return interrupted.length;
+    return recovered;
   }
 
   async function runNext() {
     if (!started) throw new Error("Worker has not been started");
     const operation = active.then(async () => {
-      const queued = await store.list({ status: "queued", limit: 1 });
+      const queued = await store.list({ status: "queued", limit: 200 });
       if (!queued.length) return { processed: false, job: null };
-      const candidate = queued[0];
+      const candidate = queued.sort((a,b) => a.createdAt.localeCompare(b.createdAt))[0];
       const handler = registry.get(candidate.type);
       const running = await store.transition(candidate.id, "running");
       if (!running) return { processed: false, job: null };
@@ -70,7 +76,7 @@ function createWorker({ store, handlers = {}, maxAttempts = 3 } = {}) {
       if (!started) throw new Error("Worker has not been started");
       if (!Number.isInteger(intervalMs) || intervalMs < 250 || intervalMs > 60000) throw new Error("Invalid polling interval");
       if (poller) return;
-      poller = setInterval(() => { runNext().catch(() => {}); }, intervalMs);
+      poller = setInterval(() => { if (polling) return; polling = true; runNext().catch(() => {}).finally(() => { polling = false; }); }, intervalMs);
       poller.unref?.();
     },
     stop() { if (poller) clearInterval(poller); poller = null; },
