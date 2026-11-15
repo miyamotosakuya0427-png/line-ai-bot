@@ -231,3 +231,23 @@ test("department task submission is authenticated, scoped and persisted to the d
   const invalid=await fetch(`http://127.0.0.1:${app.address().port}/v1/departments/unknown/tasks`,{method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},body:JSON.stringify({request:"bad"})});assert.equal(invalid.status,400);
  }finally{await new Promise(resolve=>app.close(resolve));}
 });
+
+
+test("tax agent receives validated financial aggregates without customer or payee identifiers",async()=>{
+ const salesHeaders=["売上ID","日付","現場ID","現場名","得意先","内容","税抜売上","消費税","税込売上","請求ID","備考","登録日時"];
+ const expenseHeaders=["経費ID","日付","現場ID","現場名","区分","項目","支払先","税抜金額","消費税","税込金額","支払方法","領収書URL","備考","登録日時"];
+ let queued;
+ const jobStore={create:async value=>{queued=value;return {created:true,job:{id:"22222222-2222-4222-8222-222222222222",status:"queued"}};}};
+ const app=createServer({token,jobStore,sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"s".repeat(128),fetchImpl:async(url,options)=>{
+  const body=JSON.parse(options.body);
+  if(body.action==="listSheets")return {ok:true,json:async()=>({ok:true,sheets:["売上","経費"]})};
+  if(body.action==="readRows"&&body.sheetName==="売上")return {ok:true,json:async()=>({ok:true,rows:[salesHeaders,["S1","2026/11/15","P1","岡山現場","顧客A","工事","100000","10000","110000","I1","",""]]})};
+  if(body.action==="readRows"&&body.sheetName==="経費")return {ok:true,json:async()=>({ok:true,rows:[expenseHeaders,["E1","2026/11/15","P1","岡山現場","材料費","砕石","仕入先A","30000","3000","33000","振込","","",""]]})};
+  throw new Error("Unexpected Sheets action");
+ }});
+ await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+ try{
+  const response=await fetch(\`http://127.0.0.1:\${app.address().port}/v1/departments/tax/tasks\`,{method:"POST",headers:{Authorization:\`Bearer \${token}\`,"Content-Type":"application/json"},body:JSON.stringify({request:"今月の売上と経費を整理して"})});
+  assert.equal(response.status,201);assert.equal(queued.type,"department.tax");assert.equal(queued.payload.companyContext.financials.revenueYen,100000);assert.equal(queued.payload.companyContext.financials.expenseYen,30000);assert.equal(JSON.stringify(queued.payload.companyContext).includes("顧客A"),false);assert.equal(JSON.stringify(queued.payload.companyContext).includes("仕入先A"),false);
+ }finally{await new Promise(resolve=>app.close(resolve));}
+});
