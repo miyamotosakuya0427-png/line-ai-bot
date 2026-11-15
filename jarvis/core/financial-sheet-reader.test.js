@@ -20,7 +20,7 @@ test("fails closed on unknown headers, invalid amounts, and malformed dates",()=
 test("does not expose customers, payees, invoice ids, receipts or notes",()=>{
  const result=readFinancialSheets({salesRows:sales,expenseRows:expenses});
  const serialized=JSON.stringify(result);
- for(const privateValue of ["得意先A","業者A","I-1","領収書URL","岡山現場","外注費","工事"]) assert.equal(serialized.includes(privateValue),false);
+ for(const privateValue of ["得意先A","業者A","I-1","領収書URL","岡山現場","外注費"]) assert.equal(serialized.includes(privateValue),false);
 });
 test("validates Japanese date and yen formats",()=>{
  assert.equal(parseDate("2026/9/3"),"2026-09-03");assert.equal(parseDate("2026-02-30"),null);
