@@ -17,6 +17,7 @@ const { startDailyContentPlanner } = require("./core/video-scheduler");
 const { startDailySubsidyMonitor } = require("./core/subsidy-scheduler");
 const { createVideoBatchStore } = require("./core/video-batch-store");
 const { createVideoBatchContentHandler } = require("./core/video-batch-runner");
+const { enqueueVideoBatchPlans } = require("./core/video-batch-queue");
 const { createScriptMetrics } = require("./core/script-metrics");
 const PORT = Number(process.env.PORT || 3000);
 const MAX_BODY_BYTES = 10 * 1024;
@@ -555,6 +556,14 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         const result=await videoBatchStore.saveDraft(videoDraftMatch[1],{script:job.result.answer,jobId:job.id});
         if(!result)return json(res,404,{ok:false,error:"Video not found"});
         return json(res,result.created?201:200,{ok:true,created:result.created,video:result.video,sourceVerificationStatus:"needs_source_review",externalActionsEnabled:false});
+      }
+      if (url.pathname==="/v1/content/batches/plan" && req.method==="POST") {
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        if (!videoBatchStore || !jobStore) return json(res,503,{ok:false,error:"Persistent video and job storage are required"});
+        if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+        const d=await readJson(req);
+        const result=await enqueueVideoBatchPlans({videoBatchStore,jobStore,batchId:d.batchId||null});
+        return json(res,result.queued.length?202:200,{ok:true,...result,workerEnabled:Boolean(worker)});
       }
       const videoPlanMatch=/^\/v1\/content\/videos\/(V[0-9]{2,8})\/plan$/.exec(url.pathname);
       if (videoPlanMatch && req.method==="GET") {
