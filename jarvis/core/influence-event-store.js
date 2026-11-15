@@ -11,7 +11,7 @@ const VERIFICATION=new Set(["official_api","official_web","licensed_feed","unver
 
 function clone(value){return JSON.parse(JSON.stringify(value));}
 function validTimestamp(value){
-  return typeof value==="string" && /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(value) && Number.isFinite(Date.parse(value));
+  return typeof value==="string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value));
 }
 function normalizeInfluenceEvent(input, observedAt=new Date().toISOString()){
   if(!input||typeof input!=="object"||Array.isArray(input))throw new Error("Invalid influence event");
@@ -22,20 +22,23 @@ function normalizeInfluenceEvent(input, observedAt=new Date().toISOString()){
   if(!actor||actor.length>120||!handle||handle.length>120)throw new Error("Actor and handle are required");
   if(!text.trim()||text.length>12000)throw new Error("Post text must be 1-12000 characters");
   const postedAt=String(input.postedAt||"");
-  if(!validTimestamp(postedAt))throw new Error("Invalid post timestamp");\n  if(!validTimestamp(observedAt))throw new Error("Invalid observation timestamp");
+  if(!validTimestamp(postedAt))throw new Error("Invalid post timestamp");
+  if(!validTimestamp(observedAt))throw new Error("Invalid observation timestamp");
   const sourceUrl=String(input.sourceUrl||"");
   if(sourceUrl.length>2048)throw new Error("Source URL is too long");
   let url;try{url=new URL(sourceUrl);}catch{throw new Error("A source URL is required");}
   if(url.protocol!=="https:"||url.username||url.password||url.port)throw new Error("Source URL must be a credential-free HTTPS URL on the default port");
   const verification=String(input.verification||"unverified");
   if(!VERIFICATION.has(verification))throw new Error("Invalid source verification");
-  const sourceId=String(input.sourceId||"");\n  if(sourceId.length>200)throw new Error("Source ID is too long");
+  const sourceId=String(input.sourceId||"");
+  if(sourceId.length>200)throw new Error("Source ID is too long");
   const hash=crypto.createHash("sha256").update([platform,handle,sourceId||postedAt,text].join("\n")).digest("hex");
   return {id:hash,platform,actor,handle,sourceId,postedAt,observedAt,sourceUrl:url.toString(),verification,text,language:String(input.language||"und").slice(0,16)};
 }
 
 function createInfluenceEventStore({filePath,clock=()=>new Date().toISOString(),maxJournalBytes=MAX_JOURNAL_BYTES,maxEvents=MAX_EVENTS}={}){
-  if(typeof filePath!=="string"||!path.isAbsolute(filePath))throw new Error("Influence event store requires an absolute persistent file path");\n  if(!Number.isInteger(maxJournalBytes)||maxJournalBytes<1024||maxJournalBytes>MAX_JOURNAL_BYTES||!Number.isInteger(maxEvents)||maxEvents<1||maxEvents>MAX_EVENTS)throw new Error("Invalid influence journal limits");
+  if(typeof filePath!=="string"||!path.isAbsolute(filePath))throw new Error("Influence event store requires an absolute persistent file path");
+  if(!Number.isInteger(maxJournalBytes)||maxJournalBytes<1024||maxJournalBytes>MAX_JOURNAL_BYTES||!Number.isInteger(maxEvents)||maxEvents<1||maxEvents>MAX_EVENTS)throw new Error("Invalid influence journal limits");
   let events=[],ids=new Set(),initialized=false,poisoned=false,queue=Promise.resolve();
   function serialize(fn){const p=queue.then(fn);queue=p.catch(()=>{});return p;}
   async function init(){return serialize(async()=>{
