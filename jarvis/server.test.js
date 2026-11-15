@@ -123,14 +123,17 @@ test("Google Sheets routes reject invalid sheet names", async () => {
 
 
 test("public Sheets health check verifies Apps Script without exposing secrets", async () => {
-  let sent;
+  const sent = [];
   const app = createServer({
     token,
     sheetsUrl: "https://script.google.com/macros/s/test-id/exec",
     sheetsToken: "c".repeat(128),
     fetchImpl: async (url, options) => {
-      sent = { url, body: JSON.parse(options.body) };
-      return { ok: true, json: async () => ({ ok: true, title: "株式会社One" }) };
+      const body = JSON.parse(options.body);
+      sent.push(body);
+      return { ok: true, json: async () => body.action === "listSheets"
+        ? ({ ok: true, sheets: ["01従業員", "15設定"] })
+        : ({ ok: true, rows: [["設定項目"]] }) };
     }
   });
   await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
@@ -138,9 +141,10 @@ test("public Sheets health check verifies Apps Script without exposing secrets",
     const response = await fetch(`http://127.0.0.1:${app.address().port}/health/sheets`);
     const result = await response.json();
     assert.equal(response.status, 200);
-    assert.deepEqual(result, { ok: true, googleSheets: "connected" });
-    assert.equal(sent.body.action, "ping");
-    assert.equal(sent.body.token, "c".repeat(128));
+    assert.deepEqual(result, { ok: true, googleSheets: "connected", sheetCount: 2, readTest: "success", rowsRead: 1, columnsRead: 1 });
+    assert.deepEqual(sent.map(x => x.action), ["listSheets", "readRows"]);
+    assert.equal(sent[1].sheetName, "15設定");
+    assert.equal(sent[0].token, "c".repeat(128));
     assert.equal(JSON.stringify(result).includes("cccc"), false);
   } finally {
     await new Promise(resolve => app.close(resolve));
