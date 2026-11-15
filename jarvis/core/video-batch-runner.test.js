@@ -1,7 +1,7 @@
 "use strict";
 const test=require("node:test");
 const assert=require("node:assert/strict");
-const {createVideoBatchContentHandler}=require("./video-batch-runner");
+const {createVideoBatchContentHandler,extractPronunciationCandidates,buildPronunciationReviewRequest}=require("./video-batch-runner");
 test("automatically persists ONE CONTENT script drafts and reuses them after worker recovery",async()=>{
  let calls=0;let video={id:"V01",stage:"research",status:"planned"};
  const store={get:async()=>video,saveDraft:async(id,{script,jobId})=>{video={...video,stage:"script",status:"in_progress",draftStatus:"needs_source_review",script,draftJobId:jobId};return{created:true,video};},saveSourceReview:async(id,{answer,jobId})=>{video={...video,sourceReview:{answer,jobId,verified:false}};return{created:true,video};}};
@@ -51,4 +51,28 @@ test("automatically queues source review after a script draft and reuses the sam
  assert.equal(retry.reused,true);
  assert.equal(created.length,2);
  assert.equal(created[1].idempotencyKey,created[0].idempotencyKey);
+});
+
+test("extracts Japanese kanji and numeric reading candidates without claiming correct readings",()=>{
+ const terms=extractPronunciationCandidates("江戸の町で明暦三年に火消したちが活動し、人口は100万人だった。");
+ assert.ok(terms.some(t=>t.term==="江戸"&&t.kind==="kanji_candidate"));
+ assert.ok(terms.some(t=>t.term==="明暦三年"));
+ assert.ok(terms.some(t=>t.term==="100万人"));
+ assert.ok(terms.every(t=>t.proposedReading===""));
+ assert.match(buildPronunciationReviewRequest({script:"江戸の町"}),/音声ファイルを実際に再生・聴取していない/);
+});
+test("automatically queues a pronunciation checklist after source review and persists it as unverified",async()=>{
+ let video={id:"V04",title:"江戸の火災",topic:"歴史",script:"江戸の町で明暦三年に火消したちが活動した。",stage:"script",sources:["https://www.bousai.go.jp/report"]},jobs=[],saved=null,requests=[];
+ const store={get:async()=>video,saveDraft:async()=>null,saveSourceReview:async(id,v)=>{video={...video,sourceReview:{...v}};return{created:true,video};},savePronunciationChecklist:async(id,v)=>{saved=v;video={...video,pronunciationReview:{...v}};return{created:true,video};}};
+ const jobStore={create:async job=>{jobs.push(job);return{created:true,job:{id:"queued-"+jobs.length}};}};
+ const handler=createVideoBatchContentHandler({videoBatchStore:store,jobStore,sourceFetcher:async url=>({requestedUrl:url,finalUrl:url,fetchedAt:"2026-11-16T00:00:00.000Z",httpStatus:200,title:"資料",contentSha256:"b".repeat(64),text:"資料本文"}),contentHandler:async payload=>{requests.push(payload);return{answer:"読み候補を抽出。音声は未聴取。"};}});
+ const review=await handler({taskKind:"video-batch-source-review",videoId:"V04",request:"出典照合"},{jobId:"source-4"});
+ assert.equal(review.pronunciationReviewEnqueued,true);
+ assert.equal(jobs.length,1);
+ assert.equal(jobs[0].payload.taskKind,"video-batch-pronunciation-review");
+ const pronunciation=await handler(jobs[0].payload,{jobId:"pron-4"});
+ assert.equal(pronunciation.verified,false);
+ assert.ok(saved.terms.some(t=>t.term==="明暦三年"));
+ assert.ok(saved.terms.every(t=>t.status==="needs_human_reading_confirmation"));
+ assert.match(requests[1].request,/音声ファイルを実際に再生・聴取していない/);
 });
