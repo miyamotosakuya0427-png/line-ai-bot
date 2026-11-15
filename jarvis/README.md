@@ -5,6 +5,9 @@
 ## Current core
 
 - Bearer-token protected API
+- Independent department-agent registry (management, tax/accounting, office/subsidies, construction, HR, procurement, recycling, safety/compliance, content, affiliate, investment, trading)
+- Explicit owner-approval policy for submissions, payments, contracts, publishing, deletion, and permission changes
+- Official subsidy source registry for national, Okayama, Okayama City, Kurashiki, Tokushima, and Yoshinogawa programs
 - Persistent JSONL job journal with fsync
 - Idempotent job submission
 - Queue listing, detail, cancellation, and retry
@@ -53,6 +56,8 @@ All API endpoints except `GET /health` and the dashboard shell require `Authoriz
 - `GET /v1/company/analytics` (aggregate sample of up to 99 daily reports)
 - `GET /v1/company/financials` (read-only aggregate of up to 99 rows each from `売上` and `経費`; includes receivables when both invoice tabs exist)
 - `POST /v1/company/ask` with `{request}` (queues an AI question grounded in daily-report aggregates)
+- `GET /v1/departments` (authenticated department roles and approval policy)
+- `GET /v1/subsidy/sources` (authenticated official source catalog and One-specific priority topics)
 - `GET /v1/status`
 - `GET /v1/jobs`
 - `POST /v1/jobs`
@@ -64,7 +69,7 @@ See [core design and deployment](./core/README.md) and [deployment checklist](./
 
 ## Not yet complete
 
-This is a tested foundation, not a fully autonomous office system. Daily-report analytics and aggregate-grounded AI Q&A are limited to the first 99 daily-report rows returned by Apps Script; they are not complete historical financial or profitability reports. Full-history sales/expense/invoice ingestion, tax/accounting adjustments, cost allocation, payroll analytics, arbitrary office actions, Google Sheets writes from the AI worker, desktop control, video generation/publishing, and multiple worker instances are not implemented. Those integrations require separate allowlists, permissions, and end-to-end tests.
+This is a tested foundation, not a fully autonomous office system. Department roles and read-only official-source catalog are implemented, but independent model instances, scheduled live research, push notifications, persistent research history, and per-department task queues are not yet connected. Daily-report analytics and aggregate-grounded AI Q&A are limited to the first 99 daily-report rows returned by Apps Script; they are not complete historical financial or profitability reports. Full-history sales/expense/invoice ingestion, tax/accounting adjustments, cost allocation, payroll analytics, arbitrary office actions, Google Sheets writes from the AI worker, desktop control, video generation/publishing, and multiple worker instances are not implemented. Those integrations require separate allowlists, permissions, and end-to-end tests.
 
 Production deployment remains intentionally disabled until the paid persistent disk and service configuration are approved.
 
@@ -80,3 +85,12 @@ The optional invoice reader uses `09 請求` headers `請求ID`, `請求書番�
 
 
 - `09 請求` / `10 入金` are optional; when both are present with exact headers, JARVIS displays invoice balances, overdue totals, and the difference between payment records and the invoice sheet's recorded received amount. The difference is for reconciliation only and is never auto-corrected.
+
+
+## Department agents and approvals
+
+Each department has a separate role definition and task scope. Routine research, analysis, classification, internal task creation, and drafts may be prepared autonomously. External submissions, payments, tax filings, contracts, purchases, publishing, deletions, and permission changes require the owner's explicit approval. Department registry and policy are exposed via authenticated `GET /v1/departments`.
+
+## Subsidy / grant monitoring sources
+
+The source catalog prioritizes construction equipment and ICT, battery/solar/electrical work, energy efficiency and GX, recycling/resource circulation, hiring, qualifications and training, wage increases, workplace safety, succession, new business, and AI/DX. It tracks national sources and official Okayama Prefecture, Okayama City, Kurashiki City, Tokushima Prefecture, and Yoshinogawa City pages. Each opportunity should be reported with the official URL, issuer, geography, eligibility, eligible costs, subsidy rate, cap, opening/closing dates, required documents, contact, last verified timestamp, changes, and unresolved eligibility questions. Cached snippets alone are not evidence; verify current official pages and guidelines before presenting an opportunity as open. This repository currently exposes only the source catalog; scheduled research and notifications are not active yet.
