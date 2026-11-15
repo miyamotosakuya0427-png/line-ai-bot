@@ -17,6 +17,7 @@
 - Daily-report aggregation (site counts, worker-days, estimated person-hours, equipment counts)
 - Company-context AI Q&A job that sends aggregate data only, not employee personal data
 - Read-only financial sheet reader for the approved `売上` and `経費` tabs with exact header validation
+- Optional invoice / collection reader for `09 請求` and `10 入金`, including outstanding and overdue balances
 - Financial aggregates by project/month/category using tax-exclusive amounts, with revenue, expense, difference, and margin
 - Dashboard financial summary and AI company Q&A context (financial fields only; no customer, payee, receipt URL, invoice ID, or notes)
 - Schema validation and field filtering (employee pay, phone, and notes are excluded from the employee API)
@@ -50,7 +51,7 @@ All API endpoints except `GET /health` and the dashboard shell require `Authoriz
 - `GET /v1/company/employees` (approved non-sensitive employee fields)
 - `GET /v1/company/daily-reports?from=YYYY-MM-DD&to=YYYY-MM-DD&limit=20`
 - `GET /v1/company/analytics` (aggregate sample of up to 99 daily reports)
-- `GET /v1/company/financials` (read-only aggregate of up to 99 rows each from `売上` and `経費`)
+- `GET /v1/company/financials` (read-only aggregate of up to 99 rows each from `売上` and `経費`; includes receivables when both invoice tabs exist)
 - `POST /v1/company/ask` with `{request}` (queues an AI question grounded in daily-report aggregates)
 - `GET /v1/status`
 - `GET /v1/jobs`
@@ -63,7 +64,7 @@ See [core design and deployment](./core/README.md) and [deployment checklist](./
 
 ## Not yet complete
 
-This is a tested foundation, not a fully autonomous office system. Daily-report analytics and aggregate-grounded AI Q&A are limited to the first 99 daily-report rows returned by Apps Script; they are not complete historical financial or profitability reports. Full-history sales/expense ingestion, invoicing/receivables, tax/accounting adjustments, cost allocation, payroll analytics, arbitrary office actions, Google Sheets writes from the AI worker, desktop control, video generation/publishing, and multiple worker instances are not implemented. Those integrations require separate allowlists, permissions, and end-to-end tests.
+This is a tested foundation, not a fully autonomous office system. Daily-report analytics and aggregate-grounded AI Q&A are limited to the first 99 daily-report rows returned by Apps Script; they are not complete historical financial or profitability reports. Full-history sales/expense/invoice ingestion, tax/accounting adjustments, cost allocation, payroll analytics, arbitrary office actions, Google Sheets writes from the AI worker, desktop control, video generation/publishing, and multiple worker instances are not implemented. Those integrations require separate allowlists, permissions, and end-to-end tests.
 
 Production deployment remains intentionally disabled until the paid persistent disk and service configuration are approved.
 
@@ -75,4 +76,7 @@ The read-only financial reader requires the exact existing headers below and fai
 - `売上`: `売上ID`, `日付`, `現場ID`, `現場名`, `得意先`, `内容`, `税抜売上`, `消費税`, `税込売上`, `請求ID`, `備考`, `登録日時`
 - `経費`: `経費ID`, `日付`, `現場ID`, `現場名`, `区分`, `項目`, `支払先`, `税抜金額`, `消費税`, `税込金額`, `支払方法`, `領収書URL`, `備考`, `登録日時`
 
-The API does not return customer/payee names, invoice IDs, receipt URLs, or notes. The calculated difference is registered tax-exclusive sales minus registered tax-exclusive expenses, not statutory net income or cash profit. Invoice status, collections, receivables, unpaid expenses, separate cost tabs, and unregistered costs are not included.
+The optional invoice reader uses `09 請求` headers `請求ID`, `請求書番号`, `発行日`, `支払期限`, `現場ID`, `現場名`, `得意先`, `税抜金額`, `消費税`, `請求金額`, `入金済額`, `未入金額`, `状態`, `備考`; and `10 入金` headers `入金ID`, `入金日`, `請求ID`, `現場ID`, `現場名`, `得意先`, `入金額`, `入金方法`, `口座`, `備考`. It summarizes billed, received, outstanding, overdue, and reconciliation difference without returning customer names, invoice IDs, bank accounts, payment methods, or notes. The API does not return customer/payee names, invoice IDs, receipt URLs, bank accounts, or notes. The calculated difference is registered tax-exclusive sales minus registered tax-exclusive expenses, not statutory net income or cash profit. Invoice status, collections, receivables, unpaid expenses, separate cost tabs, and unregistered costs are not included.
+
+
+- `09 請求` / `10 入金` are optional; when both are present with exact headers, JARVIS displays invoice balances, overdue totals, and the difference between payment records and the invoice sheet's recorded received amount. The difference is for reconciliation only and is never auto-corrected.
