@@ -173,6 +173,71 @@ test("LINE employee list verifies ID token without the JARVIS bearer token", asy
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
 
+test("admin bootstrap and review routes pass only LINE-verified identities to Apps Script", async () => {
+  const sent=[];
+  const app=createServer({
+    token,
+    lineLoginChannelId:"1234567890",
+    sheetsUrl:"https://script.google.com/macros/s/test-id/exec",
+    sheetsToken:"z".repeat(128),
+    fetchImpl:async(url,options)=>{
+      if(url==="https://api.line.me/oauth2/v2.1/verify") {
+        const form=new URLSearchParams(options.body);
+        const isBootstrap=form.get("id_token")==="bootstrap-id-token";
+        return {ok:true,json:async()=>({
+          iss:"https://access.line.me",
+          aud:"1234567890",
+          sub:"U"+(isBootstrap?"c":"d").repeat(32),
+          exp:Math.floor(Date.now()/1000)+300
+        })};
+      }
+      const body=JSON.parse(options.body); sent.push(body);
+      if(body.action==="bootstrapAdmin") return {ok:true,json:async()=>({ok:true,status:"有効",role:"管理者"})};
+      if(body.action==="reviewLineLink") return {ok:true,json:async()=>({ok:true,linkId:"PENDING-test",status:"有効"})};
+      return {ok:false,json:async()=>({ok:false})};
+    }
+  });
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  try {
+    const bootstrap=await fetch(`http://127.0.0.1:${app.address().port}/v1/line/admin/bootstrap`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({idToken:"bootstrap-id-token"})
+    });
+    assert.equal(bootstrap.status,200);
+    assert.deepEqual(await bootstrap.json(),{ok:true,status:"有効",role:"管理者"});
+    assert.deepEqual(sent[0],{
+      token:"z".repeat(128),action:"bootstrapAdmin",
+      lineUserId:"U"+"c".repeat(32),employeeId:"EMP003"
+    });
+
+    const review=await fetch(`http://127.0.0.1:${app.address().port}/v1/line/admin/review`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({idToken:"review-id-token",linkId:"PENDING-test",decision:"approve",adminLineUserId:"U"+"f".repeat(32)})
+    });
+    assert.equal(review.status,200);
+    assert.deepEqual(await review.json(),{ok:true,linkId:"PENDING-test",status:"有効"});
+    assert.deepEqual(sent[1],{
+      token:"z".repeat(128),action:"reviewLineLink",
+      adminLineUserId:"U"+"d".repeat(32),linkId:"PENDING-test",decision:"approve"
+    });
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
+
+test("admin bootstrap rejects an unverified LINE identity", async () => {
+  const app=createServer({
+    token,lineLoginChannelId:"1234567890",
+    fetchImpl:async()=>({ok:false,json:async()=>({})})
+  });
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  try {
+    const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/line/admin/bootstrap`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({idToken:"unverified-token"})
+    });
+    assert.equal(response.status,401);
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
+
 test("Google Sheets list route forwards authenticated request to Apps Script", async () => {
   let sent;
   const sheetsUrl = "https://script.google.com/macros/s/test-id/exec";
