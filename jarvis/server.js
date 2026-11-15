@@ -4,6 +4,7 @@ const crypto = require("node:crypto");
 const { createJobStore } = require("./core/job-store");
 const { createWorker } = require("./core/worker");
 const { createOpenAIHandler } = require("./core/openai-handler");
+const { dashboardPage } = require("./dashboard");
 const PORT = Number(process.env.PORT || 3000);
 const MAX_BODY_BYTES = 10 * 1024;
 const TOKEN = process.env.JARVIS_API_TOKEN || "";
@@ -98,6 +99,10 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
   return http.createServer(async(req,res)=>{
     try {
       const url=new URL(req.url,"http://localhost");
+      if (req.method==="GET" && url.pathname==="/") {
+        res.writeHead(200,{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store","Content-Security-Policy":"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'","X-Frame-Options":"DENY"});
+        return res.end(dashboardPage());
+      }
       if (req.method==="GET" && url.pathname==="/health") return json(res,200,{ok:true,service:"ONE JARVIS",status:"running"});
       if (req.method==="GET" && url.pathname==="/health/sheets/metadata") {
         if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
