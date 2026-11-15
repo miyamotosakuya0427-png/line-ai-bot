@@ -73,7 +73,7 @@ function doPost(e) {
       const width = Math.max(...data.rows.map(row => row.length));
       const safeRows = data.rows.map(row =>
         row.concat(Array(width - row.length).fill("")).map(value =>
-          typeof value === "string" && /^\\s*=/.test(value) ? "'" + value : value
+          typeof value === "string" && /^\s*=/.test(value) ? "'" + value : value
         )
       );
       const lock = LockService.getScriptLock();
@@ -276,7 +276,7 @@ function appendDailyReport(ss, data) {
       report.siteName, report.workDetails, report.startTime, report.endTime,
       Number(report.breakMinutes), Number(report.workerCount), report.equipment || "",
       report.materials || "", report.notes || ""
-    ].map(value => typeof value === "string" && /^\\s*=/.test(value) ? "'" + value : value);
+    ].map(value => typeof value === "string" && /^\s*=/.test(value) ? "'" + value : value);
     sheet.getRange(sheet.getLastRow() + 1, 1, 1, values.length).setValues([values]);
     return output({ ok: true, saved: true });
   } finally {
