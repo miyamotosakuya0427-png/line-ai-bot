@@ -1,7 +1,7 @@
 # ONE CONTENT Episode 001 — 亀山藩、赤字3万両の真実
 
 - Channel: 時をかける日本史
-- Target runtime: 8–12 minutes (draft narration target: about 2,700–3,200 Japanese characters; verify actual read speed after recording)
+- Target runtime: 8–12 minutes (draft narration target: about 3,000–3,400 Japanese characters; verify actual read speed after recording)
 - Format: narrated historical explainer with archival-document and map visuals
 - Status: research-checked script draft; narration, edit, export, owner review, and publication are not complete
 - Historical focus: Kameyama Domain budget estimates for An'ei 5–6 (1776–1777)
