@@ -73,6 +73,6 @@ test("automatically queues a pronunciation checklist after source review and per
  const pronunciation=await handler(jobs[0].payload,{jobId:"pron-4"});
  assert.equal(pronunciation.verified,false);
  assert.ok(saved.terms.some(t=>t.term==="明暦三年"));
- assert.ok(saved.terms.every(t=>t.status==="needs_human_reading_confirmation"));
+ assert.ok(saved.terms.every(t=>t.proposedReading===""));assert.ok(saved.terms.every(t=>t.kind==="kanji_candidate"||t.kind==="number_or_unit_candidate"));
  assert.match(requests[1].request,/音声ファイルを実際に再生・聴取していない/);
 });
