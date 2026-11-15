@@ -66,7 +66,7 @@ button.addEventListener("click",async()=>{button.disabled=true;try{await api("/v
 </script></body></html>`;
 }
 
-function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,fetchImpl=fetch}={}) {
+function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch}={}) {
   async function callSheets(action, fields={}) {
     if (!sheetsUrl || !sheetsToken) { const e=new Error("Google Sheets integration is not configured"); e.statusCode=503; throw e; }
     const u=new URL(sheetsUrl);
@@ -185,13 +185,13 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         }
       }
       if (req.method==="GET" && url.pathname==="/line-link") {
-        return res.writeHead(200,{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store","Content-Security-Policy":"default-src 'self'; script-src 'self' https://static.line-scdn.net 'unsafe-inline'; connect-src 'self' https://api.line.me; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'self' https://liff.line.me"}).end(lineLinkPage(LIFF_ID));
+        return res.writeHead(200,{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store","Content-Security-Policy":"default-src 'self'; script-src 'self' https://static.line-scdn.net 'unsafe-inline'; connect-src 'self' https://api.line.me; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'self' https://liff.line.me"}).end(lineLinkPage(liffId));
       }
       if (req.method==="POST" && (url.pathname==="/v1/line/employees" || url.pathname==="/v1/line/link")) {
         if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
-        if (!LINE_LOGIN_CHANNEL_ID) return json(res,503,{ok:false,error:"LINE Login channel is not configured"});
+        if (!lineLoginChannelId) return json(res,503,{ok:false,error:"LINE Login channel is not configured"});
         const d=await readJson(req);
-        const identity=await verifyLineIdToken(d.idToken,LINE_LOGIN_CHANNEL_ID,fetchImpl);
+        const identity=await verifyLineIdToken(d.idToken,lineLoginChannelId,fetchImpl);
         if (url.pathname==="/v1/line/employees") {
           const listed=await callSheets("listSheets");
           if (!Array.isArray(listed.sheets)||!listed.sheets.includes("01 従業員")) return json(res,503,{ok:false,error:"Employee sheet is unavailable"});
