@@ -251,3 +251,13 @@ test("tax agent receives validated financial aggregates without customer or paye
   assert.equal(response.status,201);assert.equal(queued.type,"department.tax");assert.equal(queued.payload.companyContext.financials.revenueYen,100000);assert.equal(queued.payload.companyContext.financials.expenseYen,30000);assert.equal(JSON.stringify(queued.payload.companyContext).includes("顧客A"),false);assert.equal(JSON.stringify(queued.payload.companyContext).includes("仕入先A"),false);
  }finally{await new Promise(resolve=>app.close(resolve));}
 });
+
+test("construction agent receives aggregate daily-report analytics without employee identities",async()=>{
+ let queued;
+ const jobStore={create:async value=>{queued=value;return {created:true,job:{id:"33333333-3333-4333-8333-333333333333",status:"queued"}};}};
+ const {app}=fixture({jobStore});await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+ try{
+  const response=await fetch(\`http://127.0.0.1:\${app.address().port}/v1/departments/construction/tasks\`,{method:"POST",headers:{Authorization:\`Bearer \${token}\`,"Content-Type":"application/json"},body:JSON.stringify({request:"日報から現場別稼働と重機を分析して"})});
+  assert.equal(response.status,201);assert.equal(queued.type,"department.construction");assert.equal(queued.payload.companyContext.dailyReportAnalytics.reportCount,1);assert.equal(queued.payload.companyContext.dailyReportAnalytics.siteCount,1);assert.equal(JSON.stringify(queued.payload.companyContext).includes("宮本朔也"),false);assert.equal(JSON.stringify(queued.payload.companyContext).includes("非公開メモ"),false);
+ }finally{await new Promise(resolve=>app.close(resolve));}
+});
