@@ -152,6 +152,8 @@ Construction tasks about site activity or daily reports receive read-only aggreg
 - `GET /v1/content/batches` includes the same script metrics for dashboard display.
 - `POST /v1/content/videos/:id/stage`, `/review`, and `/action-approval` (ordered stage updates, review decisions, and scoped expiring action-approval records)
 
+Stage advancement is evidence-gated: source QA must record verified claims and primary sources; pronunciation review must record checked readings; narration must have a confirmed voice and measured 8–12 minute recording; assets must have rights clearance; editing must reference a real rendered project/composition; final QA must pass with zero open issues; analytics requires a YouTube URL and publication timestamp. Missing evidence blocks advancement. Evidence is a recorded assertion from the authenticated caller, not independent provider verification; do not enter it until the underlying work has actually been checked.
+
 ### Video batch queue
 
 Japanese narration timing is estimated using a configurable 350–420 spoken-character/minute range. This is a planning estimate only; the dashboard labels it as such and requires the actual recorded narration duration before the episode can be treated as finished. An English-oriented word counter is not used to determine Japanese runtime.
