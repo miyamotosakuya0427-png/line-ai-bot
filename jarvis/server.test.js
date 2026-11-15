@@ -185,3 +185,34 @@ test("public metadata check includes employee sheet headers without exposing row
     await new Promise(resolve => app.close(resolve));
   }
 });
+
+test("metadata check includes LINE link sheet headers only", async () => {
+  const sent = [];
+  const app = createServer({
+    token,
+    sheetsUrl: "https://script.google.com/macros/s/test-id/exec",
+    sheetsToken: "e".repeat(128),
+    fetchImpl: async (url, options) => {
+      const body = JSON.parse(options.body);
+      sent.push(body);
+      if (body.action === "listSheets") {
+        return { ok: true, json: async () => ({ ok: true, sheets: ["01 従業員", "日報", "03 日報", "13 LINE連携"] }) };
+      }
+      const headers = body.sheetName === "13 LINE連携"
+        ? ["LINE User ID", "従業員ID", "LINE表示名", "連携状態"]
+        : ["見出し"];
+      return { ok: true, json: async () => ({ ok: true, rows: [headers] }) };
+    }
+  });
+  await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${app.address().port}/health/sheets/metadata`);
+    const result = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(result.lineLinkSheetFound, true);
+    assert.deepEqual(result.lineLinkHeaders, ["LINE User ID", "従業員ID", "LINE表示名", "連携状態"]);
+    assert.deepEqual(sent.slice(1).map(x => x.sheetName), ["日報", "03 日報", "01 従業員", "13 LINE連携"]);
+  } finally {
+    await new Promise(resolve => app.close(resolve));
+  }
+});
