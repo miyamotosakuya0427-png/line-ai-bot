@@ -14,6 +14,8 @@
 - Mobile-friendly web dashboard at `/`
 - Optional read-only Google Sheets API routes already present in the service
 - Authenticated read-only company APIs for approved employee and daily-report sheets
+- Daily-report aggregation (site counts, worker-days, estimated person-hours, equipment counts)
+- Company-context AI Q&A job that sends aggregate data only, not employee personal data
 - Schema validation and field filtering (employee pay, phone, and notes are excluded from the employee API)
 
 ## Run locally
@@ -44,6 +46,8 @@ All API endpoints except `GET /health` and the dashboard shell require `Authoriz
 - `GET /v1/company/overview` (read-only counts and five recent reports)
 - `GET /v1/company/employees` (approved non-sensitive employee fields)
 - `GET /v1/company/daily-reports?from=YYYY-MM-DD&to=YYYY-MM-DD&limit=20`
+- `GET /v1/company/analytics` (aggregate sample of up to 99 daily reports)
+- `POST /v1/company/ask` with `{request}` (queues an AI question grounded in daily-report aggregates)
 - `GET /v1/status`
 - `GET /v1/jobs`
 - `POST /v1/jobs`
@@ -55,6 +59,6 @@ See [core design and deployment](./core/README.md) and [deployment checklist](./
 
 ## Not yet complete
 
-This is a tested foundation, not a fully autonomous office system. It currently generates text answers; it does not yet execute arbitrary office actions, write to Google Sheets from the AI worker, control a desktop, produce/publish videos, or run multiple worker instances. Those integrations require separate allowlists, permissions, and end-to-end tests.
+This is a tested foundation, not a fully autonomous office system. Daily-report analytics and aggregate-grounded AI Q&A are limited to the first 99 daily-report rows returned by Apps Script; they are not complete historical financial or profitability reports. Sales, expenses, cost, gross profit, payroll analytics, arbitrary office actions, Google Sheets writes from the AI worker, desktop control, video generation/publishing, and multiple worker instances are not implemented. Those integrations require separate allowlists, permissions, and end-to-end tests.
 
 Production deployment remains intentionally disabled until the paid persistent disk and service configuration are approved.
