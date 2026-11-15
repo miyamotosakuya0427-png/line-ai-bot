@@ -1,0 +1,12 @@
+{
+  "name": "one-jarvis",
+  "version": "1.0.0",
+  "description": "ONE JARVIS foundation",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
