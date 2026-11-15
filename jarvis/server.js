@@ -19,8 +19,9 @@ const { createVideoBatchStore } = require("./core/video-batch-store");
 const { createVideoBatchContentHandler } = require("./core/video-batch-runner");
 const { createScriptMetrics } = require("./core/script-metrics");
 const { createPaperTradingStore } = require("./core/paper-trading-store");
+const { createInfluenceEventStore } = require("./core/influence-event-store");
 const PORT = Number(process.env.PORT || 3000);
-const MAX_BODY_BYTES = 10 * 1024;
+const MAX_BODY_BYTES = 24 * 1024;
 const TOKEN = process.env.JARVIS_API_TOKEN || "";
 const SHEETS_URL = process.env.JARVIS_SHEETS_URL || "";
 const SHEETS_TOKEN = process.env.JARVIS_SHEETS_TOKEN || "";
@@ -96,7 +97,7 @@ dailyForm.addEventListener("submit",async(event)=>{event.preventDefault();if(!id
 </script></body></html>`;
 }
 
-function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,approvalStore=null,videoBatchStore=null,paperTradingStore=null,worker=null,now=()=>new Date()}={}) {
+function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,approvalStore=null,videoBatchStore=null,paperTradingStore=null,influenceEventStore=null,worker=null,now=()=>new Date()}={}) {
   async function callSheets(action, fields={}) {
     if (!sheetsUrl || !sheetsToken) { const e=new Error("Google Sheets integration is not configured"); e.statusCode=503; throw e; }
     const u=new URL(sheetsUrl);
@@ -543,6 +544,22 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         }
         return json(res,404,{ok:false,error:"Not Found"});
       }
+      if (url.pathname.startsWith("/v1/signals/influence")) {
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        if (!influenceEventStore) return json(res,503,{ok:false,error:"Persistent influence event storage is not configured"});
+        if (req.method==="GET" && url.pathname==="/v1/signals/influence/events") {
+          const limit=Number(url.searchParams.get("limit")||100),platform=url.searchParams.get("platform")||undefined,actor=url.searchParams.get("actor")||undefined,since=url.searchParams.get("since")||undefined;
+          if (!Number.isInteger(limit)||limit<1||limit>500) return json(res,400,{ok:false,error:"Invalid event limit"});
+          return json(res,200,{ok:true,mode:"archive-only",realMoneyTradingEnabled:false,events:await influenceEventStore.list({limit,platform,actor,since})});
+        }
+        if (req.method==="POST" && url.pathname==="/v1/signals/influence/events") {
+          if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+          const d=await readJson(req);
+          const result=await influenceEventStore.add(d);
+          return json(res,result.created?201:200,{ok:true,created:result.created,event:result.event,analysisQueued:false,realMoneyTradingEnabled:false});
+        }
+        return json(res,404,{ok:false,error:"Not Found"});
+      }
       if (url.pathname.startsWith("/v1/trading/")) {
         if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         if (!paperTradingStore) return json(res,503,{ok:false,error:"Persistent paper-trading storage is not configured"});
@@ -718,6 +735,8 @@ if (require.main===module) {
     const videoBatchStore=JOB_STORE_PATH?createVideoBatchStore({filePath:JOB_STORE_PATH+".video-batches.jsonl"}):null;
     const paperTradingStore=JOB_STORE_PATH?createPaperTradingStore({filePath:JOB_STORE_PATH+".paper-trading.jsonl"}):null;
     if(paperTradingStore)await paperTradingStore.init();
+    const influenceEventStore=JOB_STORE_PATH?createInfluenceEventStore({filePath:JOB_STORE_PATH+".influence-events.jsonl"}):null;
+    if(influenceEventStore)await influenceEventStore.init();
     if(videoBatchStore)await videoBatchStore.init();
     const approvalStore=APPROVAL_STORE_PATH?createApprovalStore({filePath:APPROVAL_STORE_PATH}):null;
     if(approvalStore)await approvalStore.init();
@@ -729,7 +748,7 @@ if (require.main===module) {
     if (worker) { await worker.start(); worker.startPolling({intervalMs:Number(process.env.JARVIS_WORKER_POLL_MS||1500)}); }
     const contentScheduler=worker&&process.env.JARVIS_CONTENT_AUTOPLAN_ENABLED==="true"?startDailyContentPlanner({store:jobStore}):null;
     const subsidyScheduler=worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"?startDailySubsidyMonitor({store:jobStore}):null;
-    const server=createServer({jobStore,approvalStore,videoBatchStore,paperTradingStore,worker}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
+    const server=createServer({jobStore,approvalStore,videoBatchStore,paperTradingStore,influenceEventStore,worker}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
     const shutdown=signal=>{ console.log(`Received ${signal}; shutting down.`); if(subsidyScheduler)subsidyScheduler.stop(); if(contentScheduler)contentScheduler.stop(); if(worker)worker.stop(); server.close(error=>{if(error){console.error("Graceful shutdown failed.");process.exit(1);}process.exit(0);}); setTimeout(()=>process.exit(1),10000).unref(); };
     process.on("SIGTERM",()=>shutdown("SIGTERM")); process.on("SIGINT",()=>shutdown("SIGINT"));
     server.listen(PORT,"0.0.0.0",()=>console.log(`ONE JARVIS running on port ${PORT}`));
