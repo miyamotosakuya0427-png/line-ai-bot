@@ -1,7 +1,7 @@
 "use strict";
 const test=require("node:test");
 const assert=require("node:assert/strict");
-const {createServer}=require("./server");
+const {createServer}=require("../server");
 const token="a".repeat(64);
 
 function store(){
