@@ -10,6 +10,9 @@ const PLATFORMS=new Set(["x","truth_social","official_web","sec","press_release"
 const VERIFICATION=new Set(["official_api","official_web","licensed_feed","unverified"]);
 
 function clone(value){return JSON.parse(JSON.stringify(value));}
+function validTimestamp(value){
+  return typeof value==="string" && /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?(?:Z|[+-]\\d{2}:\\d{2})$/.test(value) && Number.isFinite(Date.parse(value));
+}
 function normalizeInfluenceEvent(input, observedAt=new Date().toISOString()){
   if(!input||typeof input!=="object"||Array.isArray(input))throw new Error("Invalid influence event");
   const platform=String(input.platform||"");
@@ -19,33 +22,34 @@ function normalizeInfluenceEvent(input, observedAt=new Date().toISOString()){
   if(!actor||actor.length>120||!handle||handle.length>120)throw new Error("Actor and handle are required");
   if(!text.trim()||text.length>12000)throw new Error("Post text must be 1-12000 characters");
   const postedAt=String(input.postedAt||"");
-  if(!Number.isFinite(Date.parse(postedAt)))throw new Error("Invalid post timestamp");
+  if(!validTimestamp(postedAt))throw new Error("Invalid post timestamp");\n  if(!validTimestamp(observedAt))throw new Error("Invalid observation timestamp");
   const sourceUrl=String(input.sourceUrl||"");
+  if(sourceUrl.length>2048)throw new Error("Source URL is too long");
   let url;try{url=new URL(sourceUrl);}catch{throw new Error("A source URL is required");}
-  if(url.protocol!=="https:")throw new Error("Source URL must use HTTPS");
+  if(url.protocol!=="https:"||url.username||url.password||url.port)throw new Error("Source URL must be a credential-free HTTPS URL on the default port");
   const verification=String(input.verification||"unverified");
   if(!VERIFICATION.has(verification))throw new Error("Invalid source verification");
-  const sourceId=String(input.sourceId||"").slice(0,200);
+  const sourceId=String(input.sourceId||"");\n  if(sourceId.length>200)throw new Error("Source ID is too long");
   const hash=crypto.createHash("sha256").update([platform,handle,sourceId||postedAt,text].join("\n")).digest("hex");
   return {id:hash,platform,actor,handle,sourceId,postedAt,observedAt,sourceUrl:url.toString(),verification,text,language:String(input.language||"und").slice(0,16)};
 }
 
-function createInfluenceEventStore({filePath,clock=()=>new Date().toISOString()}={}){
-  if(typeof filePath!=="string"||!path.isAbsolute(filePath))throw new Error("Influence event store requires an absolute persistent file path");
+function createInfluenceEventStore({filePath,clock=()=>new Date().toISOString(),maxJournalBytes=MAX_JOURNAL_BYTES,maxEvents=MAX_EVENTS}={}){
+  if(typeof filePath!=="string"||!path.isAbsolute(filePath))throw new Error("Influence event store requires an absolute persistent file path");\n  if(!Number.isInteger(maxJournalBytes)||maxJournalBytes<1024||maxJournalBytes>MAX_JOURNAL_BYTES||!Number.isInteger(maxEvents)||maxEvents<1||maxEvents>MAX_EVENTS)throw new Error("Invalid influence journal limits");
   let events=[],ids=new Set(),initialized=false,poisoned=false,queue=Promise.resolve();
   function serialize(fn){const p=queue.then(fn);queue=p.catch(()=>{});return p;}
   async function init(){return serialize(async()=>{
     if(initialized)return {ok:true,eventCount:events.length};
     await fs.mkdir(path.dirname(filePath),{recursive:true,mode:0o700});
     let raw="";try{raw=await fs.readFile(filePath,"utf8");}catch(e){if(e.code!=="ENOENT")throw e;}
-    if(Buffer.byteLength(raw)>MAX_JOURNAL_BYTES)throw new Error("Influence journal exceeds size limit");
+    if(Buffer.byteLength(raw)>maxJournalBytes)throw new Error("Influence journal exceeds size limit");
     const recovered=[];
     for(const [i,line] of raw.split("\n").entries()){
       if(!line)continue;let event;try{event=JSON.parse(line);}catch{throw new Error("Influence journal is corrupt at line "+(i+1));}
       const normalized=normalizeInfluenceEvent(event, event.observedAt);
       if(normalized.id!==event.id||ids.has(event.id))throw new Error("Influence journal has invalid or duplicate event at line "+(i+1));
       ids.add(event.id);recovered.push(normalized);
-      if(recovered.length>MAX_EVENTS)throw new Error("Influence journal exceeds event limit");
+      if(recovered.length>maxEvents)throw new Error("Influence journal exceeds event limit");
     }
     events=recovered;initialized=true;return {ok:true,eventCount:events.length};
   });}
