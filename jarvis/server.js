@@ -160,44 +160,9 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         const r=await callSheets("readRows",{sheetName,startRow,numRows}); return json(res,200,{ok:true,rows:r.rows});
       }
       if (req.method==="POST" && url.pathname==="/v1/line/link") {
-        if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
-        const d=await readJson(req);
-        const lineUserId=typeof d.lineUserId==="string"?d.lineUserId.trim():"";
-        const displayName=typeof d.displayName==="string"?d.displayName.trim():"";
-        const employeeId=typeof d.employeeId==="string"?d.employeeId.trim():"";
-        if (!/^U[0-9a-f]{32}$/i.test(lineUserId) || !employeeId || employeeId.length>20 || (displayName && displayName.length>100)) {
-          return json(res,400,{ok:false,error:"Invalid LINE link fields"});
-        }
-        const listed=await callSheets("listSheets");
-        if (!Array.isArray(listed.sheets) || !listed.sheets.includes("01 従業員") || !listed.sheets.includes("13 LINE連携")) {
-          return json(res,503,{ok:false,error:"Required sheets are unavailable"});
-        }
-        const employees=await callSheets("readRows",{sheetName:"01 従業員",startRow:1,numRows:100});
-        const employeeRows=Array.isArray(employees.rows)?employees.rows:[];
-        const employee=employeeRows.slice(1).find(row=>Array.isArray(row)&&String(row[0]||"").trim()===employeeId);
-        if (!employee) return json(res,404,{ok:false,error:"Employee ID not found"});
-        const links=await callSheets("readRows",{sheetName:"13 LINE連携",startRow:1,numRows:100});
-        const linkRows=Array.isArray(links.rows)?links.rows:[];
-        const existing=linkRows.slice(1).find(row=>Array.isArray(row)&&String(row[1]||"").trim()===lineUserId);
-        if (existing) {
-          if (String(existing[3]||"").trim()===employeeId) return json(res,200,{ok:true,linked:true,alreadyLinked:true});
-          return json(res,409,{ok:false,error:"LINE account is already linked to another employee"});
-        }
-        const employeeName=String(employee[1]||"").trim();
-        const row=[
-          "LINK-"+crypto.randomUUID(),
-          lineUserId,
-          displayName,
-          employeeId,
-          employeeName,
-          "",
-          "一般",
-          "有効",
-          new Date().toISOString(),
-          new Date().toISOString()
-        ];
-        const appended=await callSheets("appendRows",{sheetName:"13 LINE連携",rows:[row]});
-        return json(res,201,{ok:true,linked:true,alreadyLinked:false,appended:appended.appended||1});
+        // Raw LINE user IDs are not proof of identity. Keep linking disabled until
+        // LIFF ID-token verification and pending admin approval are implemented.
+        return json(res,410,{ok:false,error:"LINE linking requires verified LIFF authentication"});
       }
       if (req.method==="POST" && url.pathname==="/v1/sheets/append") {
         if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
