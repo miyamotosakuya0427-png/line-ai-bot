@@ -237,6 +237,7 @@
 - This is a researched script draft, not a completed video.
 - Verify the spoken duration with the chosen narrator; expand or trim only after timing.
 - Reconcile voice identity: the existing Descript project contains a Kenichi-named audio file and transcript speaker label Hayama; the selected default preference is Hinata. Do not overwrite the existing audio without owner review.
+- The existing 74-second composition transcript contains a pause after 「亀山藩」 and doubled punctuation around the question. Treat it as a short draft read, not the final narration; re-record only after the full script is approved and the voice is confirmed.
 - Check every numeral against the Mie Prefecture source, especially the 30,300-ryo deficit, which includes miscellaneous payments.
 - Use licensed or original visual assets; do not assume an image is cleared for commercial use merely because it is online.
 - No paid generation, export, upload, scheduling, or publication is authorized by this draft.
