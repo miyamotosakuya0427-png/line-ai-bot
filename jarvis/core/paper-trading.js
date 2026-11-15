@@ -53,7 +53,7 @@ function createPaperTradingEngine({policy={}, clock=()=>new Date().toISOString()
   let dailyHaltedDay=null;
 
   function currentDay() { return clock().slice(0,10); }
-  function dayTrades(day=currentDay()) { return trades.filter(t=>t.closedAt.slice(0,10)===day); }
+  function dayTrades(day=currentDay()) { return trades.filter(t=>t.status==="closed"&&typeof t.closedAt==="string"&&t.closedAt.slice(0,10)===day); }
   function dailyPnl(day=currentDay()) { return dayTrades(day).reduce((sum,t)=>sum+t.netPnlYen,0); }
   function openTrades() { return trades.filter(t=>t.status==="open"); }
   function riskState() {
