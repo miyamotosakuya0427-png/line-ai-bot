@@ -1,7 +1,7 @@
 # ONE CONTENT Episode 002 — 江戸を焼いた明暦の大火
 
 - Channel: 時をかける日本史
-- Target runtime: 8–12 minutes; draft narration target about 3,360–4,200 spoken Japanese characters; estimate at 350–420 characters per minute and verify the recorded read
+- Target runtime: 8–12 minutes; draft narration target about 3,200–4,800 spoken Japanese characters; estimate at 330–400 characters per minute and verify the recorded read
 - Format: narrated history documentary with Edo map, fire-spread animation, archival illustrations, and urban-planning diagrams
 - Status: source-checked script draft; existing Descript project is a 24-second scene-material composition, not a finished episode
 - Related Descript projects are separate:
