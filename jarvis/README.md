@@ -162,3 +162,5 @@ The content agent and final QA checklist require each episode to contribute dist
 
 AI-assisted scripts, outlines, titles, thumbnails, and captions alone generally do not require an AI disclosure. Realistic AI-generated or materially altered depictions of real people, places, or events, and AI-generated music that is the main focus, require a disclosure review during upload. Reconstructed scenes must not be presented as actual archival footage. Official guidance: https://support.google.com/youtube/answer/14328491?hl=ja
 
+A separate 100-topic finance/economics idea backlog is stored at `jarvis/content/finance-100-ideas.md`. It is a research-first idea list only: the finance channel destination is not configured, the ideas are not inserted into the production queue, and no finance videos are generated or published.
+
