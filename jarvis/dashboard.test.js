@@ -10,6 +10,9 @@ test("dashboard approval controls render and embedded JavaScript parses",()=>{
  assert.match(html,/id="approval-form"/);
  assert.match(html,/外部処理は実行されません/);
  assert.match(html,/AIに企画・台本下書きを依頼/);
+ assert.match(html,/AI下書きタスク/);
+ assert.match(html,/v.planJob.result.answer/);
+ assert.match(html,/AIに企画・台本下書きを依頼/);
  assert.match(html,/\/v1\/content\/videos\//);
  const match=/<script>([\s\S]*?)<\/script>/.exec(html);
  assert.ok(match,"dashboard script must exist");
