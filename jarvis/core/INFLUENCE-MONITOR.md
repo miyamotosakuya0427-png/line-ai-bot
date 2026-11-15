@@ -8,10 +8,10 @@ This module is a provenance-first event intake and durable archive for market-re
 - `official_web`, `sec`, `press_release`: official web and disclosure sources
 - `other`: explicitly marked source requiring review
 
-Every record stores author, handle, platform, source ID, original timestamp, observed timestamp, HTTPS source URL, verification class, language, original text, and a stable SHA-256 deduplication key. Repeated delivery is idempotent. The JSONL journal is append-only, fsynced, bounded, and fails closed on corruption or write errors.
+Every record stores author, handle, platform, source ID, original timestamp, observed timestamp, HTTPS source URL, verification class, language, original text, and a stable SHA-256 deduplication key. Repeated delivery is idempotent. The JSONL journal is append-only, fsynced, bounded by both event count and bytes, validates timezone-qualified timestamps and credential-free HTTPS source URLs, and fails closed on corruption or write errors.
 
 ## API integration contract
-The authenticated JARVIS API will expose event intake and read-only event listing. Only the owner-authorized ingestion process should submit records. `verification` describes provenance, not truth or factual accuracy.
+The authenticated JARVIS API will expose event intake and read-only event listing. Only the owner-authorized ingestion process should submit records. The public authenticated API forcibly records submissions as `unverified`; callers cannot self-assert `official_api`, `official_web`, or `licensed_feed`. A separately authenticated provider adapter must be added before verified provenance can be assigned. `verification` describes provenance, not truth or factual accuracy.
 
 ## Analysis and trading policy
 - Do not interpret a post as a trade signal solely from sentiment.
