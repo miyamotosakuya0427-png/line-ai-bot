@@ -10,6 +10,9 @@ test("dashboard approval controls render and embedded JavaScript parses",()=>{
  assert.match(html,/id="approval-form"/);
  assert.match(html,/外部処理は実行されません/);
  assert.match(html,/AIに企画・台本下書きを依頼/);
+ assert.match(html,/未処理の動画をまとめてAIに依頼/);
+ assert.match(html,/\/v1\/content\/batches\/plan/);
+ assert.match(html,/AI API利用料が発生する場合があります/);
  assert.match(html,/標準は8〜12分の長尺動画です/);
  assert.match(html,/証跡が揃わない限り/);
  assert.match(html,/AI下書きタスク/);
