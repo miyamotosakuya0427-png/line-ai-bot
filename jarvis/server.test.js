@@ -361,7 +361,7 @@ test("public metadata check includes employee sheet headers without exposing row
   });
   await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
   try {
-    const response = await fetch(`http://127.0.0.1:${app.address().port}/health/sheets/metadata`);
+    const response = await fetch(`http://127.0.0.1:${app.address().port}/health/sheets/metadata`, { headers: { Authorization: `Bearer ${token}` } });
     const result = await response.json();
     assert.equal(response.status, 200);
     assert.deepEqual(result.employeeHeaders, ["従業員ID", "従業員名", "LINE User ID"]);
@@ -422,7 +422,7 @@ test("public LINE link status reports counts without exposing row values", async
   });
   await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
   try {
-    const response = await fetch(`http://127.0.0.1:${app.address().port}/health/sheets/link-status`);
+    const response = await fetch(`http://127.0.0.1:${app.address().port}/health/sheets/link-status`, { headers: { Authorization: `Bearer ${token}` } });
     const result = await response.json();
     assert.equal(response.status, 200);
     assert.deepEqual(result, { ok:true, sheetFound:true, sampleLimit:100, sampledRows:3, rowsWithLineUserId:2, rowsWithEmployeeId:2, linkedRows:1, missingEmployeeId:1, limitedToFirst100:true });
@@ -456,7 +456,7 @@ test("public record counts report employee and daily report totals without expos
   });
   await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
   try {
-    const response = await fetch(`http://127.0.0.1:${app.address().port}/health/sheets/record-counts`);
+    const response = await fetch(`http://127.0.0.1:${app.address().port}/health/sheets/record-counts`, { headers: { Authorization: `Bearer ${token}` } });
     const result = await response.json();
     assert.equal(response.status, 200);
     assert.deepEqual(result, {
