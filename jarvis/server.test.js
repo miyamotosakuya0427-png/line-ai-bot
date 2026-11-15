@@ -394,7 +394,7 @@ test("metadata check includes LINE link sheet headers only", async () => {
   });
   await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
   try {
-    const response = await fetch(`http://127.0.0.1:${app.address().port}/health/sheets/metadata`);
+    const response = await fetch(`http://127.0.0.1:${app.address().port}/health/sheets/metadata`, { headers: { Authorization: `Bearer ${token}` } });
     const result = await response.json();
     assert.equal(response.status, 200);
     assert.equal(result.lineLinkSheetFound, true);
