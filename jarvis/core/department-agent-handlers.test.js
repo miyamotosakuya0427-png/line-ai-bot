@@ -12,3 +12,5 @@ test("department handler passes its own role prompt to the model",async()=>{
  const result=await handlers["department.content"]({request:"次の動画の企画を作成"});
  assert.equal(result.answer,"確認結果");assert.match(body.instructions,/ONE CONTENT/);assert.match(body.instructions,/Hinata/);
 });
+
+test("content handler accepts a full-length script review request",async()=>{const handlers=createDepartmentHandlers({apiKey:"test-key",fetchImpl:async(url,options)=>({ok:true,json:async()=>({output_text:"確認項目"})})});const result=await handlers["department.content"]({request:"確認対象："+ "歴史台本".repeat(1800)});assert.equal(result.answer,"確認項目");});
