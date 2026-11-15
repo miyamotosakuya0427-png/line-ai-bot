@@ -57,3 +57,34 @@ test("batch queue rejects invalid batch IDs and ignores non-eligible stages", as
   assert.equal(result.selected, 0);
   assert.equal(result.queued.length, 0);
 });
+
+test("queue advances through backlogs larger than 100 without skipping later plans", async t => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "jarvis-video-batch-backlog-"));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const videoBatchStore = createVideoBatchStore({ filePath: path.join(dir, "videos.jsonl") });
+  const jobStore = createJobStore({ filePath: path.join(dir, "jobs.jsonl") });
+  await videoBatchStore.createBatch({
+    idempotencyKey: "backlog-first",
+    items: Array.from({ length: 100 }, (_, i) => ({
+      id: "V" + String(i + 1).padStart(3, "0"),
+      title: "歴史企画 " + (i + 1),
+      topic: "歴史テーマ " + (i + 1)
+    }))
+  });
+  await videoBatchStore.createBatch({
+    idempotencyKey: "backlog-second",
+    items: [{ id: "V101", title: "最後の企画", topic: "最後のテーマ" }]
+  });
+
+  const first = await enqueueVideoBatchPlans({ videoBatchStore, jobStore });
+  assert.equal(first.selected, 100);
+  assert.equal(first.queued.length, 100);
+  for (let i = 1; i <= 100; i++) {
+    const id = "V" + String(i).padStart(3, "0");
+    await videoBatchStore.saveDraft(id, { script: "下書き", jobId: "completed-" + id });
+  }
+  const second = await enqueueVideoBatchPlans({ videoBatchStore, jobStore });
+  assert.equal(second.selected, 1);
+  assert.equal(second.queued.length, 1);
+  assert.equal(second.queued[0].videoId, "V101");
+});
