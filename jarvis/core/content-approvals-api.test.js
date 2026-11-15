@@ -42,6 +42,6 @@ test("content approvals API authenticates requests and persists an exact-target 
   assert.equal(item.status,"decided");
   assert.equal(item.decision.approved,true);
   const second=await fetch(base+"/v1/content/approvals/"+request.id+"/decision",{method:"POST",headers:auth,body:JSON.stringify({approved:false})});
-  assert.equal(second.status,500);
+  assert.equal(second.status,409);
  }finally{await new Promise(resolve=>app.close(resolve));}
 });
