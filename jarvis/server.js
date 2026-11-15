@@ -540,7 +540,7 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         }
         return json(res,404,{ok:false,error:"Not Found"});
       }
-      const videoPlanMatch=/^\\/v1\\/content\\/videos\\/(V[0-9]{2,8})\\/plan$/.exec(url.pathname);
+      const videoPlanMatch=/^\/v1\/content\/videos\/(V[0-9]{2,8})\/plan$/.exec(url.pathname);
       if (req.method==="POST" && videoPlanMatch) {
         if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         if (!videoBatchStore || !jobStore) return json(res,503,{ok:false,error:"Persistent video and job storage are required"});
@@ -558,11 +558,11 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
           "テーマ："+video.topic,
           "形式："+video.format,
           "目標尺：日本史チャンネルは8〜12分。内容に応じて構成と想定文字数を示す。",
-          video.script?"既存台本案：\\n"+video.script:"既存台本はありません。構成とナレーション原稿の初稿を作成してください。",
+          video.script?"既存台本案：\n"+video.script:"既存台本はありません。構成とナレーション原稿の初稿を作成してください。",
           "必須成果物：企画意図・視聴者像・冒頭フック・章立て・ナレーション原稿・字幕用テキスト・難読漢字/固有名詞の読み一覧・出典候補一覧（実在を確認できるURLのみ）・映像素材案・編集指示・タイトル/説明文案・未解決事項。",
           "重要：この実行環境で一次資料の本文を実際に閲覧していない場合、史実・年号・人物・金額を『検証済み』と書かない。各主張に『要一次資料確認』を付け、出典URLを捏造しない。既知の出典候補と確認済み事実を明確に分ける。",
           "禁止：有料音声/動画生成、外部アップロード、予約投稿、YouTube公開、購入、契約。台本・企画の下書きだけを作成し、外部操作は行わない。"
-        ].join("\\n");
+        ].join("\n");
         const result=await jobStore.create({type:"department.content",payload:{request,departmentId:"content",videoId:video.id,taskKind:"video-batch-plan"},idempotencyKey:d.idempotencyKey||("video-batch-plan-"+video.id)});
         return json(res,result.created?201:200,{ok:true,created:result.created,videoId:video.id,job:result.job,workerEnabled:Boolean(worker),externalActionsEnabled:false});
       }
