@@ -120,3 +120,29 @@ test("Google Sheets routes reject invalid sheet names", async () => {
     await new Promise(resolve => app.close(resolve));
   }
 });
+
+
+test("public Sheets health check verifies Apps Script without exposing secrets", async () => {
+  let sent;
+  const app = createServer({
+    token,
+    sheetsUrl: "https://script.google.com/macros/s/test-id/exec",
+    sheetsToken: "c".repeat(128),
+    fetchImpl: async (url, options) => {
+      sent = { url, body: JSON.parse(options.body) };
+      return { ok: true, json: async () => ({ ok: true, title: "株式会社One" }) };
+    }
+  });
+  await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${app.address().port}/health/sheets`);
+    const result = await response.json();
+    assert.equal(response.status, 200);
+    assert.deepEqual(result, { ok: true, googleSheets: "connected" });
+    assert.equal(sent.body.action, "ping");
+    assert.equal(sent.body.token, "c".repeat(128));
+    assert.equal(JSON.stringify(result).includes("cccc"), false);
+  } finally {
+    await new Promise(resolve => app.close(resolve));
+  }
+});
