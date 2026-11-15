@@ -1,7 +1,7 @@
 # ONE CONTENT Episode 001 — 亀山藩、赤字3万両の真実
 
 - Channel: 時をかける日本史
-- Target runtime: 8–12 minutes (draft narration target: about 3,000–3,400 Japanese characters; verify actual read speed after recording)
+- Target runtime: 8–12 minutes (draft narration target: about 3,360–4,200 spoken Japanese characters; estimate at 350–420 characters per minute and verify the recorded read; verify actual read speed after recording)
 - Format: narrated historical explainer with archival-document and map visuals
 - Status: research-checked script draft; narration, edit, export, owner review, and publication are not complete
 - Historical focus: Kameyama Domain budget estimates for An'ei 5–6 (1776–1777)
@@ -56,6 +56,10 @@
 家臣に支給する給米など、およそ7,400石を差し引いた残りの米を売却し、備中からの収入も合わせると、現金換算の収入はおよそ1万6,900両になったとされています。
 
 一見すると、これだけの収入があれば、藩の運営は成り立ちそうです。
+
+ただし、ここで石と両を同じ単位のように扱ってはいけません。石は米の量を示し、両は貨幣の額を示します。米をどの時期に、どの条件で売却できたのかによって、実際に使える現金は変わります。帳面の数字を読むときは、収入の量と、支払いに使える現金を分けて考える必要があります。
+
+また、この帳面は予算書にあたるため、書かれた額がすべて最終的な実支出と一致したと断定はできません。ここで読み取れるのは、藩が当時どれほどの収入と支出を見込んでいたか、そして不足をどのように認識していたかです。
 
 しかし、帳面の支出を見ていくと、状況は一変します。
 
