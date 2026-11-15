@@ -182,7 +182,7 @@ test("financials API includes receivables, collections and overdue amounts when 
  }});
  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
  try{
-  const response=await fetch(\`http://127.0.0.1:\${app.address().port}/v1/company/financials\`,{headers:{Authorization:\`Bearer \${token}\`}});
+  const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/company/financials`,{headers:{Authorization:`Bearer ${token}`}});
   const result=await response.json();const rec=result.financials.receivables;
   assert.equal(response.status,200);assert.equal(rec.billedYen,550000);assert.equal(rec.receivedYen,200000);
   assert.equal(rec.outstandingYen,350000);assert.equal(rec.overdueInvoiceCount,1);assert.equal(rec.overdueYen,350000);
