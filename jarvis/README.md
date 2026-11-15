@@ -59,6 +59,7 @@ All API endpoints except `GET /health` and the dashboard shell require `Authoriz
 - `POST /v1/company/ask` with `{request}` (queues an AI question grounded in daily-report aggregates)
 - `GET /v1/departments` (authenticated department roles and approval policy)
 - `GET /v1/content/workflow` (authenticated video production stages, quality checklist, and approval gates)
+- `GET /v1/content/approvals`, `POST /v1/content/approvals`, and `POST /v1/content/approvals/:id/decision` (authenticated durable approval request/decision records; audit only, no external side effects)
 - `GET /v1/subsidy/sources` (authenticated official source catalog and One-specific priority topics)
 - `GET /v1/status`
 - `GET /v1/jobs`
@@ -128,3 +129,8 @@ The subsidy monitor also stores bounded SHA-256 fingerprints for successfully fe
 ### Department-specific company context
 
 Construction tasks about site activity or daily reports receive read-only aggregate analytics from `03 日報` (maximum 99 sampled rows): site counts, worker-days, estimated person-hours, equipment, and recent work dates. Employee names, IDs, phone numbers, pay, free-text notes, and row-level reports are not passed to the construction agent. Missing or invalid sheet data is reported as unavailable rather than estimated.
+
+
+### Durable content approval records
+
+Approval requests and decisions are appended to the existing fsync-backed job journal as `content.approval_request` and `content.approval_decision` records. Each request specifies an allowlisted action type, a bounded description, an exact target string, and its SHA-256 target fingerprint. A request can receive one immutable decision; a second decision returns a conflict. The dashboard lists pending/decided records and can record approve/reject decisions. These records do not execute paid generation, purchases, uploads, publishing, scheduling, contracts, external submissions, deletions, or permission changes. Authentication currently uses the shared JARVIS bearer token; it does not independently verify the human owner's identity. Do not treat a recorded approval as permission for an external action until a separate owner identity control and action-specific executor are implemented and verified.
