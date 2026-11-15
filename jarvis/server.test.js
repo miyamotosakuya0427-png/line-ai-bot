@@ -601,6 +601,8 @@ test("JARVIS dashboard is served with restrictive security headers and no server
 
 
 test("video batch plan endpoint queues an idempotent draft task for ONE CONTENT without external actions", async t => {
+  const {createJobStore}=require("./core/job-store");
+  const {createWorker}=require("./core/worker");
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-video-plan-e2e-"));
   t.after(()=>fs.rm(dir,{recursive:true,force:true}));
   const jobStore=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
