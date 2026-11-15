@@ -86,6 +86,33 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
           return json(res,503,{ok:false,error:"metadata check failed"});
         }
       }
+      if (req.method==="GET" && url.pathname==="/health/sheets/record-counts") {
+        const now=Date.now();
+        if (now-lastPublicSheetsCheck<30000) return json(res,429,{ok:false,error:"check rate limited"});
+        lastPublicSheetsCheck=now;
+        try {
+          const listed=await callSheets("listSheets");
+          const targets=[
+            {key:"employee",name:"01 従業員"},
+            {key:"dailyReport",name:"03 日報"}
+          ];
+          const counts={};
+          for (const target of targets) {
+            const sheetName=Array.isArray(listed.sheets)?listed.sheets.find(name=>name===target.name):null;
+            if (!sheetName) {
+              counts[target.key]={sheetFound:false};
+              continue;
+            }
+            const read=await callSheets("readRows",{sheetName,startRow:2,numRows:100});
+            const rows=Array.isArray(read.rows)?read.rows:[];
+            const populated=rows.filter(row=>Array.isArray(row)&&row.some(value=>value!==null&&value!==undefined&&String(value).trim()!==""));
+            counts[target.key]={sheetFound:true,sampledRows:rows.length,populatedRows:populated.length,sampleLimit:100,limitedToFirst100:true};
+          }
+          return json(res,200,{ok:true,...counts});
+        } catch {
+          return json(res,503,{ok:false,error:"record count check failed"});
+        }
+      }
       if (req.method==="GET" && url.pathname==="/health/sheets/link-status") {
         const now=Date.now();
         if (now-lastPublicSheetsCheck<30000) return json(res,429,{ok:false,error:"check rate limited"});
