@@ -41,6 +41,22 @@ These are conservative research defaults, not personalized financial advice or a
 
 Passing a backtest or paper phase does not guarantee future performance. A 20% daily return and 50% monthly return are exceptionally aggressive and are not safe assumptions for planning. A 20% stop-loss may allow substantial capital loss; the default paper policy uses much tighter risk limits for research comparison.
 
+## Authenticated paper-only API
+
+When JARVIS is configured with `JARVIS_JOB_STORE_PATH` on a persistent mounted disk, the server also initializes a separate append-only journal at `JARVIS_JOB_STORE_PATH.paper-trading.jsonl`. The journal uses fsync-backed append records, replay validation, serialized writes, a bounded event count and file size, and fail-closed recovery on corruption. A disk write error poisons the in-process store; restart and journal recovery are required before further writes.
+
+All endpoints below require the JARVIS bearer token:
+- `GET /v1/trading/status`
+- `GET /v1/trading/report`
+- `GET /v1/trading/trades?status=open&limit=100`
+- `POST /v1/trading/trades` — open simulated position only
+- `POST /v1/trading/trades/:id/close` — close simulated position only
+- `GET /v1/trading/snapshots?symbol=7203&limit=100`
+- `POST /v1/trading/snapshots`
+- `POST /v1/trading/lessons`
+
+There is intentionally no order-submission endpoint. The status response explicitly reports `mode=paper-only`, `realMoneyTradingEnabled=false`, and `brokerConnected=false`.
+
 ## Current boundaries
 
-This is an isolated in-memory simulation engine and unit-tested research foundation. It is not yet wired into the JARVIS HTTP API, persistent journal, live data providers, scheduled agent, dashboard, or any broker. No real order can be placed by this module.
+The simulation engine is now backed by a separate append-only persistent journal and authenticated paper-only HTTP APIs when the JARVIS persistent disk path is configured. It is not connected to live data providers, a scheduled data collector, the dashboard, or any broker. No real order can be placed by this module.
