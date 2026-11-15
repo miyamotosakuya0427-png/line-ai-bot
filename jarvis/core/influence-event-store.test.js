@@ -4,7 +4,7 @@ const assert=require("node:assert/strict");
 const fs=require("node:fs/promises");
 const os=require("node:os");
 const path=require("node:path");
-const {createInfluenceEventStore,normalizeInfluenceEvent}=require("./core/influence-event-store");
+const {createInfluenceEventStore,normalizeInfluenceEvent}=require("./influence-event-store");
 
 const event={platform:"x",actor:"Elon Musk",handle:"@elonmusk",sourceId:"post-1",postedAt:"2026-11-16T00:00:00.000Z",sourceUrl:"https://x.com/elonmusk/status/1",verification:"official_api",text:"Market relevant announcement."};
 test("normalizes provenance and stable id",()=>{const a=normalizeInfluenceEvent(event,"2026-11-16T00:01:00Z");const b=normalizeInfluenceEvent(event,"2026-11-16T00:02:00Z");assert.equal(a.id,b.id);assert.equal(a.verification,"official_api");assert.equal(a.observedAt,"2026-11-16T00:01:00Z");});
