@@ -17,7 +17,7 @@ test("estimates Japanese runtime from character pace and requires recorded timin
 test("flags short, long, and ambiguous narration instead of claiming a finished runtime",()=>{
  assert.equal(createScriptMetrics("あ".repeat(1000)).status,"too_short");
  assert.equal(createScriptMetrics("あ".repeat(6000)).status,"too_long");
- assert.equal(createScriptMetrics("あ".repeat(3300)).status,"timing_review_required");
+ assert.equal(createScriptMetrics("あ".repeat(3000)).status,"timing_review_required");
  assert.equal(createScriptMetrics("").status,"missing_script");
 });
 test("rejects invalid narration pace settings",()=>{
