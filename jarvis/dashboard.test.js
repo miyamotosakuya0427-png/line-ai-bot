@@ -12,6 +12,8 @@ test("dashboard approval controls render and embedded JavaScript parses",()=>{
  assert.match(html,/AIに企画・台本下書きを依頼/);
  assert.match(html,/AI下書きタスク/);
  assert.match(html,/v.planJob.result.answer/);
+ assert.match(html,/台本を保存して次工程へ/);
+ assert.match(html,/\/draft/);
  assert.match(html,/AIに企画・台本下書きを依頼/);
  assert.match(html,/\/v1\/content\/videos\//);
  const match=/<script>([\s\S]*?)<\/script>/.exec(html);
