@@ -452,7 +452,7 @@ test("LINE admin pending endpoint only exposes pending requests to an active ver
     fetchImpl:async(url,options)=>{
       if(url==="https://api.line.me/oauth2/v2.1/verify"){
         const form=new URLSearchParams(options.body);
-        const isAdmin=form.get("id_token")==="admin-id-token";
+        const isAdmin=form.get("id_token")==="admin-id-token-valid-length";
         return {ok:true,json:async()=>({iss:"https://access.line.me",aud:"1234567890",sub:isAdmin?adminId:pendingId,exp:Math.floor(Date.now()/1000)+300,name:"テスト"})};
       }
       const body=JSON.parse(options.body);
@@ -467,13 +467,13 @@ test("LINE admin pending endpoint only exposes pending requests to an active ver
   await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
   try {
     const url=`http://127.0.0.1:${app.address().port}/v1/line/admin/pending`;
-    const allowed=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({idToken:"admin-id-token"})});
+    const allowed=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({idToken:"admin-id-token-valid-length"})});
     assert.equal(allowed.status,200);
     const result=await allowed.json();
     assert.equal(result.requests.length,1);
     assert.deepEqual(result.requests[0],{linkId:"PENDING-1",displayName:"申請者LINE",employeeId:"EMP004",employeeName:"従業員A",createdAt:"2026-11-15"});
     assert.equal(JSON.stringify(result).includes(pendingId),false);
-    const denied=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({idToken:"not-admin-token"})});
+    const denied=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({idToken:"not-admin-token-valid-length"})});
     assert.equal(denied.status,403);
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
