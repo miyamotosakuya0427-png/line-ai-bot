@@ -41,6 +41,7 @@ function createVideoJob(input = {}) {
     topic: cleanText(input.topic, "topic", 300),
     title: cleanText(input.title, "title", 200),
     platform: "youtube",
+    narration: { ...DEFAULT_NARRATION },
     stage: "planned",
     stageLabel: STAGE_LABELS.planned,
     createdAt: now,
