@@ -16,6 +16,18 @@ function buildSourceReviewRequest(video){
  ].join("\n");
 }
 
+
+function extractPronunciationCandidates(script){
+ const text=String(script||"");
+ const kanji=[...new Set(text.match(/[一-龯々〆ヵヶ]{2,10}/g)||[])];
+ const numerals=[...new Set(text.match(/[0-9０-９一二三四五六七八九十百千万億兆]+(?:年|月|日|人|円|石|万石|丁目|番地|世紀|回|件|％|%)/g)||[])];
+ return [...kanji.map(term=>({term,proposedReading:"",kind:"kanji_candidate"})),...numerals.map(term=>({term,proposedReading:"",kind:"number_or_unit_candidate"}))].slice(0,100);
+}
+function buildPronunciationReviewRequest(video){
+ const terms=extractPronunciationCandidates(video.script);
+ return ["ONE CONTENT 読み・発音の事前確認タスクです。台本全文から漢字の音読み/訓読み、人名・地名・官職・制度名、数字・年号・単位、読みが複数ある語を洗い出してください。","台本：\\n"+video.script,"機械抽出候補：\\n"+terms.map(t=>t.term+" ["+t.kind+"]").join("\\n"),"各候補について、文脈上の読み候補と根拠・不確実性を示してください。根拠のない読みを断定せず、読みが確定できないものは要確認としてください。音声ファイルを実際に再生・聴取していないので、発音済み・音声確認済みとは表現禁止です。","出力は日本語の表形式で、表記／読み候補／音読み・訓読み等の区分／確認根拠／要確認事項を含めてください。これは読み候補チェックリストであり、人による確認が終わるまで未承認です。"].join("\\n\\n");
+}
+
 function createVideoBatchContentHandler({contentHandler,videoBatchStore,jobStore=null,sourceFetcher=fetchOfficialSource,allowedSourceHosts=[]}={}){
  if(typeof contentHandler!=="function"||!videoBatchStore||typeof videoBatchStore.get!=="function"||typeof videoBatchStore.saveDraft!=="function"||typeof videoBatchStore.saveSourceReview!=="function"||typeof sourceFetcher!=="function")throw new Error("A content handler, source fetcher, and video batch store are required");
  async function enqueueSourceReview(video){
