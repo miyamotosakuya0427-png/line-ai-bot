@@ -25,7 +25,7 @@ function createDepartmentHandlers(options={}) {
  for(const department of DEPARTMENTS) {
   const instructions=INSTRUCTIONS[department.id];
   if(!instructions) throw new Error("Missing department agent instructions: "+department.id);
-  handlers["department."+department.id]=createOpenAIHandler({...openAIOptions,instructions});
+  handlers["department."+department.id]=createOpenAIHandler({...openAIOptions,instructions,maxOutputTokens:department.id==="content"?7000:undefined,maxRequestChars:department.id==="content"?16000:undefined});
  }
  handlers["department.office"]=createSubsidyResearchHandler({...openAIOptions,researchFetchImpl,store});
  return handlers;
