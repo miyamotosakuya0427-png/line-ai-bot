@@ -6,6 +6,7 @@ const { createWorker } = require("./core/worker");
 const { createOpenAIHandler } = require("./core/openai-handler");
 const { dashboardPage } = require("./dashboard");
 const { EMPLOYEE_SHEET, DAILY_REPORT_SHEET, readEmployees, readDailyReports, buildCompanyOverview, filterDailyReports } = require("./core/company-reader");
+const { buildDailyReportAnalytics } = require("./core/company-analytics");
 const PORT = Number(process.env.PORT || 3000);
 const MAX_BODY_BYTES = 10 * 1024;
 const TOKEN = process.env.JARVIS_API_TOKEN || "";
@@ -322,7 +323,23 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         return json(res,200,{ok:true,linkId:result.linkId,status:result.status});
       }
       if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
-      if (url.pathname==="/v1/company/overview" || url.pathname==="/v1/company/daily-reports" || url.pathname==="/v1/company/employees") {
+      if (req.method==="POST" && url.pathname==="/v1/company/ask") {
+        if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+        if (!jobStore) return json(res,503,{ok:false,error:"Persistent job storage is not configured"});
+        const d=await readJson(req);
+        if (typeof d.request!=="string" || !d.request.trim() || d.request.length>4000 ||
+            (d.idempotencyKey!==undefined && (typeof d.idempotencyKey!=="string" || d.idempotencyKey.length>128))) {
+          return json(res,400,{ok:false,error:"Invalid company question"});
+        }
+        const listed=await callSheets("listSheets");
+        if (!Array.isArray(listed.sheets) || !listed.sheets.includes(DAILY_REPORT_SHEET)) return json(res,503,{ok:false,error:"Daily report sheet is not available"});
+        const daily=await callSheets("readRows",{sheetName:DAILY_REPORT_SHEET,startRow:1,numRows:100});
+        const reports=readDailyReports(daily.rows);
+        const companyContext={dailyReportAnalytics:buildDailyReportAnalytics(reports),source:"Google Sheets / 03 日報",sampleLimit:99};
+        const created=await jobStore.create({type:"assistant.company_question",payload:{request:d.request.trim(),companyContext},idempotencyKey:d.idempotencyKey||""});
+        return json(res,created.created?201:200,{ok:true,created:created.created,job:created.job});
+      }
+      if (url.pathname==="/v1/company/overview" || url.pathname==="/v1/company/daily-reports" || url.pathname==="/v1/company/employees" || url.pathname==="/v1/company/analytics") {
         if (req.method!=="GET") return json(res,405,{ok:false,error:"Method Not Allowed"},{Allow:"GET"});
         if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         try {
@@ -336,6 +353,7 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
           if (!listed.sheets.includes(DAILY_REPORT_SHEET)) return json(res,404,{ok:false,error:"Daily report sheet not found"});
           const daily=await callSheets("readRows",{sheetName:DAILY_REPORT_SHEET,startRow:1,numRows:100});
           const reports=readDailyReports(daily.rows);
+          if (url.pathname==="/v1/company/analytics") return json(res,200,{ok:true,analytics:buildDailyReportAnalytics(reports),sampleLimit:99});
           if (url.pathname==="/v1/company/daily-reports") {
             const rawLimit=url.searchParams.get("limit");
             const limit=rawLimit===null?20:Number(rawLimit);
@@ -432,7 +450,7 @@ if (require.main===module) {
     const jobStore=JOB_STORE_PATH?createJobStore({filePath:JOB_STORE_PATH}):null;
     const workerEnabled=process.env.JARVIS_WORKER_ENABLED==="true";
     if (workerEnabled && (!jobStore || !process.env.OPENAI_API_KEY)) throw new Error("Worker requires JARVIS_JOB_STORE_PATH and OPENAI_API_KEY.");
-    const worker=workerEnabled?createWorker({store:jobStore,handlers:{"assistant.request":createOpenAIHandler()}}):null;
+    const worker=workerEnabled?createWorker({store:jobStore,handlers:{"assistant.request":createOpenAIHandler(),"assistant.company_question":createOpenAIHandler()}}):null;
     if (worker) { await worker.start(); worker.startPolling({intervalMs:Number(process.env.JARVIS_WORKER_POLL_MS||1500)}); }
     const server=createServer({jobStore,worker}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
     const shutdown=signal=>{ console.log(`Received ${signal}; shutting down.`); if(worker)worker.stop(); server.close(error=>{if(error){console.error("Graceful shutdown failed.");process.exit(1);}process.exit(0);}); setTimeout(()=>process.exit(1),10000).unref(); };
