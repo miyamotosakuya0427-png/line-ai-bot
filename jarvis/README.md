@@ -61,6 +61,9 @@ All API endpoints except `GET /health` and the dashboard shell require `Authoriz
 - `GET /v1/content/workflow` (authenticated video production stages, quality checklist, and approval gates)
 - `GET /v1/subsidy/sources` (authenticated official source catalog and One-specific priority topics)
 - `GET /v1/status`
+- `GET /v1/approvals` (owner-authenticated approval journal)
+- `POST /v1/approvals` (record an owner approval request)
+- `POST /v1/approvals/:id/decision` (record approved/rejected decision; never executes external work)
 - `GET /v1/jobs`
 - `POST /v1/jobs`
 - `GET /v1/jobs/:id`
@@ -74,6 +77,8 @@ See [core design and deployment](./core/README.md) and [deployment checklist](./
 This is a tested foundation, not a fully autonomous office system. Department roles and read-only official-source catalog are implemented, but independent model instances, scheduled live research, push notifications, persistent research history, and per-department task queues are not yet connected. Daily-report analytics and aggregate-grounded AI Q&A are limited to the first 99 daily-report rows returned by Apps Script; they are not complete historical financial or profitability reports. Full-history sales/expense/invoice ingestion, tax/accounting adjustments, cost allocation, payroll analytics, arbitrary office actions, Google Sheets writes from the AI worker, desktop control, video generation/publishing, and multiple worker instances are not implemented. Those integrations require separate allowlists, permissions, and end-to-end tests.
 
 Production deployment remains intentionally disabled until the paid persistent disk and service configuration are approved.
+
+The approval journal uses `JARVIS_APPROVAL_STORE_PATH`; if omitted while `JARVIS_JOB_STORE_PATH` is configured, it defaults to `<JARVIS_JOB_STORE_PATH>.approvals` on the same persistent volume. The authenticated approval API and dashboard persist pending/approved/rejected decisions. Approval is a recorded authorization state only: this release does not execute YouTube publishing, external submissions, payments, purchases, deletion, or permission changes. Each external integration must separately verify the approval record and implement its own execution safeguards. The dashboard labels approved requests as not executed.
 
 
 ## Financial sheet schema
