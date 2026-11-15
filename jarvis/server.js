@@ -473,7 +473,9 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         if (!jobStore) return json(res,503,{ok:false,error:"Persistent approval storage is not configured"});
         if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
         const d=await readJson(req);
-        const result=await createApprovalRequest(jobStore,d);
+        let result;
+        try { result=await createApprovalRequest(jobStore,d); }
+        catch(error) { return json(res,400,{ok:false,error:error.message}); }
         return json(res,result.created?201:200,{ok:true,created:result.created,approval:result.job});
       }
       const approvalDecisionMatch=new RegExp("^/v1/content/approvals/([0-9a-f-]{36})/decision$","i").exec(url.pathname);
@@ -482,7 +484,12 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         if (!jobStore) return json(res,503,{ok:false,error:"Persistent approval storage is not configured"});
         if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
         const d=await readJson(req);
-        const result=await decideApproval(jobStore,approvalDecisionMatch[1],d);
+        let result;
+        try { result=await decideApproval(jobStore,approvalDecisionMatch[1],d); }
+        catch(error) {
+          const status=error.message.includes("not found")?404:error.message.includes("already been decided")?409:400;
+          return json(res,status,{ok:false,error:error.message});
+        }
         return json(res,result.created?201:200,{ok:true,created:result.created,decision:result.job,sideEffectsExecuted:false});
       }
       if (url.pathname.startsWith("/v1/jobs")) {
