@@ -35,8 +35,8 @@ function createVideoBatchContentHandler({contentHandler,videoBatchStore,jobStore
   const request=buildSourceReviewRequest(video);
   return jobStore.create({type:"department.content",payload:{request,departmentId:"content",videoId:video.id,taskKind:"video-batch-source-review"},idempotencyKey:"video-batch-source-review-"+video.id});
  }
- return async function enqueuePronunciationReview(video){if(!jobStore||typeof jobStore.create!=="function")return null;return jobStore.create({type:"department.content",payload:{request:buildPronunciationReviewRequest(video),departmentId:"content",videoId:video.id,taskKind:"video-batch-pronunciation-review"},idempotencyKey:"video-batch-pronunciation-review-"+video.id});}
- async function handleVideoBatchContent(payload,context={}){
+ async function enqueuePronunciationReview(video){if(!jobStore||typeof jobStore.create!=="function")return null;return jobStore.create({type:"department.content",payload:{request:buildPronunciationReviewRequest(video),departmentId:"content",videoId:video.id,taskKind:"video-batch-pronunciation-review"},idempotencyKey:"video-batch-pronunciation-review-"+video.id});}
+ return async function handleVideoBatchContent(payload,context={}){
   if(payload?.taskKind==="video-batch-pronunciation-review"){
    if(typeof payload.videoId!=="string"||!/^V[0-9]{2,8}$/.test(payload.videoId)||typeof context.jobId!=="string"||!context.jobId)throw new Error("Invalid pronunciation-review task");
    const video=await videoBatchStore.get(payload.videoId);if(!video||!video.script||!video.sourceReview)throw new Error("A saved script and source review are required");
