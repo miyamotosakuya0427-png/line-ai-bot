@@ -15,7 +15,6 @@ function startDailyContentPlanner({store,now=()=>new Date(),intervalMs=60000,hou
   try {
    const clock=tokyoClock(now()),date=clock.year+"-"+clock.month+"-"+clock.day;
    if(Number(clock.hour)<hour||(Number(clock.hour)===hour&&Number(clock.minute)<minute)||lastAttemptedDate===date)return {queued:false,reason:"not-due"};
-   lastAttemptedDate=date;
    const request=[
     "ONE CONTENTの毎日動画企画タスクです。",
     "チャンネル：時をかける日本史（https://www.youtube.com/@samurai-b6i）。日本語8〜12分の歴史解説動画を1本分企画してください。",
@@ -24,6 +23,7 @@ function startDailyContentPlanner({store,now=()=>new Date(),intervalMs=60000,hou
     "このタスクは企画・下書きだけです。音声/動画の有料生成、購入、外部アップロード、YouTube公開、予約投稿は実行しないでください。代表者の承認待ちとして止めてください。"
    ].join("\n");
    const result=await store.create({type:"department.content",payload:{request,departmentId:"content",scheduledDate:date},idempotencyKey:"content-daily-plan-"+date});
+   lastAttemptedDate=date;
    return {queued:Boolean(result.created),date,job:result.job||null,duplicate:!result.created};
   } finally {running=false;}
  }
