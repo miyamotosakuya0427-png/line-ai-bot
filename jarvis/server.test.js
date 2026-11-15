@@ -726,3 +726,40 @@ test("video batch APIs require auth, persist 100-item queues, and expose owner r
     assert.equal(approved.status,201);
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
+
+
+test("authenticated batch planning endpoint enqueues a complete batch idempotently", async t => {
+  const {createJobStore}=require("./core/job-store");
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-video-batch-enqueue-api-"));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const jobStore=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
+  const videoBatchStore=createVideoBatchStore({filePath:path.join(dir,"videos.jsonl")});
+  const batch=await videoBatchStore.createBatch({items:[
+    {id:"V81",title:"江戸の火災",topic:"江戸時代の火災対策"},
+    {id:"V82",title:"城下町の形成",topic:"城下町の都市構造"}
+  ]});
+  const app=createServer({token,jobStore,videoBatchStore});
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  const root="http://127.0.0.1:"+app.address().port;
+  const headers={Authorization:"Bearer "+token,"Content-Type":"application/json"};
+  try {
+    const denied=await fetch(root+"/v1/content/batches/plan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({batchId:batch.batchId})});
+    assert.equal(denied.status,401);
+    const first=await fetch(root+"/v1/content/batches/plan",{method:"POST",headers,body:JSON.stringify({batchId:batch.batchId})});
+    assert.equal(first.status,202);
+    const data=await first.json();
+    assert.equal(data.selected,2);
+    assert.equal(data.queued.length,2);
+    assert.equal(data.existing.length,0);
+    assert.equal(data.externalActionsEnabled,false);
+    assert.equal(data.workerEnabled,false);
+    const second=await fetch(root+"/v1/content/batches/plan",{method:"POST",headers,body:JSON.stringify({batchId:batch.batchId})});
+    assert.equal(second.status,200);
+    const repeated=await second.json();
+    assert.equal(repeated.queued.length,0);
+    assert.equal(repeated.existing.length,2);
+    assert.equal((await jobStore.list({status:"queued",limit:20})).length,2);
+  } finally {
+    await new Promise(resolve=>app.close(resolve));
+  }
+});
