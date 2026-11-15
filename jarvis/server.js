@@ -7,7 +7,7 @@ const { createOpenAIHandler } = require("./core/openai-handler");
 const { dashboardPage } = require("./dashboard");
 const { EMPLOYEE_SHEET, DAILY_REPORT_SHEET, readEmployees, readDailyReports, buildCompanyOverview, filterDailyReports } = require("./core/company-reader");
 const { buildDailyReportAnalytics } = require("./core/company-analytics");
-const { SALES_SHEET, EXPENSE_SHEET, readFinancialSheets } = require("./core/financial-sheet-reader");
+const { SALES_SHEET, EXPENSE_SHEET, INVOICE_SHEET, PAYMENT_SHEET, readFinancialSheets, readReceivablesSheets } = require("./core/financial-sheet-reader");
 const PORT = Number(process.env.PORT || 3000);
 const MAX_BODY_BYTES = 10 * 1024;
 const TOKEN = process.env.JARVIS_API_TOKEN || "";
@@ -84,7 +84,7 @@ dailyForm.addEventListener("submit",async(event)=>{event.preventDefault();if(!id
 </script></body></html>`;
 }
 
-function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,worker=null}={}) {
+function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,worker=null,now=()=>new Date()}={}) {
   async function callSheets(action, fields={}) {
     if (!sheetsUrl || !sheetsToken) { const e=new Error("Google Sheets integration is not configured"); e.statusCode=503; throw e; }
     const u=new URL(sheetsUrl);
@@ -343,6 +343,13 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
             callSheets("readRows",{sheetName:EXPENSE_SHEET,startRow:1,numRows:100})
           ]);
           companyContext.financialSummary=readFinancialSheets({salesRows:sales.rows,expenseRows:expenses.rows});
+          if (listed.sheets.includes(INVOICE_SHEET) && listed.sheets.includes(PAYMENT_SHEET)) {
+            const [invoices,payments]=await Promise.all([
+              callSheets("readRows",{sheetName:INVOICE_SHEET,startRow:1,numRows:100}),
+              callSheets("readRows",{sheetName:PAYMENT_SHEET,startRow:1,numRows:100})
+            ]);
+            companyContext.receivablesSummary=readReceivablesSheets({invoiceRows:invoices.rows,paymentRows:payments.rows,asOfDate:now().toLocaleDateString("sv-SE",{timeZone:"Asia/Tokyo"})});
+          }
         } else {
           companyContext.financialDataStatus="売上・経費シートが見つからないため、財務数値は回答対象外です。";
         }
@@ -366,7 +373,17 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
               callSheets("readRows",{sheetName:SALES_SHEET,startRow:1,numRows:100}),
               callSheets("readRows",{sheetName:EXPENSE_SHEET,startRow:1,numRows:100})
             ]);
-            return json(res,200,{ok:true,financials:readFinancialSheets({salesRows:sales.rows,expenseRows:expenses.rows})});
+            const financials=readFinancialSheets({salesRows:sales.rows,expenseRows:expenses.rows});
+            if (listed.sheets.includes(INVOICE_SHEET) && listed.sheets.includes(PAYMENT_SHEET)) {
+              const [invoices,payments]=await Promise.all([
+                callSheets("readRows",{sheetName:INVOICE_SHEET,startRow:1,numRows:100}),
+                callSheets("readRows",{sheetName:PAYMENT_SHEET,startRow:1,numRows:100})
+              ]);
+              financials.receivables=readReceivablesSheets({invoiceRows:invoices.rows,paymentRows:payments.rows,asOfDate:now().toLocaleDateString("sv-SE",{timeZone:"Asia/Tokyo"})});
+            } else {
+              financials.receivablesStatus="請求・入金シートが見つからないため、未収金集計は未接続です。";
+            }
+            return json(res,200,{ok:true,financials});
           }
           if (!listed.sheets.includes(DAILY_REPORT_SHEET)) return json(res,404,{ok:false,error:"Daily report sheet not found"});
           const daily=await callSheets("readRows",{sheetName:DAILY_REPORT_SHEET,startRow:1,numRows:100});
