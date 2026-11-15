@@ -143,7 +143,7 @@ test("public Sheets health check verifies Apps Script without exposing secrets",
     assert.equal(response.status, 200);
     assert.deepEqual(result, { ok: true, googleSheets: "connected", sheetCount: 2, readTest: "success", rowsRead: 1, columnsRead: 1 });
     assert.deepEqual(sent.map(x => x.action), ["listSheets", "readRows"]);
-    assert.equal(sent[1].sheetName, "15設定");
+    assert.equal(sent[1].sheetName, "01従業員");
     assert.equal(sent[0].token, "c".repeat(128));
     assert.equal(JSON.stringify(result).includes("cccc"), false);
   } finally {
