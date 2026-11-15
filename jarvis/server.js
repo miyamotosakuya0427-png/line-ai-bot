@@ -476,7 +476,7 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         const result=await createApprovalRequest(jobStore,d);
         return json(res,result.created?201:200,{ok:true,created:result.created,approval:result.job});
       }
-      const approvalDecisionMatch=/^\\/v1\\/content\\/approvals\\/([0-9a-f-]{36})\\/decision$/i.exec(url.pathname);
+      const approvalDecisionMatch=new RegExp("^/v1/content/approvals/([0-9a-f-]{36})/decision$","i").exec(url.pathname);
       if (approvalDecisionMatch && req.method === "POST") {
         if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         if (!jobStore) return json(res,503,{ok:false,error:"Persistent approval storage is not configured"});
