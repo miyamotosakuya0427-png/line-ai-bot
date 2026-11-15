@@ -63,7 +63,7 @@ function buildCompanyOverview({ employeeRows, dailyReportRows }) {
   };
 }
 
-function filterDailyReports(reports, { from, to, limit = 20 } = {}) {
+function isValidDate(value) {\n  if (typeof value !== "string" || !/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) return false;\n  const time = Date.parse(value + "T00:00:00Z");\n  return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === value;\n}\n\nfunction filterDailyReports(reports, { from, to, limit = 20 } = {}) {
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
     const error = new Error("Invalid limit");
     error.code = "INVALID_QUERY";
