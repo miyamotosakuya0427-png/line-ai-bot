@@ -60,8 +60,10 @@ function createInfluenceEventStore({filePath,clock=()=>new Date().toISOString(),
     if(poisoned)throw new Error("Influence journal requires restart and recovery");
     const event=normalizeInfluenceEvent(input,clock());
     if(ids.has(event.id))return {created:false,event:clone(events.find(x=>x.id===event.id))};
-    if(events.length>=MAX_EVENTS)throw new Error("Influence event capacity reached");
+    if(events.length>=maxEvents)throw new Error("Influence event capacity reached");
     const line=JSON.stringify(event)+"\n";
+    let currentBytes=0;try{currentBytes=(await fs.stat(filePath)).size;}catch(error){if(error.code!=="ENOENT")throw error;}
+    if(currentBytes+Buffer.byteLength(line)>maxJournalBytes)throw new Error("Influence journal size limit reached");
     try{const handle=await fs.open(filePath,"a",0o600);try{await handle.writeFile(line,"utf8");await handle.sync();}finally{await handle.close();}await fs.chmod(filePath,0o600);}
     catch(error){poisoned=true;throw new Error("Influence journal write failed; restart required: "+error.message);}
     events.push(event);ids.add(event.id);return {created:true,event:clone(event)};
