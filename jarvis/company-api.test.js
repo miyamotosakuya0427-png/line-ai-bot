@@ -142,3 +142,28 @@ test("financial API fails closed if either financial sheet is absent",async()=>{
   assert.equal(response.status,404);
  }finally{await new Promise(resolve=>app.close(resolve));}
 });
+
+
+test("company AI question receives bounded financial aggregates but no customer or payee details",async()=>{
+ const {SALES_HEADERS,EXPENSE_HEADERS}=require("./core/financial-sheet-reader");
+ let created;
+ const app=createServer({token,sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"s".repeat(128),jobStore:{create:async value=>{created=value;return{created:true,job:{id:"00000000-0000-4000-8000-000000000002",status:"queued"}};}},fetchImpl:async(url,options)=>{
+  const body=JSON.parse(options.body);
+  if(body.action==="listSheets")return{ok:true,json:async()=>({ok:true,sheets:["03 日報","売上","経費"]})};
+  if(body.sheetName==="03 日報")return{ok:true,json:async()=>({ok:true,rows:[dailyHeaders,["DR-1","2026-11-15T09:00:00.000Z","2026-11-15","EMP003","氏名非公開","岡山現場","作業","08:00","17:00",60,2,"","",""]]})};
+  if(body.sheetName==="売上")return{ok:true,json:async()=>({ok:true,rows:[SALES_HEADERS,["S-1","2026/11/01","P1","岡山現場","顧客秘密","工事","500000","50000","550000","I-1","",""]]})};
+  if(body.sheetName==="経費")return{ok:true,json:async()=>({ok:true,rows:[EXPENSE_HEADERS,["E-1","2026/11/02","P1","岡山現場","工事原価","外注費","業者秘密","200000","20000","220000","振込","url","備考秘密",""]]})};
+  throw new Error("Unexpected sheet");
+ }});
+ await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+ try{
+  const response=await fetch(\`http://127.0.0.1:\${app.address().port}/v1/company/ask\`,{method:"POST",headers:{Authorization:\`Bearer \${token}\`,"Content-Type":"application/json"},body:JSON.stringify({request:"今月の売上と差引を教えて"})});
+  assert.equal(response.status,201);
+  const context=created.payload.companyContext;
+  assert.equal(context.financialSummary.revenueYen,500000);
+  assert.equal(context.financialSummary.expenseYen,200000);
+  assert.equal(context.financialSummary.profitYen,300000);
+  const serialized=JSON.stringify(context);
+  for(const secret of ["顧客秘密","業者秘密","備考秘密","氏名非公開","I-1","url"])assert.equal(serialized.includes(secret),false);
+ }finally{await new Promise(resolve=>app.close(resolve));}
+});
