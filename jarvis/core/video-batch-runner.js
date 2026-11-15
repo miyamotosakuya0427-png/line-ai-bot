@@ -1,6 +1,6 @@
 "use strict";
 function createVideoBatchContentHandler({contentHandler,videoBatchStore}={}){
- if(typeof contentHandler!=="function"||!videoBatchStore||typeof videoBatchStore.get!=="function"||typeof videoBatchStore.saveDraft!=="function")throw new Error("A content handler and video batch store are required");
+ if(typeof contentHandler!=="function"||!videoBatchStore||typeof videoBatchStore.get!=="function"||typeof videoBatchStore.saveDraft!=="function"||typeof videoBatchStore.saveSourceReview!=="function")throw new Error("A content handler and video batch store are required");
  return async function handleVideoBatchContent(payload,context={}){
   if(payload?.taskKind==="video-batch-source-review"){
    if(typeof payload.videoId!=="string"||!/^V[0-9]{2,8}$/.test(payload.videoId)||typeof context.jobId!=="string"||!context.jobId)throw new Error("Invalid source-review task");
