@@ -5,13 +5,18 @@ function createOpenAIHandler({ apiKey = process.env.OPENAI_API_KEY || "", model 
     if (!apiKey) throw new Error("OpenAI API is not configured");
     const request = typeof payload?.request === "string" ? payload.request.trim() : "";
     if (!request || request.length > 4000) throw new Error("Invalid assistant request");
+    const companyContext = payload?.companyContext && typeof payload.companyContext === "object" && !Array.isArray(payload.companyContext)
+      ? JSON.stringify(payload.companyContext).slice(0, 12000) : "";
+    const input = companyContext
+      ? "質問：\n" + request + "\n\n以下はGoogle Sheetsから取得した集計データです。データの範囲と限界を明示して回答してください。\n" + companyContext
+      : request;
     const response = await fetchImpl("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + apiKey },
       body: JSON.stringify({
         model,
-        instructions: "あなたは株式会社Oneの業務アシスタントJARVISです。日本語で簡潔かつ正確に回答してください。確認できない情報を事実のように述べず、実行していない操作を完了したと主張しないでください。外部システムの変更、送信、購入、予約、削除などは、明示的な承認なしに実行したと主張してはいけません。この処理では回答文の作成だけを行い、外部操作は行いません。",
-        input: request,
+        instructions: "あなたは株式会社Oneの業務アシスタントJARVISです。日本語で簡潔かつ正確に回答してください。確認できない情報を事実のように述べず、実行していない操作を完了したと主張しないでください。外部システムの変更、送信、購入、予約、削除などは、明示的な承認なしに実行したと主張してはいけません。この処理では回答文の作成だけを行い、外部操作は行いません。集計データに含まれない売上・経費・利益・原価・給与などの数値は推測しないでください。データが最大99件のサンプルである場合は、その制限を必ず説明してください。",
+        input,
         max_output_tokens: 1200
       }),
       signal: AbortSignal.timeout(45000)
