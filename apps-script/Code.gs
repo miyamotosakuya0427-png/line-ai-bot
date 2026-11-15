@@ -43,6 +43,7 @@ function doPost(e) {
     if (data.action === "listSheets") return output({ ok: true, sheets: ss.getSheets().map(s => s.getName()) });
     if (data.action === "bootstrapAdmin") return bootstrapAdmin(ss, data, props);
     if (data.action === "reviewLineLink") return reviewLineLink(ss, data);
+    if (data.action === "appendDailyReport") return appendDailyReport(ss, data);
 
     const sheetName = String(data.sheetName || "");
     const sheet = ss.getSheetByName(sheetName);
@@ -238,6 +239,49 @@ function appendAuditEvent(ss, row) {
     }
   }
   sheet.getRange(sheet.getLastRow() + 1, 1, 1, row.length).setValues([row]);
+}
+
+
+const DAILY_REPORT_SHEET = "03 日報";
+const DAILY_REPORT_HEADERS = [
+  "日報ID", "記録日時", "作業日", "従業員ID", "氏名", "現場名", "作業内容",
+  "開始時刻", "終了時刻", "休憩（分）", "作業人数", "使用機械・車両", "使用材料", "連絡事項"
+];
+
+function appendDailyReport(ss, data) {
+  const report = data.report || {};
+  const required = ["reportId","recordedAt","workDate","employeeId","employeeName","siteName","workDetails","startTime","endTime"];
+  if (required.some(key => !String(report[key] || "").trim())) {
+    return output({ ok: false, error: "Invalid daily report" });
+  }
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    let sheet = ss.getSheetByName(DAILY_REPORT_SHEET);
+    if (!sheet) {
+      sheet = ss.insertSheet(DAILY_REPORT_SHEET);
+      sheet.getRange(1, 1, 1, DAILY_REPORT_HEADERS.length).setValues([DAILY_REPORT_HEADERS]);
+    }
+    const headers = sheet.getRange(1, 1, 1, DAILY_REPORT_HEADERS.length).getDisplayValues()[0];
+    if (JSON.stringify(headers) !== JSON.stringify(DAILY_REPORT_HEADERS)) {
+      return output({ ok: false, error: "Daily report sheet headers do not match" });
+    }
+    const lastRow = sheet.getLastRow();
+    if (lastRow >= 2) {
+      const existing = sheet.getRange(2, 1, lastRow - 1, 1).getDisplayValues().flat();
+      if (existing.includes(String(report.reportId))) return output({ ok: true, saved: true, duplicate: true });
+    }
+    const values = [
+      report.reportId, report.recordedAt, report.workDate, report.employeeId, report.employeeName,
+      report.siteName, report.workDetails, report.startTime, report.endTime,
+      Number(report.breakMinutes), Number(report.workerCount), report.equipment || "",
+      report.materials || "", report.notes || ""
+    ].map(value => typeof value === "string" && /^\\s*=/.test(value) ? "'" + value : value);
+    sheet.getRange(sheet.getLastRow() + 1, 1, 1, values.length).setValues([values]);
+    return output({ ok: true, saved: true });
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function output(data) {
