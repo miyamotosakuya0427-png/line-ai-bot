@@ -45,8 +45,10 @@ function createPaperTradingStore({filePath,policy={},clock=()=>new Date().toISOS
    if(poisoned)throw new Error("Paper trading journal requires restart");
    if(events.length>=maxEvents)throw new Error("Paper trading journal event limit reached");
    const event={type,data:clone(data),recordedAt:clock()};
-   const result=apply(engine,event.data);
    const line=JSON.stringify(event)+"\n";
+   let currentBytes=0;try{currentBytes=(await fs.stat(filePath)).size;}catch(error){if(error.code!=="ENOENT")throw error;}
+   if(currentBytes+Buffer.byteLength(line)>maxJournalBytes)throw new Error("Paper trading journal size limit reached");
+   const result=apply(engine,event.data);
    try{
     const handle=await fs.open(filePath,"a",0o600);
     try{await handle.writeFile(line,"utf8");await handle.sync();}finally{await handle.close();}
