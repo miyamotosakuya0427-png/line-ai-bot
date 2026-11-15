@@ -16,7 +16,7 @@ const { createDepartmentHandlers } = require("./core/department-agent-handlers")
 const { startDailyContentPlanner } = require("./core/video-scheduler");
 const { startDailySubsidyMonitor } = require("./core/subsidy-scheduler");
 const { createVideoBatchStore } = require("./core/video-batch-store");
-const { createVideoBatchContentHandler } = require("./core/video-batch-runner");
+const { createVideoBatchContentHandler, buildSourceReviewRequest } = require("./core/video-batch-runner");
 const { createScriptMetrics } = require("./core/script-metrics");
 const PORT = Number(process.env.PORT || 3000);
 const MAX_BODY_BYTES = 10 * 1024;
@@ -607,18 +607,7 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         const video=await videoBatchStore.get(sourceReviewMatch[1]);
         if(!video)return json(res,404,{ok:false,error:"Video not found"});
         if(!video.script||video.stage!=="script")return json(res,409,{ok:false,error:"A saved script at the script stage is required"});
-        const request=[
-          "ONE CONTENT 一次資料確認タスクです。ワーカーが登録済みHTTPS出典候補を安全な許可ドメイン制限付きで取得し、その本文抜粋を後続指示に添付します。取得済み資料と主張を照合し、事実を検証済みと誤認してはいけません。",
-          "動画ID："+video.id,
-          "タイトル："+video.title,
-          "テーマ："+video.topic,
-          "台本全文：\n"+video.script,
-          "登録済み出典候補（取得前）：\n"+JSON.stringify(video.sources||[]),
-          "台本から検証が必要な個別主張を漏れなく抽出し、年号・人名・地名・官職・制度・金額・因果関係に分けて整理してください。",
-          "各主張について、必要な一次資料・公的資料の種類、探すべき機関・所蔵先、照合すべき原文・ページ・条文・史料箇所、台本の危険な断定表現を示してください。",
-          "出典候補のURLを新規に創作してはいけません。登録済みURLも本文未確認なら未検証と明記してください。主張ごとに「未検証」「要資料取得」「資料と照合済み」を区別し、実際に資料を読んでいない以上「検証済み」は使用禁止です。",
-          "成果物は日本語の確認表と、修正が必要な台本箇所の指摘です。公開・外部送信・有料生成はしません。"
-        ].join("\n");
+        const request=buildSourceReviewRequest(video);
         const sourceReviewKey="video-batch-source-review-"+video.id;
         const priorSourceReview=await jobStore.getByIdempotencyKey(sourceReviewKey);
         if(priorSourceReview?.status==="failed"){const retried=await jobStore.transition(priorSourceReview.id,"queued");return json(res,200,{ok:true,created:false,videoId:video.id,job:retried,verificationStatus:"not_verified",externalActionsEnabled:false});}
@@ -717,7 +706,7 @@ if (require.main===module) {
     const workerEnabled=process.env.JARVIS_WORKER_ENABLED==="true";
     if (workerEnabled && (!jobStore || !process.env.OPENAI_API_KEY)) throw new Error("Worker requires JARVIS_JOB_STORE_PATH and OPENAI_API_KEY.");
     const departmentHandlers=createDepartmentHandlers({store:jobStore});
-    if(videoBatchStore&&departmentHandlers["department.content"]) departmentHandlers["department.content"]=createVideoBatchContentHandler({contentHandler:departmentHandlers["department.content"],videoBatchStore,allowedSourceHosts:(process.env.JARVIS_SOURCE_ALLOWED_HOSTS||"").split(",").map(x=>x.trim().toLowerCase()).filter(Boolean)});
+    if(videoBatchStore&&departmentHandlers["department.content"]) departmentHandlers["department.content"]=createVideoBatchContentHandler({contentHandler:departmentHandlers["department.content"],videoBatchStore,jobStore,allowedSourceHosts:(process.env.JARVIS_SOURCE_ALLOWED_HOSTS||"").split(",").map(x=>x.trim().toLowerCase()).filter(Boolean)});
     const worker=workerEnabled?createWorker({store:jobStore,handlers:{"assistant.request":createOpenAIHandler(),"assistant.company_question":createOpenAIHandler(),...departmentHandlers}}):null;
     if (worker) { await worker.start(); worker.startPolling({intervalMs:Number(process.env.JARVIS_WORKER_POLL_MS||1500)}); }
     const contentScheduler=worker&&process.env.JARVIS_CONTENT_AUTOPLAN_ENABLED==="true"?startDailyContentPlanner({store:jobStore}):null;
