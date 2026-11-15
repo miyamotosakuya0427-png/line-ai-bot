@@ -619,7 +619,10 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
           "出典候補のURLを新規に創作してはいけません。登録済みURLも本文未確認なら未検証と明記してください。主張ごとに「未検証」「要資料取得」「資料と照合済み」を区別し、実際に資料を読んでいない以上「検証済み」は使用禁止です。",
           "成果物は日本語の確認表と、修正が必要な台本箇所の指摘です。公開・外部送信・有料生成はしません。"
         ].join("\\n");
-        const result=await jobStore.create({type:"department.content",payload:{request,departmentId:"content",videoId:video.id,taskKind:"video-batch-source-review"},idempotencyKey:"video-batch-source-review-"+video.id});
+        const sourceReviewKey="video-batch-source-review-"+video.id;
+        const priorSourceReview=await jobStore.getByIdempotencyKey(sourceReviewKey);
+        if(priorSourceReview?.status==="failed"){const retried=await jobStore.transition(priorSourceReview.id,"queued");return json(res,200,{ok:true,created:false,videoId:video.id,job:retried,verificationStatus:"not_verified",externalActionsEnabled:false});}
+        const result=await jobStore.create({type:"department.content",payload:{request,departmentId:"content",videoId:video.id,taskKind:"video-batch-source-review"},idempotencyKey:sourceReviewKey});
         return json(res,result.created?201:200,{ok:true,created:result.created,videoId:video.id,job:result.job,verificationStatus:"not_verified",externalActionsEnabled:false});
       }
       if (url.pathname.startsWith("/v1/content/batches") || url.pathname.startsWith("/v1/content/approvals") || url.pathname.startsWith("/v1/content/videos/")) {
