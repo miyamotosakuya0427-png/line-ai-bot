@@ -614,6 +614,9 @@ test("video batch APIs require auth, persist 100-item queues, and expose owner r
     assert.equal(created.status,201);
     const result=await created.json();
     assert.equal(result.videos.length,100);
+    const stage=await fetch(root+"/v1/content/videos/V01/stage",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({stage:"script",notes:"企画確認"})});
+    assert.equal(stage.status,200);
+    assert.equal((await stage.json()).video.stage,"script");
     const listed=await fetch(root+"/v1/content/batches?limit=200",{headers:{Authorization:"Bearer "+token}});
     assert.equal((await listed.json()).summary.total,100);
     for(const stage of ["script","source_qa","pronunciation","narration","assets","edit","final_qa","owner_review"]) await videoBatchStore.updateStage("V01",stage);
