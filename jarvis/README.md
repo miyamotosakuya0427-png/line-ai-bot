@@ -74,7 +74,7 @@ See [core design and deployment](./core/README.md) and [deployment checklist](./
 
 ## Not yet complete
 
-This is a tested foundation, not a fully autonomous office system. Department roles and read-only official-source catalog are implemented, but independent model instances, scheduled live research, push notifications, persistent research history, and per-department task queues are not yet connected. Daily-report analytics and aggregate-grounded AI Q&A are limited to the first 99 daily-report rows returned by Apps Script; they are not complete historical financial or profitability reports. Full-history sales/expense/invoice ingestion, tax/accounting adjustments, cost allocation, payroll analytics, arbitrary office actions, Google Sheets writes from the AI worker, desktop control, video generation/publishing, and multiple worker instances are not implemented. Those integrations require separate allowlists, permissions, and end-to-end tests.
+This is a tested foundation, not a fully autonomous office system. Department role-scoped handlers and a durable task queue are implemented, but separate model instances, push notifications, persistent long-term research history, and multiple worker instances are not. Daily-report analytics and financial aggregates are limited to the first 99 rows per sheet returned by Apps Script; they are not complete historical financial or profitability reports. Tax/accounting adjustments, cost allocation, payroll analytics, arbitrary office actions, Google Sheets writes from the AI worker, desktop control, direct Descript/Metricool/vidIQ service integration, automatic video rendering, and external publishing are not implemented. The video batch queue and owner review inbox can register and manage up to 100 ideas, but they do not generate or publish media. Those integrations require separate allowlists, permissions, provider credentials, and end-to-end tests.
 
 Production deployment remains intentionally disabled until the paid persistent disk and service configuration are approved.
 
@@ -113,6 +113,8 @@ The content department uses a staged workflow: research, script and source verif
 Two independently tracked 8–12 minute narration drafts are stored under `jarvis/content/`: `episode-001-kameyama-finance.md` and `episode-002-meireki-fire.md`. Each includes a source register, pronunciation checklist, visual plan, and explicit fact-check caveats. Their tests enforce key numerical/source claims and a target narration length. These are script drafts, not rendered or published videos.
 
 The Descript registry records measured project media durations: the Edo-daimyo composition is 74 seconds with a 33.28-second audio file; the Edo-fire composition is 24 seconds with audio assets around 32.31 and 32.83 seconds, plus a separate 32.31-second pronunciation-check project. The existing audio names identify Kenichi and one transcript speaker label is Hayama, while the selected default preference is Hinata. These assets must not be treated as finished 8–12 minute videos or overwritten without review.
+
+Descript, Metricool, and vidIQ connections available inside ChatGPT are not automatically available inside the Render-hosted JARVIS process. No server-side credentials/adapters for those ChatGPT connectors have been verified. Do not mark media editing, export, scheduling, or publishing as integrated until a separate supported server-side API connection and end-to-end test exist.
 
 ### Video agent execution and scheduler
 
