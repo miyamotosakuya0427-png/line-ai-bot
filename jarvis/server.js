@@ -466,7 +466,7 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
       }
       if (req.method==="GET" && url.pathname==="/v1/content/workflow") {
         if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
-        return json(res,200,{ok:true,workflow:getVideoWorkflow()});
+        return json(res,200,{ok:true,workflow:getVideoWorkflow({autoplanEnabled:Boolean(worker&&process.env.JARVIS_CONTENT_AUTOPLAN_ENABLED==="true")})});
       }
       if (req.method==="GET" && (url.pathname==="/v1/departments" || url.pathname==="/v1/subsidy/sources")) {
         if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
