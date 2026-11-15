@@ -15,6 +15,9 @@ test("dashboard approval controls render and embedded JavaScript parses",()=>{
  assert.match(html,/台本を保存して次工程へ/);
  assert.match(html,/一次資料・数字・固有名詞の確認が必要/);
  assert.match(html,/needs_source_review/);
+ assert.match(html,/scriptMetrics/);
+ assert.match(html,/ナレーション：/);
+ assert.match(html,/録音後に実測/);
  assert.match(html,/\/draft/);
  assert.match(html,/AIに企画・台本下書きを依頼/);
  assert.match(html,/\/v1\/content\/videos\//);
