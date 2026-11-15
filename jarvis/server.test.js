@@ -641,6 +641,15 @@ test("video batch plan endpoint queues an idempotent ONE CONTENT draft task with
     const batchStatus=await fetch(root+"/v1/content/batches?limit=10",{headers:{Authorization:headers.Authorization}});
     const batchStatusData=await batchStatus.json();
     assert.equal(batchStatusData.videos[0].planJob.result.draft,true);
+    assert.equal(batchStatusData.videos[0].scriptMetrics.status,"too_short");
+    assert.equal(batchStatusData.videos[0].scriptMetrics.requiresRecordedTiming,true);
+    const metricsResponse=await fetch(root+"/v1/content/videos/V01/script-metrics",{headers:{Authorization:headers.Authorization}});
+    assert.equal(metricsResponse.status,200);
+    const metricsData=await metricsResponse.json();
+    assert.equal(metricsData.scriptMetrics.characters,batchStatusData.videos[0].scriptMetrics.characters);
+    assert.equal(metricsData.scriptMetrics.status,"too_short");
+    const metricsDenied=await fetch(root+"/v1/content/videos/V01/script-metrics");
+    assert.equal(metricsDenied.status,401);
     const autoSaved=await videoBatchStore.get("V01");
     assert.equal(autoSaved.stage,"script");
     assert.equal(autoSaved.status,"in_progress");
