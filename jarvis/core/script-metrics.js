@@ -1,6 +1,6 @@
 "use strict";
 const TARGET_MINUTES=Object.freeze({min:8,max:12});
-const JAPANESE_RATE=Object.freeze({slow:350,fast:420});
+const JAPANESE_RATE=Object.freeze({slow:330,fast:400});
 function extractSpokenText(script){
  if(typeof script!=="string")return "";
  const normalized=script.replace(/\r\n?/g,"\n");
