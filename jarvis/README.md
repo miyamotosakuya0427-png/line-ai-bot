@@ -147,6 +147,7 @@ Construction tasks about site activity or daily reports receive read-only aggreg
 - `GET /v1/content/approvals` (video owner-review inbox)
 - `GET /v1/content/videos/:id/plan` (read the associated ONE CONTENT draft-job status/result)
 - `POST /v1/content/videos/:id/plan` (enqueue an authenticated ONE CONTENT research/script draft job; completed output is shown in the video queue but is not automatically saved into the script field or advanced to the next stage)
+- `POST /v1/content/videos/:id/draft` (save the matching successful ONE CONTENT result into the video script field and mark it `needs_source_review`; this does not mark the sources as verified)
 - `POST /v1/content/videos/:id/stage`, `/review`, and `/action-approval` (ordered stage updates, review decisions, and scoped expiring action-approval records)
 
 ### Video batch queue
