@@ -63,18 +63,24 @@ function buildCompanyOverview({ employeeRows, dailyReportRows }) {
   };
 }
 
-function isValidDate(value) {\n  if (typeof value !== "string" || !/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) return false;\n  const time = Date.parse(value + "T00:00:00Z");\n  return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === value;\n}\n\nfunction filterDailyReports(reports, { from, to, limit = 20 } = {}) {
+function isValidDate(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const time = Date.parse(value + "T00:00:00Z");
+  return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === value;
+}
+
+function filterDailyReports(reports, { from, to, limit = 20 } = {}) {
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
     const error = new Error("Invalid limit");
     error.code = "INVALID_QUERY";
     throw error;
   }
-  if (from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) {
+  if (from && !isValidDate(from)) {
     const error = new Error("Invalid from date");
     error.code = "INVALID_QUERY";
     throw error;
   }
-  if (to && !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+  if (to && !isValidDate(to)) {
     const error = new Error("Invalid to date");
     error.code = "INVALID_QUERY";
     throw error;
