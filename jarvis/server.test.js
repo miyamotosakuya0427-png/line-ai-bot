@@ -722,6 +722,7 @@ test("video batch APIs require auth, persist 100-item queues, and expose owner r
     const result=await created.json();
     assert.equal(result.videos.length,100);
     await videoBatchStore.saveDraft("V01",{script:"台本初稿。出典と読みを確認する。",jobId:"api-test-V01"});
+    await videoBatchStore.saveSourceReview("V01",{answer:"出典候補確認",jobId:"source-api-V01",sourceSnapshots:[{requestedUrl:"https://www.bousai.go.jp/report",finalUrl:"https://www.bousai.go.jp/report",fetchedAt:"2026-11-16T00:00:00.000Z",httpStatus:200,title:"公的資料",contentSha256:"d".repeat(64),text:"明暦三年に江戸で大火が起きた。",error:""}]});
     const stage=await fetch(root+"/v1/content/videos/V01/stage",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({stage:"source_qa",notes:"台本保存済み"})});
     assert.equal(stage.status,200);
     assert.equal((await stage.json()).video.stage,"source_qa");
