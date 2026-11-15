@@ -708,7 +708,7 @@ test("video batch APIs require auth, persist 100-item queues, and expose owner r
     const result=await created.json();
     assert.equal(result.videos.length,100);
     await videoBatchStore.saveDraft("V01",{script:"台本初稿。出典と読みを確認する。",jobId:"api-test-V01"});
-    const stage=await fetch(root+"/v1/content/videos/V01/stage",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({stage:"source_qa",notes:"台本保存済み"})});
+    const stage=await fetch(root+"/v1/content/videos/V01/stage",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({stage:"source_qa",notes:"台本保存済み",evidence:{sourceQa:STAGE_EVIDENCE.sourceQa}})});
     assert.equal(stage.status,200);
     assert.equal((await stage.json()).video.stage,"source_qa");
     const listed=await fetch(root+"/v1/content/batches?limit=200",{headers:{Authorization:"Bearer "+token}});
