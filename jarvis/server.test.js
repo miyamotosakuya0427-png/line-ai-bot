@@ -3,6 +3,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { createServer } = require("./server");
+const fs=require("node:fs/promises");
+const os=require("node:os");
+const path=require("node:path");
+const {createVideoBatchStore}=require("./core/video-batch-store");
 
 const token = "test-token-that-is-at-least-32-bytes-long";
 let server;
@@ -592,5 +596,36 @@ test("JARVIS dashboard is served with restrictive security headers and no server
     assert.match(html,/ONE JARVIS/);
     assert.match(html,/メモリ内だけ/);
     assert.doesNotMatch(html,new RegExp(token));
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
+
+
+test("video batch APIs require auth, persist 100-item queues, and expose owner review", async t => {
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-video-api-"));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const videoBatchStore=createVideoBatchStore({filePath:path.join(dir,"videos.jsonl")});
+  const app=createServer({token,videoBatchStore});
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  const root="http://127.0.0.1:"+app.address().port;
+  try {
+    const denied=await fetch(root+"/v1/content/batches");
+    assert.equal(denied.status,401);
+    const items=Array.from({length:100},(_,i)=>({id:"V"+String(i+1).padStart(2,"0"),title:"企画"+(i+1),topic:"歴史テーマ"+(i+1)}));
+    const created=await fetch(root+"/v1/content/batches",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({items,idempotencyKey:"api-batch-100"})});
+    assert.equal(created.status,201);
+    const result=await created.json();
+    assert.equal(result.videos.length,100);
+    const stage=await fetch(root+"/v1/content/videos/V01/stage",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({stage:"script",notes:"企画確認"})});
+    assert.equal(stage.status,200);
+    assert.equal((await stage.json()).video.stage,"script");
+    const listed=await fetch(root+"/v1/content/batches?limit=200",{headers:{Authorization:"Bearer "+token}});
+    assert.equal((await listed.json()).summary.total,100);
+    for(const stage of ["source_qa","pronunciation","narration","assets","edit","final_qa","owner_review"]) await videoBatchStore.updateStage("V01",stage);
+    const inbox=await fetch(root+"/v1/content/approvals",{headers:{Authorization:"Bearer "+token}});
+    assert.equal((await inbox.json()).pending.length,1);
+    const review=await fetch(root+"/v1/content/videos/V01/review",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({decision:"approve",note:"確認済"})});
+    assert.equal(review.status,200);
+    const approved=await fetch(root+"/v1/content/videos/V01/action-approval",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({action:"publish",provider:"youtube",costEstimate:0,destination:"history-channel"})});
+    assert.equal(approved.status,201);
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
