@@ -24,3 +24,15 @@ fsync'd before it becomes visible in memory.
 
 Payloads are JSON objects up to 16 KB. Idempotency keys are optional and prevent
 duplicate job creation. Journal corruption fails closed.
+
+## Worker groundwork
+
+`worker.js` executes one queued job at a time through an explicit handler
+allowlist. Unknown job types fail closed. Handler errors are recorded as failed
+jobs, and interrupted running jobs are returned to the queue on worker startup.
+This assumes a single worker process owns the journal; multi-instance locking
+and production scheduling are not implemented yet.
+
+The worker is not connected to HTTP routes and is not started by the Render
+service. Do not enable it in production until a persistent disk is mounted,
+single-instance ownership is guaranteed, and an end-to-end test is approved.
