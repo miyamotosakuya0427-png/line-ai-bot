@@ -18,6 +18,7 @@ const E={
 };
 async function advanceToOwnerReview(s,id){
  await s.saveDraft(id,{script:"台本初稿。出典と読みを確認する。",jobId:"test-job-"+id});
+ await s.saveSourceReview(id,{answer:"出典照合候補",jobId:"source-job-"+id,sourceSnapshots:[{requestedUrl:"https://www.bousai.go.jp/report",finalUrl:"https://www.bousai.go.jp/report",fetchedAt:"2026-11-16T00:00:00.000Z",httpStatus:200,title:"公的資料",contentSha256:"a".repeat(64),text:"明暦三年に江戸で大火が起きた。",error:""}]});
  await s.updateStage(id,"source_qa");
  await s.updateStage(id,"pronunciation",{evidence:{sourceQa:E.sourceQa}});
  await s.updateStage(id,"narration",{evidence:{pronunciation:E.pronunciation}});
