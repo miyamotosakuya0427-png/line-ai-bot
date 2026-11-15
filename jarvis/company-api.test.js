@@ -205,3 +205,15 @@ test("department and subsidy source APIs require authentication and expose appro
   const data=await sources.json();assert.equal(sources.status,200);assert.ok(data.sources.some(s=>s.id==="okayama-city"));assert.equal(data.monitoringEnabled,false);
  }finally{await new Promise(resolve=>app.close(resolve));}
 });
+
+
+test("video department workflow is authenticated and keeps paid generation and publishing disabled",async()=>{
+ const {app,calls}=fixture();await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+ try{
+  const denied=await fetch(\`http://127.0.0.1:\${app.address().port}/v1/content/workflow\`);assert.equal(denied.status,401);
+  const response=await fetch(\`http://127.0.0.1:\${app.address().port}/v1/content/workflow\`,{headers:{Authorization:\`Bearer \${token}\`}});
+  const result=await response.json();assert.equal(response.status,200);assert.equal(result.workflow.series.name,"時をかける日本史");
+  assert.equal(result.workflow.publicationEnabled,false);assert.equal(result.workflow.paidGenerationEnabled,false);
+  assert.ok(result.workflow.stages.some(s=>s.id==="pronunciation"));assert.equal(calls.length,0);
+ }finally{await new Promise(resolve=>app.close(resolve));}
+});
