@@ -35,3 +35,20 @@ test("source review fetches registered official sources and passes bounded evide
  assert.equal(result.verified,false);
  assert.equal(result.sourceCount,2);
 });
+
+test("automatically queues source review after a script draft and reuses the same idempotency key on recovery",async()=>{
+ let video={id:"V03",title:"明暦の大火",topic:"江戸の火災",sources:["https://www.bousai.go.jp/report"],stage:"research",status:"planned"},created=[];
+ const store={get:async()=>video,saveDraft:async(id,{script,jobId})=>{video={...video,script,stage:"script",status:"in_progress",draftStatus:"needs_source_review",draftJobId:jobId};return{created:true,video};},saveSourceReview:async()=>null};
+ const jobStore={create:async(value)=>{created.push(value);return{created:created.length===1,job:{id:"source-job"}};}};
+ const handler=createVideoBatchContentHandler({videoBatchStore:store,jobStore,contentHandler:async()=>({answer:"江戸の大火に関する台本"})});
+ const first=await handler({taskKind:"video-batch-plan",videoId:"V03"},{jobId:"draft-job"});
+ assert.equal(first.sourceReviewEnqueued,true);
+ assert.equal(created.length,1);
+ assert.equal(created[0].type,"department.content");
+ assert.equal(created[0].payload.taskKind,"video-batch-source-review");
+ assert.match(created[0].payload.request,/台本全文：/);
+ const retry=await handler({taskKind:"video-batch-plan",videoId:"V03"},{jobId:"draft-job"});
+ assert.equal(retry.reused,true);
+ assert.equal(created.length,2);
+ assert.equal(created[1].idempotencyKey,created[0].idempotencyKey);
+});
