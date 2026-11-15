@@ -101,3 +101,12 @@ The source catalog prioritizes construction equipment and ICT, battery/solar/ele
 ## Video department: 時をかける日本史
 
 The content department uses a staged workflow: research, script and source verification, Japanese kanji/name reading and pronunciation review, narration, authorized visual assets, edit/captions, final QA, owner review, publication, and post-publication analytics. QA checks cover historical sourcing, dates/names/amounts, spoken-vs-script alignment, audible completeness, subtitle accuracy and mobile readability, asset rights, black frames/audio loss/export integrity, and honest titles/thumbnails. Paid voice/video generation requires explicit approval for that generation; subscription/purchases require owner approval; publication and scheduling are owner-only actions. The current implementation exposes the workflow and checklist at authenticated `GET /v1/content/workflow`; it does not yet provide scheduled production or autonomous publishing. Existing Descript projects must be inspected before marking any stage complete. The channel is `https://www.youtube.com/@samurai-b6i` and the working project is `江戸大名、借金まみれの真実`.
+
+
+### Video agent execution and scheduler
+
+The JARVIS worker registers an isolated role-scoped AI handler for each department (`department.<id>`). Authenticated `POST /v1/departments/:id/tasks` and `POST /v1/content/tasks` enqueue durable, idempotent tasks; results are visible in the job journal. ONE CONTENT has a dedicated Japanese-history prompt for 8–12 minute drafts, fact/source uncertainty handling, kanji readings, narration/subtitle alignment, and strict non-publication rules.
+
+The daily content planner is opt-in via `JARVIS_CONTENT_AUTOPLAN_ENABLED=true` and requires the persistent job store, `JARVIS_WORKER_ENABLED=true`, and a running service. It enqueues one idempotent planning task per Japan-local date at 08:45 JST. It creates a concept/outline/source-checklist draft only; it does not generate paid audio/video or publish. The flag is not enabled in the current Render environment and this PR is not deployed.
+
+Verified Descript projects are tracked separately: `072f8671-af62-480c-8072-bb253faf58b7` is `江戸大名、借金まみれの真実` (74-second composition, no publishes), and `5b28e058-e58b-41a7-9a26-0164aaea9ca6` is the separate `江戸の大火` project. The selected default voice preference is Hinata; the Edo-daimyo project's existing audio filename identifies Kenichi, so voice consistency remains a review item. Existing media is never overwritten automatically.
