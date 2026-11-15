@@ -224,10 +224,10 @@ test("department task submission is authenticated, scoped and persisted to the d
  const created=[];const jobStore={create:async value=>{created.push(value);return {created:true,job:{id:"11111111-1111-4111-8111-111111111111",...value,status:"queued"}};}};
  const {app}=fixture({jobStore});await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
  try{
-  const url=\`http://127.0.0.1:\${app.address().port}/v1/content/tasks\`;
+  const url=`http://127.0.0.1:${app.address().port}/v1/content/tasks`;
   const denied=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({request:"企画を作る"})});assert.equal(denied.status,401);
-  const response=await fetch(url,{method:"POST",headers:{Authorization:\`Bearer \${token}\`,"Content-Type":"application/json"},body:JSON.stringify({request:"10分動画の企画を作る",idempotencyKey:"video-plan-001"})});
+  const response=await fetch(url,{method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},body:JSON.stringify({request:"10分動画の企画を作る",idempotencyKey:"video-plan-001"})});
   const data=await response.json();assert.equal(response.status,201);assert.equal(data.departmentId,"content");assert.equal(created[0].type,"department.content");assert.equal(created[0].payload.request,"10分動画の企画を作る");
-  const invalid=await fetch(\`http://127.0.0.1:\${app.address().port}/v1/departments/unknown/tasks\`,{method:"POST",headers:{Authorization:\`Bearer \${token}\`,"Content-Type":"application/json"},body:JSON.stringify({request:"bad"})});assert.equal(invalid.status,400);
+  const invalid=await fetch(`http://127.0.0.1:${app.address().port}/v1/departments/unknown/tasks`,{method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},body:JSON.stringify({request:"bad"})});assert.equal(invalid.status,400);
  }finally{await new Promise(resolve=>app.close(resolve));}
 });
