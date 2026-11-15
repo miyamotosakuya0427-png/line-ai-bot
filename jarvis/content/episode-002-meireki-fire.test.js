@@ -28,7 +28,7 @@ test("Meireki fire script distinguishes firefighter command systems and includes
  assert.match(script,/同心/);
  assert.match(script,/Kenichi/);
  assert.match(script,/Hinata/);
- assert.match(script,/有料生成/);
+ assert.match(script,/No paid generation/);
 });
 
 test("Meireki fire narration is sized for an 8–12 minute spoken video",()=>{
