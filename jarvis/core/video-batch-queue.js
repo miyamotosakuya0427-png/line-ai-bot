@@ -34,8 +34,7 @@ async function enqueueVideoBatchPlans({ videoBatchStore, jobStore, batchId = nul
     video.stage === "research" &&
     video.channelId === "history" &&
     (!batchId || video.batchId === batchId)
-  );
-  if (eligible.length > 100) throw new Error("A single enqueue operation is limited to 100 videos");
+  ).slice(0, 100);
   const queued = [];
   const existing = [];
   const failed = [];
