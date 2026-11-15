@@ -269,7 +269,7 @@ test("Google Sheets routes reject invalid sheet names", async () => {
   const app = createServer({ token, sheetsUrl: "https://script.google.com/macros/s/test-id/exec", sheetsToken: "b".repeat(128) });
   await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
   try {
-    const response = await fetch(`http://127.0.0.1:${app.address().port}/v1/sheets/read?sheetName=missing`, {
+    const response = await fetch(`http://127.0.0.1:${app.address().port}/v1/sheets/read?sheetName=`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     assert.equal(response.status, 400);
