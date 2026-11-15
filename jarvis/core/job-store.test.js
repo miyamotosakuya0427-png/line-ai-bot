@@ -23,6 +23,7 @@ test("job journal persists and recovers job state", async t => {
   const recovered = await second.get(created.job.id);
   assert.equal(recovered.status, "succeeded");
   assert.equal(recovered.attempts, 1);
+  assert.equal(recovered.result, null);
 });
 
 test("idempotency key prevents duplicate jobs", async t => {
@@ -57,4 +58,14 @@ test("concurrent creates are serialized and unique", async t => {
     store.create({ type: "task.run", payload: { index: i } })));
   assert.equal(new Set(results.map(x => x.job.id)).size, 20);
   assert.equal((await store.list({ limit: 200 })).length, 20);
+});
+
+test("successful job results are persisted and recovered", async t => {
+  const filePath = await fixture(t);
+  const first = createJobStore({ filePath });
+  const job = (await first.create({ type: "assistant.request", payload: { request: "hello" } })).job;
+  await first.transition(job.id, "running");
+  await first.transition(job.id, "succeeded", { result: { answer: "こんにちは" } });
+  const second = createJobStore({ filePath });
+  assert.deepEqual((await second.get(job.id)).result, { answer: "こんにちは" });
 });
