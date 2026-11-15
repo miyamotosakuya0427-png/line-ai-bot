@@ -150,3 +150,38 @@ test("public Sheets health check verifies Apps Script without exposing secrets",
     await new Promise(resolve => app.close(resolve));
   }
 });
+
+test("public metadata check includes employee sheet headers without exposing row data", async () => {
+  const sent = [];
+  const app = createServer({
+    token,
+    sheetsUrl: "https://script.google.com/macros/s/test-id/exec",
+    sheetsToken: "d".repeat(128),
+    fetchImpl: async (url, options) => {
+      const body = JSON.parse(options.body);
+      sent.push(body);
+      if (body.action === "listSheets") {
+        return { ok: true, json: async () => ({ ok: true, sheets: ["01 従業員", "日報", "03 日報"] }) };
+      }
+      const headers = body.sheetName === "01 従業員"
+        ? ["従業員ID", "従業員名", "LINE User ID"]
+        : body.sheetName === "日報"
+          ? ["日報ID", "日付"]
+          : ["日報ID", "日付", "従業員ID"];
+      return { ok: true, json: async () => ({ ok: true, rows: [headers] }) };
+    }
+  });
+  await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${app.address().port}/health/sheets/metadata`);
+    const result = await response.json();
+    assert.equal(response.status, 200);
+    assert.deepEqual(result.employeeHeaders, ["従業員ID", "従業員名", "LINE User ID"]);
+    assert.equal(result.employeeSheetFound, true);
+    assert.deepEqual(sent.map(x => x.action), ["listSheets", "readRows", "readRows", "readRows"]);
+    assert.deepEqual(sent.slice(1).map(x => x.sheetName), ["日報", "03 日報", "01 従業員"]);
+    assert.equal(JSON.stringify(result).includes("dddd"), false);
+  } finally {
+    await new Promise(resolve => app.close(resolve));
+  }
+});
