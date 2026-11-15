@@ -590,7 +590,7 @@ test("JARVIS dashboard is served with restrictive security headers and no server
     assert.match(response.headers.get("content-security-policy"),/default-src 'self'/);
     assert.equal(response.headers.get("x-frame-options"),"DENY");
     assert.match(html,/ONE JARVIS/);
-    assert.match(html,/sessionStorage|memory/);
+    assert.match(html,/メモリ内だけ/);
     assert.doesNotMatch(html,new RegExp(token));
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
