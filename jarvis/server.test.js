@@ -639,6 +639,16 @@ test("video batch plan endpoint queues an idempotent ONE CONTENT draft task with
     assert.equal(batchStatusData.videos[0].planJob.result.draft,true);
     const stillUnverified=await videoBatchStore.get("V01");
     assert.equal(stillUnverified.stage,"research");
+    const saveDraft=await fetch(root+"/v1/content/videos/V01/draft",{method:"POST",headers,body:JSON.stringify({jobId:run.job.id})});
+    assert.equal(saveDraft.status,201);
+    const savedDraft=await saveDraft.json();
+    assert.equal(savedDraft.video.stage,"script");
+    assert.equal(savedDraft.video.draftStatus,"needs_source_review");
+    assert.equal(savedDraft.video.script,run.job.result.answer);
+    const duplicateSave=await fetch(root+"/v1/content/videos/V01/draft",{method:"POST",headers,body:JSON.stringify({jobId:run.job.id})});
+    assert.equal(duplicateSave.status,200);
+    assert.equal((await duplicateSave.json()).created,false);
+
     const denied=await fetch(root+"/v1/content/videos/V01/plan",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
     assert.equal(denied.status,401);
   } finally {
