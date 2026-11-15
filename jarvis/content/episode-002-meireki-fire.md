@@ -1,7 +1,7 @@
 # ONE CONTENT Episode 002 — 江戸を焼いた明暦の大火
 
 - Channel: 時をかける日本史
-- Target runtime: 8–12 minutes; draft narration target about 3,000–3,400 Japanese characters
+- Target runtime: 8–12 minutes; draft narration target about 3,360–4,200 spoken Japanese characters; estimate at 350–420 characters per minute and verify the recorded read
 - Format: narrated history documentary with Edo map, fire-spread animation, archival illustrations, and urban-planning diagrams
 - Status: source-checked script draft; existing Descript project is a 24-second scene-material composition, not a finished episode
 - Related Descript projects are separate:
@@ -101,11 +101,15 @@
 
 報告書は、避難路が荷物などでふさがれ、多くの犠牲につながったことを教訓として挙げています。
 
+報告書は、家財道具などが避難路をふさぎ、犠牲を大きくした点も教訓として挙げています。火から離れようとする人の流れと、荷物を運び出そうとする動きが重なると、狭い道では身動きが取れなくなります。大火では、建物の延焼だけでなく、避難する人の動線そのものが危険になります。火除地や広い道は、火を止める空間であると同時に、人が逃げるための空間としても重要でした。
+
 火を消すことだけでなく、人々が安全に逃げられる道を確保することも、防災には欠かせません。
 
 ### 第四章 — 幕府は町そのものを作り直した
 
 大火のあと、幕府は被災者への食料支援や、焼けた米の放出、資金の給付などを行いました。
+
+幕府は、被災者への食料支援、焼けた米穀の放出、大名や旗本・御家人だけでなく町人も対象とした資金給付を行いました。防火対策だけでなく、被災後に生活を立て直す支援も復興の一部だったのです。
 
 そして、復興と同時に、防火のための都市改造を進めていきます。
 
