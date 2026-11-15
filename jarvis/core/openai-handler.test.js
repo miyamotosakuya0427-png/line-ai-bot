@@ -35,3 +35,19 @@ test("assistant handler marks transient provider errors retryable", async () => 
   });
   await assert.rejects(handler({ request: "hello" }), error => error.retryable === true);
 });
+
+
+test("assistant handler includes only supplied bounded company aggregate context", async () => {
+  let body;
+  const handler = createOpenAIHandler({
+    apiKey: "test-key",
+    fetchImpl: async (url, options) => {
+      body = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ output_text: "日報サンプルでは岡山現場が最多です。" }) };
+    }
+  });
+  const result = await handler({ request: "どの現場が多い？", companyContext: { reportCount: 12, topSites: [{ name: "岡山現場", count: 5 }] } });
+  assert.equal(result.answer, "日報サンプルでは岡山現場が最多です。");
+  assert.match(body.input, /岡山現場/);
+  assert.match(body.instructions, /売上・経費・利益/);
+});
