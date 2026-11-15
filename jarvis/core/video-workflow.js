@@ -6,6 +6,8 @@ const VIDEO_SERIES=Object.freeze({
   channelUrl:"https://www.youtube.com/@samurai-b6i",
   language:"ja",
   defaultFormat:"illustrated-history-voiceover",
+  targetDurationMinutes:10,
+  acceptableDurationMinutes:{min:8,max:12},
   defaultNarration:"Hinata (Japanese male, calm; previously selected)",
   reviewLimit:2,
   publicationMode:"owner-publishes-after-approval",
@@ -13,7 +15,7 @@ const VIDEO_SERIES=Object.freeze({
 });
 
 const EXISTING_PROJECTS=Object.freeze([
- {id:"072f8671-af62-480c-8072-bb253faf58b7",title:"江戸大名、借金まみれの真実",compositionId:"cd7b6796-23cc-43a7-ae7c-c2e3cfb50d32",durationSeconds:74,media:{images:5,audio:"HeyGen音声_Kenichi_江戸大名借金.wav"},publishCount:0,verification:"Descript project inspected; existing audio voice label differs from selected Hinata preference; do not overwrite without review"},
+ {id:"072f8671-af62-480c-8072-bb253faf58b7",title:"江戸大名、借金まみれの真実",compositionId:"cd7b6796-23cc-43a7-ae7c-c2e3cfb50d32",durationSeconds:74,media:{images:5,audio:"HeyGen音声_Kenichi_江戸大名借金.wav"},publishCount:0,transcriptSpeakerLabel:"Hayama",verification:"Descript project inspected; existing audio filename says Kenichi and transcript speaker label says Hayama, while selected default voice preference is Hinata; do not overwrite without review",historicalReview:{status:"primary-source-verified",sourceUrl:"https://www.bunka.pref.mie.lg.jp/rekishi/kenshi/asp/hakken/detail228.html",verifiedClaims:["安永5〜6年（1776〜1777年）の亀山藩予算書","歳入約1万6,900両","支出約4万5,700両","赤字約3万300両"],note:"三重県県史編さんグループの公開資料とナレーション原稿の主要数値が一致"}},
  {id:"5b28e058-e58b-41a7-9a26-0164aaea9ca6",title:"時をかける日本史｜江戸の大火",compositionId:"8a30994f-210a-4dd7-aa85-31904ea6368b",durationSeconds:24,media:{images:5,audio:"江戸の大火_ナレーション_Kenichi_読み修正版.wav"},publishCount:0,verification:"Separate Descript project; not the Edo-daimyo video"}
 ]);
 
