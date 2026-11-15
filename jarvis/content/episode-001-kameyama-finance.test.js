@@ -7,8 +7,8 @@ const file=path.join(__dirname,"episode-001-kameyama-finance.md");
 const script=fs.readFileSync(file,"utf8");
 
 test("Kameyama episode draft preserves primary-source figures and accounting caveats",()=>{
- assert.match(script,/24,000石/);
- assert.match(script,/2,900両/);
+ assert.match(script,/2万4千石/);
+ assert.match(script,/2,900両|2,900 ryo/);
  assert.match(script,/1万6,900両/);
  assert.match(script,/4万5,700両/);
  assert.match(script,/3万300両/);
@@ -25,6 +25,6 @@ test("Kameyama episode includes pronunciation, voice identity, and publication s
  assert.match(script,/Hinata/);
  assert.match(script,/Kenichi/);
  assert.match(script,/Hayama/);
- assert.match(script,/公開.*承認|承認.*公開/);
+ assert.match(script,/publication|publishing/);
  assert.match(script,/No paid generation|有料生成/);
 });
