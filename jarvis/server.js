@@ -56,10 +56,10 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         lastPublicSheetsCheck=now;
         try {
           const listed=await callSheets("listSheets");
-          const targetSheet="15設定";
-          if (!Array.isArray(listed.sheets) || !listed.sheets.includes(targetSheet)) {
-            return json(res,200,{ok:true,googleSheets:"connected",sheetCount:Array.isArray(listed.sheets)?listed.sheets.length:0,readTest:"target sheet not found"});
+          if (!Array.isArray(listed.sheets) || listed.sheets.length===0) {
+            return json(res,200,{ok:true,googleSheets:"connected",sheetCount:0,readTest:"no sheets found"});
           }
+          const targetSheet=listed.sheets[0];
           const read=await callSheets("readRows",{sheetName:targetSheet,startRow:1,numRows:1});
           const firstRow=Array.isArray(read.rows)&&Array.isArray(read.rows[0])?read.rows[0]:[];
           return json(res,200,{ok:true,googleSheets:"connected",sheetCount:listed.sheets.length,readTest:"success",rowsRead:Array.isArray(read.rows)?read.rows.length:0,columnsRead:firstRow.length});
