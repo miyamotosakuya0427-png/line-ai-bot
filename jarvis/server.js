@@ -187,16 +187,6 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
       if (req.method==="GET" && url.pathname==="/line-link") {
         return res.writeHead(200,{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store","Content-Security-Policy":"default-src 'self'; script-src 'self' https://static.line-scdn.net 'unsafe-inline'; connect-src 'self' https://api.line.me; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'self' https://liff.line.me"}).end(lineLinkPage(LIFF_ID));
       }
-      if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
-      if (req.method==="GET" && url.pathname==="/v1/status") return json(res,200,{ok:true,system:"ONE JARVIS",version:"1.2.0",mode:"read-only",googleSheetsConfigured:Boolean(sheetsUrl&&sheetsToken)});
-      if (req.method==="GET" && url.pathname==="/v1/sheets/list") {
-        const r=await callSheets("listSheets"); return json(res,200,{ok:true,sheets:r.sheets});
-      }
-      if (req.method==="GET" && url.pathname==="/v1/sheets/read") {
-        const sheetName=url.searchParams.get("sheetName")||"", startRow=Number(url.searchParams.get("startRow")||1), numRows=Number(url.searchParams.get("numRows")||20);
-        if (!validSheetName(sheetName) || !Number.isInteger(startRow) || startRow<1 || !Number.isInteger(numRows) || numRows<1 || numRows>100) return json(res,400,{ok:false,error:"Invalid read parameters"});
-        const r=await callSheets("readRows",{sheetName,startRow,numRows}); return json(res,200,{ok:true,rows:r.rows});
-      }
       if (req.method==="POST" && (url.pathname==="/v1/line/employees" || url.pathname==="/v1/line/link")) {
         if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
         if (!LINE_LOGIN_CHANNEL_ID) return json(res,503,{ok:false,error:"LINE Login channel is not configured"});
@@ -231,6 +221,16 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         const row=["PENDING-"+crypto.randomUUID(),identity.lineUserId,identity.displayName,employeeId,String(employee[1]||"").trim(),"","一般","確認待ち",new Date().toISOString(),new Date().toISOString()];
         const appended=await callSheets("appendRows",{sheetName:"13 LINE連携",rows:[row]});
         return json(res,201,{ok:true,submitted:true,alreadySubmitted:false,status:"確認待ち",appended:appended.appended||1});
+      }
+      if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+      if (req.method==="GET" && url.pathname==="/v1/status") return json(res,200,{ok:true,system:"ONE JARVIS",version:"1.2.0",mode:"read-only",googleSheetsConfigured:Boolean(sheetsUrl&&sheetsToken)});
+      if (req.method==="GET" && url.pathname==="/v1/sheets/list") {
+        const r=await callSheets("listSheets"); return json(res,200,{ok:true,sheets:r.sheets});
+      }
+      if (req.method==="GET" && url.pathname==="/v1/sheets/read") {
+        const sheetName=url.searchParams.get("sheetName")||"", startRow=Number(url.searchParams.get("startRow")||1), numRows=Number(url.searchParams.get("numRows")||20);
+        if (!validSheetName(sheetName) || !Number.isInteger(startRow) || startRow<1 || !Number.isInteger(numRows) || numRows<1 || numRows>100) return json(res,400,{ok:false,error:"Invalid read parameters"});
+        const r=await callSheets("readRows",{sheetName,startRow,numRows}); return json(res,200,{ok:true,rows:r.rows});
       }
       if (req.method==="POST" && url.pathname==="/v1/sheets/append") {
         if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
