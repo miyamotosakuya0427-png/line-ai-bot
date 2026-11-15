@@ -183,7 +183,7 @@ test("admin bootstrap and review routes pass only LINE-verified identities to Ap
     fetchImpl:async(url,options)=>{
       if(url==="https://api.line.me/oauth2/v2.1/verify") {
         const form=new URLSearchParams(options.body);
-        const isBootstrap=form.get("id_token")==="bootstrap-id-token";
+        const isBootstrap=form.get("id_token")==="bootstrap-id-token-valid-length";
         return {ok:true,json:async()=>({
           iss:"https://access.line.me",
           aud:"1234567890",
@@ -201,7 +201,7 @@ test("admin bootstrap and review routes pass only LINE-verified identities to Ap
   try {
     const bootstrap=await fetch(`http://127.0.0.1:${app.address().port}/v1/line/admin/bootstrap`,{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({idToken:"bootstrap-id-token"})
+      body:JSON.stringify({idToken:"bootstrap-id-token-valid-length"})
     });
     assert.equal(bootstrap.status,200);
     assert.deepEqual(await bootstrap.json(),{ok:true,status:"有効",role:"管理者"});
@@ -212,7 +212,7 @@ test("admin bootstrap and review routes pass only LINE-verified identities to Ap
 
     const review=await fetch(`http://127.0.0.1:${app.address().port}/v1/line/admin/review`,{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({idToken:"review-id-token",linkId:"PENDING-test",decision:"approve",adminLineUserId:"U"+"f".repeat(32)})
+      body:JSON.stringify({idToken:"review-id-token-valid-length",linkId:"PENDING-test",decision:"approve",adminLineUserId:"U"+"f".repeat(32)})
     });
     assert.equal(review.status,200);
     assert.deepEqual(await review.json(),{ok:true,linkId:"PENDING-test",status:"有効"});
@@ -232,7 +232,7 @@ test("admin bootstrap rejects an unverified LINE identity", async () => {
   try {
     const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/line/admin/bootstrap`,{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({idToken:"unverified-token"})
+      body:JSON.stringify({idToken:"unverified-token-valid-length"})
     });
     assert.equal(response.status,401);
   } finally { await new Promise(resolve=>app.close(resolve)); }
