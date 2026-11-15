@@ -73,3 +73,42 @@ test("company daily reports API applies date and result limits",async()=>{
     assert.equal(invalid.status,400);
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
+
+
+test("company analytics API returns bounded aggregate data only",async()=>{
+  const {app,calls}=fixture();
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  try {
+    const response=await fetch(\`http://127.0.0.1:\${app.address().port}/v1/company/analytics\`,{headers:{Authorization:\`Bearer \${token}\`}});
+    const result=await response.json();
+    assert.equal(response.status,200);
+    assert.equal(result.analytics.reportCount,1);
+    assert.equal(result.analytics.workerDays,3);
+    assert.equal(result.analytics.estimatedPersonHours,24);
+    assert.equal(result.analytics.topSites[0].name,"岡山現場");
+    assert.equal(JSON.stringify(result).includes("宮本朔也"),false);
+    assert.deepEqual(calls.map(call=>call.action),["listSheets","readRows"]);
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
+
+test("company ask queues an AI question with aggregate context and no personal data",async()=>{
+  const {calls}=fixture();
+  let created;
+  const jobStore={create:async value=>{created=value;return {created:true,job:{id:"00000000-0000-4000-8000-000000000001",status:"queued"}};}};
+  const app=createServer({token,sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"s".repeat(128),fetchImpl:async(url,options)=>{
+    const body=JSON.parse(options.body);calls.push(body);
+    if(body.action==="listSheets") return {ok:true,json:async()=>({ok:true,sheets:["03 日報"]})};
+    return {ok:true,json:async()=>({ok:true,rows:[dailyHeaders,["DR-1","2026-11-15T09:00:00.000Z","2026-11-15","EMP003","宮本朔也","岡山現場","掘削作業","08:00","17:00",60,3,"バックホウ","RC30",""]]})};
+  },jobStore});
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  try {
+    const response=await fetch(\`http://127.0.0.1:\${app.address().port}/v1/company/ask\`,{method:"POST",headers:{Authorization:\`Bearer \${token}\`,"Content-Type":"application/json"},body:JSON.stringify({request:"現場の稼働状況を教えて"})});
+    const result=await response.json();
+    assert.equal(response.status,201);
+    assert.equal(result.job.status,"queued");
+    assert.equal(created.type,"assistant.company_question");
+    assert.equal(created.payload.companyContext.dailyReportAnalytics.reportCount,1);
+    assert.equal(JSON.stringify(created.payload.companyContext).includes("宮本朔也"),false);
+    assert.deepEqual(calls.map(call=>call.action),["listSheets","readRows"]);
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
