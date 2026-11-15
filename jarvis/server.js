@@ -55,10 +55,16 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         if (now-lastPublicSheetsCheck<30000) return json(res,429,{ok:false,googleSheets:"check rate limited"});
         lastPublicSheetsCheck=now;
         try {
-          await callSheets("ping");
-          return json(res,200,{ok:true,googleSheets:"connected"});
+          const listed=await callSheets("listSheets");
+          const targetSheet="15設定";
+          if (!Array.isArray(listed.sheets) || !listed.sheets.includes(targetSheet)) {
+            return json(res,200,{ok:true,googleSheets:"connected",sheetCount:Array.isArray(listed.sheets)?listed.sheets.length:0,readTest:"target sheet not found"});
+          }
+          const read=await callSheets("readRows",{sheetName:targetSheet,startRow:1,numRows:1});
+          const firstRow=Array.isArray(read.rows)&&Array.isArray(read.rows[0])?read.rows[0]:[];
+          return json(res,200,{ok:true,googleSheets:"connected",sheetCount:listed.sheets.length,readTest:"success",rowsRead:Array.isArray(read.rows)?read.rows.length:0,columnsRead:firstRow.length});
         } catch {
-          return json(res,503,{ok:false,googleSheets:"not connected"});
+          return json(res,503,{ok:false,googleSheets:"not connected",readTest:"failed"});
         }
       }
       if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
