@@ -18,3 +18,14 @@ test("subsidy agent sends official page snapshots to the model and labels unveri
  assert.match(result.answer,/個別公募要領未確認/);assert.match(modelBody.instructions,/募集状況・締切/);assert.match(modelBody.input,/verified-page-fetched/);
 });
 test("HTML cleaner decodes entities and removes scripts/styles",()=>{assert.equal(stripHtml("<style>x</style><p>A&amp;B&nbsp;C</p><script>bad</script>"),"A&B C");});
+
+test("subsidy monitor compares official page fingerprints across prior completed runs",async()=>{
+ let previousJob=null;
+ const store={list:async()=>previousJob?[previousJob]:[]};
+ const handler=createSubsidyResearchHandler({apiKey:"test",store,fetchImpl:async()=>({ok:true,json:async()=>({output_text:"比較済み"})}),researchFetchImpl:async url=>({url,status:200,ok:true,headers:{get:()=>"text/html"},text:async()=>"<title>制度情報</title><p>同じ内容</p>"})});
+ const first=await handler({request:"補助金の最新情報"});
+ assert.ok(first.changes.every(x=>x.status==="new"));
+ previousJob={type:"department.office",result:{sourceFingerprints:first.sourceFingerprints}};
+ const second=await handler({request:"補助金の最新情報"});
+ assert.ok(second.changes.every(x=>x.status==="unchanged"));
+});
