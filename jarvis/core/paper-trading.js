@@ -82,6 +82,7 @@ function createPaperTradingEngine({policy={}, clock=()=>new Date().toISOString()
     },
     openPaperTrade(input) {
       if (halted) throw new Error("Paper trading halted: "+haltReason);
+      if (openTrades().length>=limits.maxOpenPositions) throw new Error("Open-position limit reached");
       if (trades.length>=MAX_TRADES) throw new Error("Trade capacity reached");
       const {id=crypto.randomUUID(),symbol,side,quantity,entryPrice,stopPrice,openedAt=clock(),strategyId,signalId="",sourceSnapshotId="",reason=""}=input||{};
       if (typeof id!=="string"||id.length<1||id.length>100||seenIds.has(id)) throw new Error("Invalid or duplicate trade id");
