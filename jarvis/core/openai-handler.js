@@ -1,7 +1,8 @@
 "use strict";
 
 function createOpenAIHandler({ apiKey = process.env.OPENAI_API_KEY || "", model = process.env.JARVIS_OPENAI_MODEL || "gpt-5.6-luna", fetchImpl = fetch, instructions = "", maxOutputTokens = 1200 } = {}) {
-  if (!Number.isInteger(maxOutputTokens) || maxOutputTokens < 256 || maxOutputTokens > 10000) throw new Error("Invalid maximum output token budget");\n  return async function handleAssistantRequest(payload) {
+  if (!Number.isInteger(maxOutputTokens) || maxOutputTokens < 256 || maxOutputTokens > 10000) throw new Error("Invalid maximum output token budget");
+  return async function handleAssistantRequest(payload) {
     if (!apiKey) throw new Error("OpenAI API is not configured");
     const request = typeof payload?.request === "string" ? payload.request.trim() : "";
     if (!request || request.length > 4000) throw new Error("Invalid assistant request");
