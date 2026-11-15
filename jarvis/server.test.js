@@ -81,6 +81,61 @@ test("unknown routes are not found", async () => {
 });
 
 
+test("authenticated LINE linking validates employee and appends a mapped row", async () => {
+  const sent = [];
+  const app = createServer({
+    token,
+    sheetsUrl: "https://script.google.com/macros/s/test-id/exec",
+    sheetsToken: "h".repeat(128),
+    fetchImpl: async (url, options) => {
+      const body = JSON.parse(options.body);
+      sent.push(body);
+      if (body.action === "listSheets") return { ok: true, json: async () => ({ ok: true, sheets: ["01 従業員", "13 LINE連携"] }) };
+      if (body.action === "readRows" && body.sheetName === "01 従業員") {
+        return { ok: true, json: async () => ({ ok: true, rows: [["従業員ID","氏名"],["EMP001","信原 晴"]] }) };
+      }
+      if (body.action === "readRows" && body.sheetName === "13 LINE連携") {
+        return { ok: true, json: async () => ({ ok: true, rows: [["連携ID","LINEユーザーID","LINE表示名","従業員ID"]] }) };
+      }
+      return { ok: true, json: async () => ({ ok: true, appended: 1 }) };
+    }
+  });
+  await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${app.address().port}/v1/line/link`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ lineUserId: "U" + "a".repeat(32), displayName: "晴", employeeId: "EMP001" })
+    });
+    const result = await response.json();
+    assert.equal(response.status, 201);
+    assert.deepEqual(result, { ok: true, linked: true, alreadyLinked: false, appended: 1 });
+    const write = sent.find(x => x.action === "appendRows");
+    assert.equal(write.sheetName, "13 LINE連携");
+    assert.equal(write.rows[0][1], "U" + "a".repeat(32));
+    assert.equal(write.rows[0][3], "EMP001");
+    assert.equal(write.rows[0][4], "信原 晴");
+    assert.equal(write.rows[0][7], "有効");
+  } finally {
+    await new Promise(resolve => app.close(resolve));
+  }
+});
+
+test("LINE linking rejects malformed LINE user IDs", async () => {
+  const app = createServer({ token });
+  await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${app.address().port}/v1/line/link`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ lineUserId: "not-a-line-id", employeeId: "EMP001" })
+    });
+    assert.equal(response.status, 400);
+  } finally {
+    await new Promise(resolve => app.close(resolve));
+  }
+});
+
 test("Google Sheets list route forwards authenticated request to Apps Script", async () => {
   let sent;
   const sheetsUrl = "https://script.google.com/macros/s/test-id/exec";
