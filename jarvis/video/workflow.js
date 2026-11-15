@@ -1,6 +1,14 @@
 "use strict";
 
-const DEFAULT_NARRATION = Object.freeze({\n  provider: "vidiq",\n  voiceName: "Hinata",\n  voiceId: "j210dv0vWm7fCknyQpbA",\n  language: "ja",\n  output: "mp3"\n});\n\nconst STAGES = Object.freeze([
+const DEFAULT_NARRATION = Object.freeze({
+  provider: "vidiq",
+  voiceName: "Hinata",
+  voiceId: "j210dv0vWm7fCknyQpbA",
+  language: "ja",
+  output: "mp3"
+});
+
+const STAGES = Object.freeze([
   "planned",
   "scripted",
   "assets_ready",
