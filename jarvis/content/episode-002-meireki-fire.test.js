@@ -3,6 +3,7 @@ const test=require("node:test");
 const assert=require("node:assert/strict");
 const fs=require("node:fs");
 const path=require("node:path");
+const {createScriptMetrics}=require("../core/script-metrics");
 const script=fs.readFileSync(path.join(__dirname,"episode-002-meireki-fire.md"),"utf8");
 
 test("Meireki fire episode attributes casualty and date claims to official disaster report",()=>{
@@ -33,7 +34,9 @@ test("Meireki fire script distinguishes firefighter command systems and includes
 });
 
 test("Meireki fire narration is sized for an 8–12 minute spoken video",()=>{
- const body=script.split("## Narration script")[1].split("## Pronunciation / narration checklist")[0];
- const characters=[...body.replace(/### .*/g,"").replace(/\s/g,"")].length;
+ const metrics=createScriptMetrics(script);
+ const characters=metrics.characters;
+ assert.equal(metrics.status,"estimated_range_ok");
+ assert.equal(metrics.requiresRecordedTiming,true);
  assert.ok(characters>=3360&&characters<=4200,"narration character count was "+characters);
 });
