@@ -253,6 +253,7 @@
 - Existing Descript composition is 24 seconds and scene-material oriented; the separate read-check project is a 32.3-second audio transcript. Neither is a completed 8–12 minute episode.
 - The current read-check transcript is only about 32 seconds; it must not be treated as the final narration for this script.
 - Existing audio files are named Kenichi; reconcile with the selected Hinata preference before recording or replacing any voice.
+- The separate 32.3-second read-check transcript is not the final script. It contains 「火消路」, which is not supported by the cited source register; prefer the sourced terms 「火除地」 and 「広小路」 unless a primary source verifies another term. ASR text alone does not prove correct pronunciation; listen to the audio before approval.
 - The 68,000+ death figure is attributed to the Cabinet Office report; avoid presenting it as an exact universally agreed count.
 - Do not claim a single proven ignition source or that all of Edo burned.
 - Use original or licensed visual assets. Do not assume archival-looking AI images are actual historical records.
