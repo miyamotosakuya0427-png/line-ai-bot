@@ -1,6 +1,10 @@
 "use strict";
 const http = require("node:http");
 const crypto = require("node:crypto");
+const { createJobStore } = require("./core/job-store");
+const { createWorker } = require("./core/worker");
+const { createOpenAIHandler } = require("./core/openai-handler");
+const { dashboardPage } = require("./dashboard");
 const PORT = Number(process.env.PORT || 3000);
 const MAX_BODY_BYTES = 10 * 1024;
 const TOKEN = process.env.JARVIS_API_TOKEN || "";
@@ -8,6 +12,7 @@ const SHEETS_URL = process.env.JARVIS_SHEETS_URL || "";
 const SHEETS_TOKEN = process.env.JARVIS_SHEETS_TOKEN || "";
 const LINE_LOGIN_CHANNEL_ID = process.env.LINE_LOGIN_CHANNEL_ID || "";
 const LIFF_ID = process.env.LIFF_ID || "";
+const JOB_STORE_PATH = process.env.JARVIS_JOB_STORE_PATH || "";
 
 function json(res, status, payload, extraHeaders = {}) {
   res.writeHead(status, {"Content-Type":"application/json; charset=utf-8","Cache-Control":"no-store","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer",...extraHeaders});
@@ -76,7 +81,7 @@ dailyForm.addEventListener("submit",async(event)=>{event.preventDefault();if(!id
 </script></body></html>`;
 }
 
-function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch}={}) {
+function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,worker=null}={}) {
   async function callSheets(action, fields={}) {
     if (!sheetsUrl || !sheetsToken) { const e=new Error("Google Sheets integration is not configured"); e.statusCode=503; throw e; }
     const u=new URL(sheetsUrl);
@@ -94,6 +99,10 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
   return http.createServer(async(req,res)=>{
     try {
       const url=new URL(req.url,"http://localhost");
+      if (req.method==="GET" && url.pathname==="/") {
+        res.writeHead(200,{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store","Content-Security-Policy":"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'","X-Frame-Options":"DENY"});
+        return res.end(dashboardPage());
+      }
       if (req.method==="GET" && url.pathname==="/health") return json(res,200,{ok:true,service:"ONE JARVIS",status:"running"});
       if (req.method==="GET" && url.pathname==="/health/sheets/metadata") {
         if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
@@ -312,7 +321,49 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         return json(res,200,{ok:true,linkId:result.linkId,status:result.status});
       }
       if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
-      if (req.method==="GET" && url.pathname==="/v1/status") return json(res,200,{ok:true,system:"ONE JARVIS",version:"1.2.0",mode:"read-only",googleSheetsConfigured:Boolean(sheetsUrl&&sheetsToken)});
+      if (url.pathname.startsWith("/v1/jobs")) {
+        if (!jobStore) return json(res,503,{ok:false,error:"Persistent job storage is not configured"});
+        if (req.method==="GET" && url.pathname==="/v1/jobs") {
+          const status=url.searchParams.get("status")||undefined;
+          const limit=Number(url.searchParams.get("limit")||50);
+          if ((status && !["queued","running","succeeded","failed","cancelled"].includes(status)) || !Number.isInteger(limit) || limit<1 || limit>200) {
+            return json(res,400,{ok:false,error:"Invalid job list parameters"});
+          }
+          const jobs=await jobStore.list({status,limit});
+          return json(res,200,{ok:true,jobs});
+        }
+        if (req.method==="POST" && url.pathname==="/v1/jobs") {
+          if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+          const d=await readJson(req);
+          if (d.type!=="assistant.request" || !d.payload || typeof d.payload!=="object" || Array.isArray(d.payload) ||
+              typeof d.payload.request!=="string" || !d.payload.request.trim() || d.payload.request.length>4000 ||
+              (d.idempotencyKey!==undefined && (typeof d.idempotencyKey!=="string" || d.idempotencyKey.length>128))) {
+            return json(res,400,{ok:false,error:"Invalid job request"});
+          }
+          const result=await jobStore.create({type:d.type,payload:{request:d.payload.request.trim()},idempotencyKey:d.idempotencyKey||""});
+          return json(res,result.created?201:200,{ok:true,created:result.created,job:result.job});
+        }
+        const match=/^\/v1\/jobs\/([0-9a-f-]{36})(?:\/(cancel|retry))?$/.exec(url.pathname);
+        if (match && req.method==="GET" && !match[2]) {
+          const job=await jobStore.get(match[1]);
+          return job?json(res,200,{ok:true,job}):json(res,404,{ok:false,error:"Job not found"});
+        }
+        if (match && req.method==="POST" && match[2]) {
+          const job=await jobStore.get(match[1]);
+          if (!job) return json(res,404,{ok:false,error:"Job not found"});
+          if (match[2]==="cancel" && ["queued","failed"].includes(job.status)) {
+            const updated=await jobStore.transition(job.id,"cancelled");
+            return json(res,200,{ok:true,job:updated});
+          }
+          if (match[2]==="retry" && job.status==="failed") {
+            const updated=await jobStore.transition(job.id,"queued");
+            return json(res,200,{ok:true,job:updated});
+          }
+          return json(res,409,{ok:false,error:"Job cannot be changed from its current state"});
+        }
+        return json(res,404,{ok:false,error:"Not Found"});
+      }
+      if (req.method==="GET" && url.pathname==="/v1/status") return json(res,200,{ok:true,system:"ONE JARVIS",version:"1.3.0",mode:"read-only",googleSheetsConfigured:Boolean(sheetsUrl&&sheetsToken),jobQueueConfigured:Boolean(jobStore),workerEnabled:Boolean(worker)});
       if (req.method==="GET" && url.pathname==="/v1/sheets/list") {
         const r=await callSheets("listSheets"); return json(res,200,{ok:true,sheets:r.sheets});
       }
@@ -344,10 +395,17 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
   });
 }
 if (require.main===module) {
-  if (!TOKEN||Buffer.byteLength(TOKEN,"utf8")<32) { console.error("JARVIS_API_TOKEN must be configured with at least 32 bytes."); process.exit(1); }
-  const server=createServer(); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
-  server.listen(PORT,"0.0.0.0",()=>console.log(`ONE JARVIS running on port ${PORT}`));
-  const shutdown=signal=>{ console.log(`Received ${signal}; shutting down.`); server.close(error=>{if(error){console.error("Graceful shutdown failed.");process.exit(1);}process.exit(0);}); setTimeout(()=>process.exit(1),10000).unref(); };
-  process.on("SIGTERM",()=>shutdown("SIGTERM")); process.on("SIGINT",()=>shutdown("SIGINT"));
+  (async()=>{
+    if (!TOKEN||Buffer.byteLength(TOKEN,"utf8")<32) throw new Error("JARVIS_API_TOKEN must be configured with at least 32 bytes.");
+    const jobStore=JOB_STORE_PATH?createJobStore({filePath:JOB_STORE_PATH}):null;
+    const workerEnabled=process.env.JARVIS_WORKER_ENABLED==="true";
+    if (workerEnabled && (!jobStore || !process.env.OPENAI_API_KEY)) throw new Error("Worker requires JARVIS_JOB_STORE_PATH and OPENAI_API_KEY.");
+    const worker=workerEnabled?createWorker({store:jobStore,handlers:{"assistant.request":createOpenAIHandler()}}):null;
+    if (worker) { await worker.start(); worker.startPolling({intervalMs:Number(process.env.JARVIS_WORKER_POLL_MS||1500)}); }
+    const server=createServer({jobStore,worker}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
+    const shutdown=signal=>{ console.log(`Received ${signal}; shutting down.`); if(worker)worker.stop(); server.close(error=>{if(error){console.error("Graceful shutdown failed.");process.exit(1);}process.exit(0);}); setTimeout(()=>process.exit(1),10000).unref(); };
+    process.on("SIGTERM",()=>shutdown("SIGTERM")); process.on("SIGINT",()=>shutdown("SIGINT"));
+    server.listen(PORT,"0.0.0.0",()=>console.log(`ONE JARVIS running on port ${PORT}`));
+  })().catch(error=>{console.error(error.message);process.exit(1);});
 }
 module.exports={createServer,isAuthorized,readJson};
