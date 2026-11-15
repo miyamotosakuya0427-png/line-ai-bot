@@ -7,8 +7,8 @@ const MAX_REDIRECTS = 3;
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 
 function isAllowedOfficialHost(hostname, extraHosts = []) {
-  const host = String(hostname || "").toLowerCase().replace(/\\.$/, "");
-  if (!host || host.length > 253 || host === "localhost" || /^\\d+(?:\\.\\d+){3}$/.test(host) || host.includes(":")) return false;
+  const host = String(hostname || "").toLowerCase().replace(/\.$/, "");
+  if (!host || host.length > 253 || host === "localhost" || /^\d+(?:\.\d+){3}$/.test(host) || host.includes(":")) return false;
   if (extraHosts.some(value => host === String(value).toLowerCase())) return true;
   return [".go.jp", ".lg.jp", ".ac.jp", ".ed.jp"].some(suffix => host.endsWith(suffix));
 }
@@ -28,19 +28,19 @@ function decodeEntities(value) {
     .replace(/&nbsp;|&#160;/gi, " ")
     .replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">")
     .replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'")
-    .replace(/&#(\\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
     .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)));
 }
 
 function htmlToText(html) {
   return decodeEntities(String(html || "")
-    .replace(/<!--[\\s\\S]*?-->/g, " ")
-    .replace(/<(script|style|noscript|svg|template)\\b[^>]*>[\\s\\S]*?<\\/\\1>/gi, " ")
-    .replace(/<\\/(p|div|li|tr|h[1-6]|section|article|br)\\s*>/gi, "\\n")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<(script|style|noscript|svg|template)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<\/(p|div|li|tr|h[1-6]|section|article|br)\s*>/gi, "\n")
     .replace(/<[^>]+>/g, " "))
-    .replace(/[\\t\\f\\v ]+/g, " ")
-    .replace(/ *\\n */g, "\\n")
-    .replace(/\\n{3,}/g, "\\n\\n")
+    .replace(/[\t\f\v ]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
@@ -98,9 +98,9 @@ async function fetchOfficialSource(urlValue, {
   }
   if (!response.ok) throw new Error("Official source returned HTTP " + response.status);
   const contentType = response.headers?.get?.("content-type") || "";
-  if (!/^(text\\/html|application\\/xhtml\\+xml)(?:\\s*;|$)/i.test(contentType)) throw new Error("Only HTML official sources are supported");
+  if (!/^(text\/html|application\/xhtml\+xml)(?:\s*;|$)/i.test(contentType)) throw new Error("Only HTML official sources are supported");
   const html = await readBoundedBody(response, maxBytes);
-  const titleRaw = (/<title\\b[^>]*>([\\s\\S]*?)<\\/title>/i.exec(html) || [])[1] || "";
+  const titleRaw = (/<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(html) || [])[1] || "";
   const text = htmlToText(html);
   if (!text) throw new Error("Official source contains no readable text");
   return {
