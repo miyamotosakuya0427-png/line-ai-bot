@@ -1,9 +1,10 @@
 "use strict";
 
-function createWorker({ store, handlers = {} } = {}) {
+function createWorker({ store, handlers = {}, maxAttempts = 3 } = {}) {
   if (!store || typeof store.list !== "function" || typeof store.transition !== "function") {
     throw new Error("A compatible durable job store is required");
   }
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 10) throw new Error("Invalid max attempts");
   const registry = new Map(Object.entries(handlers));
   for (const [type, handler] of registry) {
     if (!/^[a-z][a-z0-9._-]{1,63}$/.test(type) || typeof handler !== "function") {
@@ -45,8 +46,12 @@ function createWorker({ store, handlers = {} } = {}) {
         return { processed: true, job: succeeded };
       } catch (error) {
         const message = error && typeof error.message === "string" ? error.message : "Job failed";
+        if (error?.retryable === true && running.attempts < maxAttempts) {
+          const queued = await store.transition(running.id, "queued");
+          return { processed: true, job: queued, retryScheduled: true };
+        }
         const failed = await store.transition(running.id, "failed", { error: message.slice(0, 500) });
-        return { processed: true, job: failed };
+        return { processed: true, job: failed, retryScheduled: false };
       }
     });
     active = operation.catch(() => {});
