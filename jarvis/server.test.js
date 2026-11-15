@@ -244,3 +244,41 @@ test("public LINE link status reports counts without exposing row values", async
     await new Promise(resolve => app.close(resolve));
   }
 });
+
+
+test("public record counts report employee and daily report totals without exposing values", async () => {
+  const app = createServer({
+    token,
+    sheetsUrl: "https://script.google.com/macros/s/test-id/exec",
+    sheetsToken: "g".repeat(128),
+    fetchImpl: async (url, options) => {
+      const body = JSON.parse(options.body);
+      if (body.action === "listSheets") {
+        return { ok: true, json: async () => ({ ok: true, sheets: ["01 従業員", "03 日報"] }) };
+      }
+      if (body.sheetName === "01 従業員") {
+        return { ok: true, json: async () => ({ ok: true, rows: [
+          ["EMP-secret", "氏名A"], ["EMP-secret-2", "氏名B"], ["", ""]
+        ] }) };
+      }
+      return { ok: true, json: async () => ({ ok: true, rows: [
+        ["REPORT-secret", "2026-11-01"], ["", ""]
+      ] }) };
+    }
+  });
+  await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${app.address().port}/health/sheets/record-counts`);
+    const result = await response.json();
+    assert.equal(response.status, 200);
+    assert.deepEqual(result, {
+      ok: true,
+      employee: { sheetFound: true, sampledRows: 3, populatedRows: 2, sampleLimit: 100, limitedToFirst100: true },
+      dailyReport: { sheetFound: true, sampledRows: 2, populatedRows: 1, sampleLimit: 100, limitedToFirst100: true }
+    });
+    assert.equal(JSON.stringify(result).includes("EMP-secret"), false);
+    assert.equal(JSON.stringify(result).includes("REPORT-secret"), false);
+  } finally {
+    await new Promise(resolve => app.close(resolve));
+  }
+});
