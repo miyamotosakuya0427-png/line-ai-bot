@@ -16,7 +16,7 @@ test("only HTTPS official government, local government, university, or explicitl
 });
 
 test("HTML is reduced to readable text and script/style content is excluded", () => {
-  const text = htmlToText("<html><title>資料 &amp; 記録</title><script>secret()</script><p>江戸の町</p><style>.x{}</style><p>火除地</p></html>");
+  const text = htmlToText("<html><head><title>資料 &amp; 記録</title></head><body><script>secret()</script><p>江戸の町</p><style>.x{}</style><p>火除地</p></body></html>");
   assert.match(text, /江戸の町/);
   assert.match(text, /火除地/);
   assert.doesNotMatch(text, /secret|資料/);
