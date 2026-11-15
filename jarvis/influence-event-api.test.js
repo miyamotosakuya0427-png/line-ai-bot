@@ -25,5 +25,5 @@ test("influence API stores and lists source-backed events without enabling trade
  const post=await fetch(base+"/v1/signals/influence/events",{method:"POST",headers,body:JSON.stringify(event)});
  assert.equal(post.status,201);const created=await post.json();assert.equal(created.analysisQueued,false);assert.equal(created.realMoneyTradingEnabled,false);assert.equal(created.event.verification,"unverified");
  const duplicate=await fetch(base+"/v1/signals/influence/events",{method:"POST",headers,body:JSON.stringify(event)});assert.equal((await duplicate.json()).created,false);
- const get=await fetch(base+"/v1/signals/influence/events?platform=truth_social");const listed=await get.json();assert.equal(listed.events.length,1);assert.equal(listed.events[0].actor,"Donald Trump");
+ const get=await fetch(base+"/v1/signals/influence/events?platform=truth_social",{headers});const listed=await get.json();assert.equal(get.status,200,JSON.stringify(listed));assert.equal(listed.events.length,1);assert.equal(listed.events[0].actor,"Donald Trump");
 }));
