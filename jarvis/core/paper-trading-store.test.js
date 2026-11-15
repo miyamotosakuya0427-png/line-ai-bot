@@ -51,3 +51,17 @@ test("corrupt journal fails closed instead of silently resetting history",async 
 test("journal requires an absolute path",()=>{
  assert.throws(()=>createPaperTradingStore({filePath:"relative.jsonl"}),/absolute/);
 });
+
+test("paper journal enforces its byte cap before every append",async t=>{
+ const f=await fixture(t);
+ const store=createPaperTradingStore({filePath:f.filePath,clock:f.clock,maxJournalBytes:1024});
+ await store.init();
+ let blocked=false;
+ for(let i=0;i<20;i++){
+  try{await store.recordSnapshot({source:"market.example",symbol:"7203",capturedAt:f.clock(),price:1000+i});}
+  catch(error){assert.match(error.message,/size limit reached/);blocked=true;break;}
+ }
+ assert.equal(blocked,true);
+ const rows=await store.listSnapshots({limit:100});
+ assert.ok(rows.length>0&&rows.length<20);
+});
