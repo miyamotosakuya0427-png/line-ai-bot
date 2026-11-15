@@ -9,7 +9,7 @@ test("aggregates daily reports by site, equipment, workers and estimated person-
   {workDate:"2026-11-14",siteName:"倉敷現場",workerCount:1,startTime:"08:00",endTime:"17:00",breakMinutes:60,equipment:"バックホウ"}
  ]);
  assert.equal(result.reportCount,3);assert.equal(result.siteCount,2);assert.equal(result.workerDays,6);assert.equal(result.estimatedPersonHours,46);
- assert.deepEqual(result.topSites[0],{name:"岡山現場",count:2});assert.deepEqual(result.topEquipment[0],{name:"バックホウ",count:2});
+ assert.deepEqual(result.topSites[0],{name:"岡山現場",count:2});assert.deepEqual(result.topEquipment[0],{name:"ダンプ",count:2});
 });
 test("ignores malformed times and bounds output to top ten",()=>{
  const reports=Array.from({length:12},(_,i)=>({workDate:"2026-11-15",siteName:"現場"+i,workerCount:1,startTime:"bad",endTime:"17:00",breakMinutes:0,equipment:""}));
