@@ -41,7 +41,7 @@ function summarizeFinancialRecords(records) {
     }
   }
   const profitYen = revenueYen - expenseYen;
-  const sorted = type => [...groups.values()].filter(x=>x.type===type).sort((a,b)=>a.name.localeCompare(b.name,"ja")).map(x=>({...x,profitYen:x.revenueYen-x.expenseYen}));
+  const sorted = type => [...groups.values()].filter(x=>x.type===type).sort((a,b)=>(b.revenueYen+b.expenseYen)-(a.revenueYen+a.expenseYen)||a.name.localeCompare(b.name,"ja")).slice(0,10).map(x=>({...x,profitYen:x.revenueYen-x.expenseYen}));
   return {
     recordCount: normalized.length,
     revenueYen,
