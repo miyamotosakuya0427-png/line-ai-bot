@@ -600,6 +600,44 @@ test("JARVIS dashboard is served with restrictive security headers and no server
 });
 
 
+test("video batch plan endpoint queues an idempotent draft task for ONE CONTENT without external actions", async t => {
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-video-plan-e2e-"));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const jobStore=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
+  const videoBatchStore=createVideoBatchStore({filePath:path.join(dir,"videos.jsonl")});
+  await videoBatchStore.createBatch({items:[{id:"V01",title:"江戸の町を変えた大火",topic:"明暦の大火と江戸の都市改造"}]});
+  const worker=createWorker({store:jobStore,handlers:{"department.content":async payload=>({draft:true,videoId:payload.videoId,request:payload.request})}});
+  await worker.start();
+  const app=createServer({token,jobStore,videoBatchStore,worker});
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  const root="http://127.0.0.1:"+app.address().port;
+  const headers={Authorization:"Bearer "+token,"Content-Type":"application/json"};
+  try {
+    const first=await fetch(root+"/v1/content/videos/V01/plan",{method:"POST",headers,body:JSON.stringify({})});
+    assert.equal(first.status,201);
+    const result=await first.json();
+    assert.equal(result.created,true);
+    assert.equal(result.job.type,"department.content");
+    assert.equal(result.job.payload.videoId,"V01");
+    assert.match(result.job.payload.request,/要一次資料確認/);
+    assert.match(result.job.payload.request,/YouTube公開/);
+    assert.equal(result.externalActionsEnabled,false);
+    const duplicate=await fetch(root+"/v1/content/videos/V01/plan",{method:"POST",headers,body:JSON.stringify({})});
+    assert.equal(duplicate.status,200);
+    assert.equal((await duplicate.json()).created,false);
+    const run=await worker.runNext();
+    assert.equal(run.job.status,"succeeded");
+    assert.equal(run.job.result.videoId,"V01");
+    const stillUnverified=await videoBatchStore.get("V01");
+    assert.equal(stillUnverified.stage,"research");
+    const denied=await fetch(root+"/v1/content/videos/V01/plan",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+    assert.equal(denied.status,401);
+  } finally {
+    worker.stop();
+    await new Promise(resolve=>app.close(resolve));
+  }
+});
+
 test("video batch APIs require auth, persist 100-item queues, and expose owner review", async t => {
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-video-api-"));
   t.after(()=>fs.rm(dir,{recursive:true,force:true}));
