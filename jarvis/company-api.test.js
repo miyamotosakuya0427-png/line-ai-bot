@@ -79,7 +79,7 @@ test("company analytics API returns bounded aggregate data only",async()=>{
   const {app,calls}=fixture();
   await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
   try {
-    const response=await fetch(\`http://127.0.0.1:\${app.address().port}/v1/company/analytics\`,{headers:{Authorization:\`Bearer \${token}\`}});
+    const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/company/analytics`,{headers:{Authorization:`Bearer ${token}`}});
     const result=await response.json();
     assert.equal(response.status,200);
     assert.equal(result.analytics.reportCount,1);
@@ -102,7 +102,7 @@ test("company ask queues an AI question with aggregate context and no personal d
   },jobStore});
   await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
   try {
-    const response=await fetch(\`http://127.0.0.1:\${app.address().port}/v1/company/ask\`,{method:"POST",headers:{Authorization:\`Bearer \${token}\`,"Content-Type":"application/json"},body:JSON.stringify({request:"現場の稼働状況を教えて"})});
+    const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/company/ask`,{method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},body:JSON.stringify({request:"現場の稼働状況を教えて"})});
     const result=await response.json();
     assert.equal(response.status,201);
     assert.equal(result.job.status,"queued");
