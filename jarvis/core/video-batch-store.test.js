@@ -8,7 +8,7 @@ const {createVideoBatchStore,MAX_BATCH,STAGES}=require("./video-batch-store");
 async function fixture(t){const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-video-batch-"));t.after(()=>fs.rm(dir,{recursive:true,force:true}));return path.join(dir,"videos.jsonl");}
 function item(i,extra={}){return {id:"V"+String(i).padStart(2,"0"),title:"動画"+i,topic:"テーマ"+i,...extra};}
 const E={
- sourceQa:{status:"passed",allClaimsVerified:true,verifiedClaimCount:4,primarySourceCount:2,reviewedBy:"test-reviewer"},
+ sourceQa:{status:"passed",allClaimsVerified:true,verifiedClaimCount:1,primarySourceCount:1,reviewedBy:"test-reviewer",sources:[{url:"https://www.bousai.go.jp/primary-source",title:"内閣府 防災資料",sourceType:"primary",accessedAt:"2026-11-16T00:00:00.000Z",excerpt:"一次資料の原文に基づく確認済みの記述を含む抜粋です。"}],claims:[{claim:"明暦の大火に関する確認済みの記述",status:"verified",sourceUrls:["https://www.bousai.go.jp/primary-source"]}]},
  pronunciation:{status:"passed",readingsReviewed:true,termsChecked:8,reviewedBy:"test-reviewer"},
  narration:{status:"recorded",durationSeconds:600,voiceName:"Hinata",voiceConfirmed:true,recordedBy:"test-recorder"},
  assets:{status:"cleared",assetCount:5,rightsConfirmed:true,clearedBy:"test-editor"},
@@ -18,7 +18,7 @@ const E={
 };
 async function advanceToOwnerReview(s,id){
  await s.saveDraft(id,{script:"台本初稿。出典と読みを確認する。",jobId:"test-job-"+id});
- await s.updateStage(id,"source_qa");
+ await s.updateStage(id,"source_qa",{evidence:{sourceQa:E.sourceQa}});
  await s.updateStage(id,"pronunciation",{evidence:{sourceQa:E.sourceQa}});
  await s.updateStage(id,"narration",{evidence:{pronunciation:E.pronunciation}});
  await s.updateStage(id,"assets",{evidence:{narration:E.narration}});
