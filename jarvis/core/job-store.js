@@ -83,7 +83,7 @@ function createJobStore({ filePath, clock = () => new Date().toISOString() } = {
         }
         if (jobs.size >= MAX_JOBS) throw new Error("Job store capacity reached");
         const now = clock();
-        const job = { id: crypto.randomUUID(), type, payload: clone(payload), status: "queued", attempts: 0, idempotencyKey, createdAt: now, updatedAt: now, error: null };
+        const job = { id: crypto.randomUUID(), type, payload: clone(payload), status: "queued", attempts: 0, idempotencyKey, createdAt: now, updatedAt: now, error: null, result: null };
         await append({ type: "job", job });
         jobs.set(job.id, job);
         return { job: publicJob(job), created: true };
@@ -101,14 +101,16 @@ function createJobStore({ filePath, clock = () => new Date().toISOString() } = {
       return [...jobs.values()].filter(job => !status || job.status === status)
         .sort((a,b) => b.createdAt.localeCompare(a.createdAt)).slice(0,limit).map(publicJob);
     },
-    async transition(id, nextStatus, { error = null } = {}) {
+    async transition(id, nextStatus, { error = null, result = undefined } = {}) {
       await ready();
       return serialize(async () => {
         const current = jobs.get(id);
         if (!current) return null;
         if (!STATES.has(nextStatus) || !NEXT[current.status].has(nextStatus)) throw new Error("Invalid job state transition");
         if (error !== null && (typeof error !== "string" || error.length > 500)) throw new Error("Invalid job error");
-        const next = { ...current, status: nextStatus, updatedAt: clock(), error: nextStatus === "failed" ? (error || "Job failed") : null };
+        if (result !== undefined && !validPayload(result)) throw new Error("Invalid job result");
+        const next = { ...current, status: nextStatus, updatedAt: clock(), error: nextStatus === "failed" ? (error || "Job failed") : null,
+          result: nextStatus === "succeeded" ? (result === undefined ? current.result : clone(result)) : null };
         if (nextStatus === "running") next.attempts += 1;
         await append({ type: "job", job: next });
         jobs.set(id, next);
