@@ -189,3 +189,19 @@ test("financials API includes receivables, collections and overdue amounts when 
   assert.equal(JSON.stringify(rec).includes("顧客秘密"),false);assert.equal(JSON.stringify(rec).includes("口座秘密"),false);
  }finally{await new Promise(resolve=>app.close(resolve));}
 });
+
+
+test("department and subsidy source APIs require authentication and expose approval rules",async()=>{
+ const {app,calls}=fixture();
+ await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+ try{
+  const denied=await fetch(`http://127.0.0.1:${app.address().port}/v1/departments`);
+  assert.equal(denied.status,401);
+  const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/departments`,{headers:{Authorization:`Bearer ${token}`}});
+  const result=await response.json();
+  assert.equal(response.status,200);assert.ok(result.departments.some(d=>d.id==="tax"));assert.ok(result.departments.some(d=>d.id==="office"));
+  assert.equal(result.approvalPolicy.owner.includes("送金"),true);assert.equal(calls.length,0);
+  const sources=await fetch(`http://127.0.0.1:${app.address().port}/v1/subsidy/sources`,{headers:{Authorization:`Bearer ${token}`}});
+  const data=await sources.json();assert.equal(sources.status,200);assert.ok(data.sources.some(s=>s.id==="okayama-city"));assert.equal(data.monitoringEnabled,false);
+ }finally{await new Promise(resolve=>app.close(resolve));}
+});

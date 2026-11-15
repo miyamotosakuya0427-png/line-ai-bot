@@ -8,6 +8,8 @@ const { dashboardPage } = require("./dashboard");
 const { EMPLOYEE_SHEET, DAILY_REPORT_SHEET, readEmployees, readDailyReports, buildCompanyOverview, filterDailyReports } = require("./core/company-reader");
 const { buildDailyReportAnalytics } = require("./core/company-analytics");
 const { SALES_SHEET, EXPENSE_SHEET, INVOICE_SHEET, PAYMENT_SHEET, readFinancialSheets, readReceivablesSheets } = require("./core/financial-sheet-reader");
+const { DEPARTMENTS, APPROVAL } = require("./core/department-agents");
+const { SUBSIDY_SOURCES, PRIORITY_TOPICS, REPORT_FIELDS } = require("./core/subsidy-monitor");
 const PORT = Number(process.env.PORT || 3000);
 const MAX_BODY_BYTES = 10 * 1024;
 const TOKEN = process.env.JARVIS_API_TOKEN || "";
@@ -447,6 +449,11 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
           return json(res,409,{ok:false,error:"Job cannot be changed from its current state"});
         }
         return json(res,404,{ok:false,error:"Not Found"});
+      }
+      if (req.method==="GET" && (url.pathname==="/v1/departments" || url.pathname==="/v1/subsidy/sources")) {
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        if (url.pathname==="/v1/departments") return json(res,200,{ok:true,departments:DEPARTMENTS,approvalPolicy:APPROVAL});
+        return json(res,200,{ok:true,sources:SUBSIDY_SOURCES,priorityTopics:PRIORITY_TOPICS,reportFields:REPORT_FIELDS,monitoringEnabled:false,monitoringNote:"情報源カタログのみ。定期調査・通知はスケジューラー接続後に有効化されます。"});
       }
       if (req.method==="GET" && url.pathname==="/v1/status") return json(res,200,{ok:true,system:"ONE JARVIS",version:"1.3.0",mode:"read-only",googleSheetsConfigured:Boolean(sheetsUrl&&sheetsToken),jobQueueConfigured:Boolean(jobStore),workerEnabled:Boolean(worker)});
       if (req.method==="GET" && url.pathname==="/v1/sheets/list") {
