@@ -17,7 +17,15 @@ function validText(v,max){return typeof v==="string"&&v.trim().length>0&&v.lengt
 function canonicalAction(a){return JSON.stringify({videoId:a.videoId,action:a.action,provider:a.provider,costEstimate:a.costEstimate,destination:a.destination});}
 function validateStageEvidence(targetStage,p,evidence={}){
  const required=(key,predicate,message)=>{const value=evidence&&evidence[key];if(!value||typeof value!=="object"||Array.isArray(value)||!predicate(value))throw new Error("Stage evidence required for "+targetStage+": "+message);return value;};
- const reviewer=v=>validText(v,100);\n const sourceQaValid=v=>{\n  if(v.status!=="passed"||v.allClaimsVerified!==true||!Number.isInteger(v.verifiedClaimCount)||v.verifiedClaimCount<1||!Number.isInteger(v.primarySourceCount)||v.primarySourceCount<1||!reviewer(v.reviewedBy)||!Array.isArray(v.sources)||!Array.isArray(v.claims)||v.sources.length<1||v.claims.length<1)return false;\n  const sources=v.sources.filter(x=>x&&typeof x==="object"&&!Array.isArray(x));\n  if(sources.length!==v.sources.length||sources.some(x=>{let u;try{u=new URL(x.url);}catch{return true;}return u.protocol!=="https:"||!validText(x.title,300)||x.sourceType!=="primary"||!Number.isFinite(Date.parse(x.accessedAt))||!validText(x.excerpt,1200)||x.excerpt.length<20;}))return false;\n  if(sources.filter(x=>x.sourceType==="primary").length!==v.primarySourceCount)return false;\n  const urls=new Set(sources.map(x=>x.url));\n  return v.claims.length===v.verifiedClaimCount&&v.claims.every(c=>c&&typeof c==="object"&&c.status==="verified"&&validText(c.claim,500)&&Array.isArray(c.sourceUrls)&&c.sourceUrls.length>0&&c.sourceUrls.every(url=>urls.has(url)));\n };
+ const reviewer=v=>validText(v,100);
+ const sourceQaValid=v=>{
+  if(v.status!=="passed"||v.allClaimsVerified!==true||!Number.isInteger(v.verifiedClaimCount)||v.verifiedClaimCount<1||!Number.isInteger(v.primarySourceCount)||v.primarySourceCount<1||!reviewer(v.reviewedBy)||!Array.isArray(v.sources)||!Array.isArray(v.claims)||v.sources.length<1||v.claims.length<1)return false;
+  const sources=v.sources.filter(x=>x&&typeof x==="object"&&!Array.isArray(x));
+  if(sources.length!==v.sources.length||sources.some(x=>{let u;try{u=new URL(x.url);}catch{return true;}return u.protocol!=="https:"||!validText(x.title,300)||x.sourceType!=="primary"||!Number.isFinite(Date.parse(x.accessedAt))||!validText(x.excerpt,1200)||x.excerpt.length<20;}))return false;
+  if(sources.filter(x=>x.sourceType==="primary").length!==v.primarySourceCount)return false;
+  const urls=new Set(sources.map(x=>x.url));
+  return v.claims.length===v.verifiedClaimCount&&v.claims.every(c=>c&&typeof c==="object"&&c.status==="verified"&&validText(c.claim,500)&&Array.isArray(c.sourceUrls)&&c.sourceUrls.length>0&&c.sourceUrls.every(url=>urls.has(url)));
+ };
  const duration=v=>Number.isFinite(v)&&v>=480&&v<=720;
  if(targetStage==="script"&&(!validText(p.script,12000)||p.draftStatus!=="needs_source_review"))throw new Error("A saved script draft is required before entering the script stage");
  if(targetStage==="source_qa"){if(!validText(p.script,12000))throw new Error("A saved script draft is required before source QA");return required("sourceQa",sourceQaValid,"verified claim register with primary-source URLs, access dates, and supporting excerpts");}
