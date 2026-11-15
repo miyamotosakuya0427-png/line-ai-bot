@@ -145,7 +145,8 @@ The subsidy monitor also stores bounded SHA-256 fingerprints for successfully fe
 Construction tasks about site activity or daily reports receive read-only aggregate analytics from `03 日報` (maximum 99 sampled rows): site counts, worker-days, estimated person-hours, equipment, and recent work dates. Employee names, IDs, phone numbers, pay, free-text notes, and row-level reports are not passed to the construction agent. Missing or invalid sheet data is reported as unavailable rather than estimated.
 - `GET /v1/content/batches` and `POST /v1/content/batches` (authenticated persistent video queue, up to 100 ideas per batch)
 - `GET /v1/content/approvals` (video owner-review inbox)
-- `GET /v1/content/videos/:id/plan` (read the associated ONE CONTENT draft-job status/result)\n- `POST /v1/content/videos/:id/plan` (enqueue an authenticated ONE CONTENT research/script draft job; completed output is shown in the video queue but is not automatically saved into the script field or advanced to the next stage)
+- `GET /v1/content/videos/:id/plan` (read the associated ONE CONTENT draft-job status/result)
+- `POST /v1/content/videos/:id/plan` (enqueue an authenticated ONE CONTENT research/script draft job; completed output is shown in the video queue but is not automatically saved into the script field or advanced to the next stage)
 - `POST /v1/content/videos/:id/stage`, `/review`, and `/action-approval` (ordered stage updates, review decisions, and scoped expiring action-approval records)
 
 ### Video batch queue
