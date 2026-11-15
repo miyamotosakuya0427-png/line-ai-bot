@@ -96,6 +96,7 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
       const url=new URL(req.url,"http://localhost");
       if (req.method==="GET" && url.pathname==="/health") return json(res,200,{ok:true,service:"ONE JARVIS",status:"running"});
       if (req.method==="GET" && url.pathname==="/health/sheets/metadata") {
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         const now=Date.now();
         if (now-lastPublicSheetsCheck<30000) return json(res,429,{ok:false,error:"check rate limited"});
         lastPublicSheetsCheck=now;
@@ -132,6 +133,7 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         }
       }
       if (req.method==="GET" && url.pathname==="/health/sheets/record-counts") {
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         const now=Date.now();
         if (now-lastPublicSheetsCheck<30000) return json(res,429,{ok:false,error:"check rate limited"});
         lastPublicSheetsCheck=now;
@@ -159,6 +161,7 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         }
       }
       if (req.method==="GET" && url.pathname==="/health/sheets/link-status") {
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         const now=Date.now();
         if (now-lastPublicSheetsCheck<30000) return json(res,429,{ok:false,error:"check rate limited"});
         lastPublicSheetsCheck=now;
