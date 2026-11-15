@@ -14,6 +14,7 @@ const { getVideoWorkflow } = require("./core/video-workflow");
 const { createDepartmentHandlers } = require("./core/department-agent-handlers");
 const { startDailyContentPlanner } = require("./core/video-scheduler");
 const { startDailySubsidyMonitor } = require("./core/subsidy-scheduler");
+const { createApprovalRequest, listApprovals, decideApproval } = require("./core/content-approvals");
 const PORT = Number(process.env.PORT || 3000);
 const MAX_BODY_BYTES = 10 * 1024;
 const TOKEN = process.env.JARVIS_API_TOKEN || "";
@@ -461,6 +462,28 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         if(companyContext)payload.companyContext=companyContext;
         const result=await jobStore.create({type:"department."+departmentId,payload,idempotencyKey:d.idempotencyKey||""});
         return json(res,result.created?201:200,{ok:true,created:result.created,departmentId,job:result.job});
+      }
+      if (url.pathname === "/v1/content/approvals" && req.method === "GET") {
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        if (!jobStore) return json(res,503,{ok:false,error:"Persistent approval storage is not configured"});
+        return json(res,200,{ok:true,approvals:await listApprovals(jobStore)});
+      }
+      if (url.pathname === "/v1/content/approvals" && req.method === "POST") {
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        if (!jobStore) return json(res,503,{ok:false,error:"Persistent approval storage is not configured"});
+        if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+        const d=await readJson(req);
+        const result=await createApprovalRequest(jobStore,d);
+        return json(res,result.created?201:200,{ok:true,created:result.created,approval:result.job});
+      }
+      const approvalDecisionMatch=/^\\/v1\\/content\\/approvals\\/([0-9a-f-]{36})\\/decision$/i.exec(url.pathname);
+      if (approvalDecisionMatch && req.method === "POST") {
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        if (!jobStore) return json(res,503,{ok:false,error:"Persistent approval storage is not configured"});
+        if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+        const d=await readJson(req);
+        const result=await decideApproval(jobStore,approvalDecisionMatch[1],d);
+        return json(res,result.created?201:200,{ok:true,created:result.created,decision:result.job,sideEffectsExecuted:false});
       }
       if (url.pathname.startsWith("/v1/jobs")) {
         if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
