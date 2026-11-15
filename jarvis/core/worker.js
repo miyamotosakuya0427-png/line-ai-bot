@@ -29,14 +29,15 @@ function createWorker({ store, handlers = {} } = {}) {
       if (!queued.length) return { processed: false, job: null };
       const candidate = queued[0];
       const handler = registry.get(candidate.type);
+      const running = await store.transition(candidate.id, "running");
+      if (!running) return { processed: false, job: null };
       if (!handler) {
-        const failed = await store.transition(candidate.id, "failed", {
+        const failed = await store.transition(running.id, "failed", {
           error: "No handler registered for job type: " + candidate.type
         });
         return { processed: true, job: failed };
       }
 
-      const running = await store.transition(candidate.id, "running");
       if (!running) return { processed: false, job: null };
       try {
         await handler(running.payload, { jobId: running.id, attempt: running.attempts });
