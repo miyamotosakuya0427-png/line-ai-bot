@@ -1,5 +1,6 @@
 "use strict";
 
+const crypto=require("node:crypto");
 const fs=require("node:fs/promises");
 const path=require("node:path");
 const {createPaperTradingEngine}=require("./paper-trading");
@@ -57,10 +58,10 @@ function createPaperTradingStore({filePath,policy={},clock=()=>new Date().toISOS
  }
  return {
   init,
-  async recordSnapshot(data){await commit("snapshot",data);return this.listSnapshots({limit:1}).then(x=>x[0]);},
-  async openPaperTrade(data){await commit("open",data);return this.listTrades({status:"open",limit:1000}).then(x=>x.find(t=>t.id===data.id)||x[x.length-1]);},
-  async closePaperTrade(data){await commit("close",data);return this.analyze();},
-  async recordLesson(data){await commit("lesson",data);return this.analyze().then(a=>a.lessons[a.lessons.length-1]);},
+  async recordSnapshot(data){await commit("snapshot",data);const x=await this.listSnapshots({limit:1});return x[0];},
+  async openPaperTrade(data){const normalized={...data,id:data?.id||crypto.randomUUID(),openedAt:data?.openedAt||clock()};await commit("open",normalized);const x=await this.listTrades({status:"open",limit:1000});return x.find(t=>t.id===normalized.id);},
+  async closePaperTrade(data){await commit("close",{...data,closedAt:data?.closedAt||clock()});return this.analyze();},
+  async recordLesson(data){await commit("lesson",{...data,id:data?.id||crypto.randomUUID(),createdAt:data?.createdAt||clock()});const a=await this.analyze();return a.lessons[a.lessons.length-1];},
   async analyze(){await ready();return serialize(async()=>clone(engine.analyze()));},
   async riskState(){await ready();return serialize(async()=>clone(engine.riskState()));},
   async listTrades(options){await ready();return serialize(async()=>clone(engine.listTrades(options)));},
