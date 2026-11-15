@@ -22,13 +22,14 @@ test("worker executes an allowlisted job and marks it succeeded", async () => {
     const { job } = await f.store.create({ type: "report.generate", payload: { reportId: "R1" } });
     const worker = createWorker({
       store: f.store,
-      handlers: { "report.generate": async (payload, context) => calls.push({ payload, context }) }
+      handlers: { "report.generate": async (payload, context) => { calls.push({ payload, context }); return { answer: "done" }; } }
     });
     await worker.start();
     const result = await worker.runNext();
     assert.equal(result.processed, true);
     assert.equal(result.job.status, "succeeded");
     assert.equal(result.job.attempts, 1);
+    assert.deepEqual(result.job.result, { answer: "done" });
     assert.equal(calls.length, 1);
     assert.deepEqual(calls[0].payload, { reportId: "R1" });
     assert.equal(calls[0].context.jobId, job.id);
@@ -80,5 +81,17 @@ test("worker requires start before processing", async () => {
   try {
     const worker = createWorker({ store: f.store });
     await assert.rejects(worker.runNext(), /not been started/);
+  } finally { await f.cleanup(); }
+});
+
+test("worker polling can be started and stopped", async () => {
+  const f = await fixture();
+  try {
+    const worker = createWorker({ store: f.store });
+    await worker.start();
+    worker.startPolling({ intervalMs: 500 });
+    worker.startPolling({ intervalMs: 500 });
+    worker.stop();
+    assert.throws(() => worker.startPolling({ intervalMs: 50 }), /Invalid polling interval/);
   } finally { await f.cleanup(); }
 });
