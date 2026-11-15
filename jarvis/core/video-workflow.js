@@ -42,8 +42,23 @@ const QA_CHECKS=Object.freeze([
  "画像・BGM・効果音の利用権限と出典を確認した",
  "映像の黒画面・静止画の長時間放置・音声欠落・書き出し破損がない",
  "タイトル・サムネイル・説明文が内容を誇張していない",
- "公開先・公開設定・予約日時は代表者承認待ちである"
+ "公開先・公開設定・予約日時は代表者承認待ちである",
+ "各動画に固有の史料・論点・独自解説があり、単純なテンプレート差し替えの量産になっていない",
+ "転載・引用素材は出典を記録し、実質的な独自解説・教育的価値・変換がある",
+ "写実的なAI生成・改変映像やAI生成音楽について、YouTubeのAI開示要否を確認した"
 ]);
+
+const YOUTUBE_POLICY=Object.freeze({
+  monetizationUrl:"https://support.google.com/youtube/answer/1311392?hl=ja",
+  aiDisclosureUrl:"https://support.google.com/youtube/answer/14328491?hl=ja",
+  rules:Object.freeze([
+    "各動画は独自の調査・ナラティブ・教育的価値を提供する。題材名だけを入れ替えたテンプレ大量生産は収益化対象外となるリスクがある。",
+    "シリーズ共通の構成やイントロは利用できるが、各回の実質的な内容は十分に異なり、独自の説明・価値を持たせる。",
+    "AIによる台本・構成・タイトル・サムネイル作成の補助だけでは通常AI開示不要。",
+    "実在人物の発言・行動を偽装する、実在の場所や出来事に見える写実的なAI映像を生成・改変する、主題となるAI生成音楽を使う場合は投稿時のAI開示要否を確認する。",
+    "生成した再現映像を実際の史料映像・記録映像として見せない。必要に応じて再現・イメージ映像と明示する。"
+  ])
+});
 
 const APPROVAL_GATES=Object.freeze({
  paid_generation:"当該生成の直前に代表者の明示承認が必要。承認なしで生成APIを呼ばない",
@@ -89,6 +104,6 @@ function setQualityCheck(plan,checkId,passed,notes="") {
  return {...plan,qa:{checks}};
 }
 function getVideoWorkflow({autoplanEnabled=false}={}) {
- return {series:VIDEO_SERIES,projects:EXISTING_PROJECTS,stages:STAGES,qualityChecks:QA_CHECKS,approvalGates:APPROVAL_GATES,automationStatus:autoplanEnabled?"daily-planner-enabled":"opt-in-not-enabled",autoplanEnabled,publicationEnabled:false,paidGenerationEnabled:false,notes:["Existing production project is not automatically marked complete; inspect the real editor project and media before advancing stages.","Scheduled production requires a connected persistent worker and an approved budget."]};
+ return {series:VIDEO_SERIES,projects:EXISTING_PROJECTS,stages:STAGES,qualityChecks:QA_CHECKS,youtubePolicy:YOUTUBE_POLICY,approvalGates:APPROVAL_GATES,automationStatus:autoplanEnabled?"daily-planner-enabled":"opt-in-not-enabled",autoplanEnabled,publicationEnabled:false,paidGenerationEnabled:false,notes:["Existing production project is not automatically marked complete; inspect the real editor project and media before advancing stages.","Scheduled production requires a connected persistent worker and an approved budget."]};
 }
-module.exports={VIDEO_SERIES,EXISTING_PROJECTS,STAGES,QA_CHECKS,APPROVAL_GATES,createVideoPlan,markStageComplete,setVoiceGenerationMode,setOwnerApproval,setQualityCheck,getVideoWorkflow};
+module.exports={VIDEO_SERIES,EXISTING_PROJECTS,STAGES,QA_CHECKS,YOUTUBE_POLICY,APPROVAL_GATES,createVideoPlan,markStageComplete,setVoiceGenerationMode,setOwnerApproval,setQualityCheck,getVideoWorkflow};
