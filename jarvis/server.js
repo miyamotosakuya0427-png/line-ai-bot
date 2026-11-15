@@ -2,6 +2,8 @@
 const http = require("node:http");
 const crypto = require("node:crypto");
 const { createJobStore } = require("./core/job-store");
+const { createWorker } = require("./core/worker");
+const { createOpenAIHandler } = require("./core/openai-handler");
 const PORT = Number(process.env.PORT || 3000);
 const MAX_BODY_BYTES = 10 * 1024;
 const TOKEN = process.env.JARVIS_API_TOKEN || "";
@@ -78,7 +80,7 @@ dailyForm.addEventListener("submit",async(event)=>{event.preventDefault();if(!id
 </script></body></html>`;
 }
 
-function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null}={}) {
+function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,worker=null}={}) {
   async function callSheets(action, fields={}) {
     if (!sheetsUrl || !sheetsToken) { const e=new Error("Google Sheets integration is not configured"); e.statusCode=503; throw e; }
     const u=new URL(sheetsUrl);
@@ -356,7 +358,7 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         }
         return json(res,404,{ok:false,error:"Not Found"});
       }
-      if (req.method==="GET" && url.pathname==="/v1/status") return json(res,200,{ok:true,system:"ONE JARVIS",version:"1.2.0",mode:"read-only",googleSheetsConfigured:Boolean(sheetsUrl&&sheetsToken)});
+      if (req.method==="GET" && url.pathname==="/v1/status") return json(res,200,{ok:true,system:"ONE JARVIS",version:"1.3.0",mode:"job-queue",googleSheetsConfigured:Boolean(sheetsUrl&&sheetsToken),jobQueueConfigured:Boolean(jobStore),workerEnabled:Boolean(worker)});
       if (req.method==="GET" && url.pathname==="/v1/sheets/list") {
         const r=await callSheets("listSheets"); return json(res,200,{ok:true,sheets:r.sheets});
       }
@@ -388,11 +390,17 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
   });
 }
 if (require.main===module) {
-  if (!TOKEN||Buffer.byteLength(TOKEN,"utf8")<32) { console.error("JARVIS_API_TOKEN must be configured with at least 32 bytes."); process.exit(1); }
-  const jobStore=JOB_STORE_PATH?createJobStore({filePath:JOB_STORE_PATH}):null;
-  const server=createServer({jobStore}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
-  server.listen(PORT,"0.0.0.0",()=>console.log(`ONE JARVIS running on port ${PORT}`));
-  const shutdown=signal=>{ console.log(`Received ${signal}; shutting down.`); server.close(error=>{if(error){console.error("Graceful shutdown failed.");process.exit(1);}process.exit(0);}); setTimeout(()=>process.exit(1),10000).unref(); };
-  process.on("SIGTERM",()=>shutdown("SIGTERM")); process.on("SIGINT",()=>shutdown("SIGINT"));
+  (async()=>{
+    if (!TOKEN||Buffer.byteLength(TOKEN,"utf8")<32) throw new Error("JARVIS_API_TOKEN must be configured with at least 32 bytes.");
+    const jobStore=JOB_STORE_PATH?createJobStore({filePath:JOB_STORE_PATH}):null;
+    const workerEnabled=process.env.JARVIS_WORKER_ENABLED==="true";
+    if (workerEnabled && (!jobStore || !process.env.OPENAI_API_KEY)) throw new Error("Worker requires JARVIS_JOB_STORE_PATH and OPENAI_API_KEY.");
+    const worker=workerEnabled?createWorker({store:jobStore,handlers:{"assistant.request":createOpenAIHandler()}}):null;
+    if (worker) { await worker.start(); worker.startPolling({intervalMs:Number(process.env.JARVIS_WORKER_POLL_MS||1500)}); }
+    const server=createServer({jobStore,worker}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
+    const shutdown=signal=>{ console.log(`Received ${signal}; shutting down.`); if(worker)worker.stop(); server.close(error=>{if(error){console.error("Graceful shutdown failed.");process.exit(1);}process.exit(0);}); setTimeout(()=>process.exit(1),10000).unref(); };
+    process.on("SIGTERM",()=>shutdown("SIGTERM")); process.on("SIGINT",()=>shutdown("SIGINT"));
+    server.listen(PORT,"0.0.0.0",()=>console.log(`ONE JARVIS running on port ${PORT}`));
+  })().catch(error=>{console.error(error.message);process.exit(1);});
 }
 module.exports={createServer,isAuthorized,readJson};
