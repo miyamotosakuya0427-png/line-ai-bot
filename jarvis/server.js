@@ -583,7 +583,7 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         }
         if (req.method==="GET" && url.pathname==="/v1/content/approvals") {
           const videos=await videoBatchStore.list({limit:200});
-          const pending=videos.filter(p=>p.status==="awaiting_owner_review");
+          const pending=videos.filter(p=>["awaiting_owner_review","on_hold"].includes(p.status));
           return json(res,200,{ok:true,pending,reviews:await videoBatchStore.listReviews(),actionApprovals:await videoBatchStore.listActionApprovals()});
         }
         const stageMatch=new RegExp("^/v1/content/videos/(V[0-9]{2,8})/stage$").exec(url.pathname);
