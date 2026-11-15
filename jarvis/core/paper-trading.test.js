@@ -65,3 +65,27 @@ test("analysis reports strategy-level performance without claiming predictive re
  assert.equal(a.targetAssessment.status,"RESEARCH_ONLY_NOT_A_PROMISE");
  assert.ok(a.limitations.length>=4);
 });
+
+test("position cap blocks new entries without permanently halting the paper engine",()=>{
+ const {engine}=setup();
+ const capped=createPaperTradingEngine({policy:{maxOpenPositions:1}});
+ open(capped);
+ assert.equal(capped.riskState().halted,false);
+ assert.equal(capped.riskState().openPositionLimitReached,true);
+ capped.closePaperTrade({id:"trade-1",exitPrice:1000});
+ assert.equal(capped.riskState().halted,false);
+ assert.equal(capped.riskState().openPositionLimitReached,false);
+ open(capped,{id:"trade-2"});
+ assert.equal(capped.listTrades({status:"open"}).length,1);
+});
+test("daily loss halt expires on the next market day while drawdown remains below its hard limit",()=>{
+ const {engine,setTime}=setup();
+ open(engine);
+ engine.closePaperTrade({id:"trade-1",exitPrice:790});
+ assert.equal(engine.riskState().halted,true);
+ assert.equal(engine.riskState().haltReason,"DAILY_LOSS_LIMIT");
+ setTime("2026-11-17T09:00:00+09:00");
+ assert.equal(engine.riskState().halted,false);
+ open(engine,{id:"trade-2"});
+ assert.equal(engine.listTrades({status:"open"}).length,1);
+});
