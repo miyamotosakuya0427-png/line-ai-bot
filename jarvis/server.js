@@ -5,6 +5,7 @@ const { createJobStore } = require("./core/job-store");
 const { createWorker } = require("./core/worker");
 const { createOpenAIHandler } = require("./core/openai-handler");
 const { dashboardPage } = require("./dashboard");
+const { EMPLOYEE_SHEET, DAILY_REPORT_SHEET, readEmployees, readDailyReports, buildCompanyOverview, filterDailyReports } = require("./core/company-reader");
 const PORT = Number(process.env.PORT || 3000);
 const MAX_BODY_BYTES = 10 * 1024;
 const TOKEN = process.env.JARVIS_API_TOKEN || "";
@@ -321,6 +322,37 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         return json(res,200,{ok:true,linkId:result.linkId,status:result.status});
       }
       if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+      if (url.pathname==="/v1/company/overview" || url.pathname==="/v1/company/daily-reports" || url.pathname==="/v1/company/employees") {
+        if (req.method!=="GET") return json(res,405,{ok:false,error:"Method Not Allowed"},{Allow:"GET"});
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        try {
+          const listed=await callSheets("listSheets");
+          if (!Array.isArray(listed.sheets)) return json(res,502,{ok:false,error:"Invalid sheet list"});
+          if (url.pathname==="/v1/company/employees") {
+            if (!listed.sheets.includes(EMPLOYEE_SHEET)) return json(res,404,{ok:false,error:"Employee sheet not found"});
+            const read=await callSheets("readRows",{sheetName:EMPLOYEE_SHEET,startRow:1,numRows:100});
+            return json(res,200,{ok:true,employees:readEmployees(read.rows),sampleLimit:99});
+          }
+          if (!listed.sheets.includes(DAILY_REPORT_SHEET)) return json(res,404,{ok:false,error:"Daily report sheet not found"});
+          const daily=await callSheets("readRows",{sheetName:DAILY_REPORT_SHEET,startRow:1,numRows:100});
+          const reports=readDailyReports(daily.rows);
+          if (url.pathname==="/v1/company/daily-reports") {
+            const rawLimit=url.searchParams.get("limit");
+            const limit=rawLimit===null?20:Number(rawLimit);
+            const from=url.searchParams.get("from")||undefined;
+            const to=url.searchParams.get("to")||undefined;
+            const filtered=filterDailyReports(reports,{from,to,limit});
+            return json(res,200,{ok:true,reports:filtered,sampleLimit:99,returned:filtered.length});
+          }
+          if (!listed.sheets.includes(EMPLOYEE_SHEET)) return json(res,404,{ok:false,error:"Employee sheet not found"});
+          const employees=await callSheets("readRows",{sheetName:EMPLOYEE_SHEET,startRow:1,numRows:100});
+          return json(res,200,{ok:true,...buildCompanyOverview({employeeRows:employees.rows,dailyReportRows:daily.rows}),sampleLimit:99});
+        } catch(error) {
+          if (error.code==="INVALID_QUERY") return json(res,400,{ok:false,error:error.message});
+          if (error.code==="SHEET_SCHEMA_MISMATCH" || error.code==="SHEET_DATA_UNAVAILABLE") return json(res,503,{ok:false,error:"Company sheet schema or data is not ready"});
+          return json(res,503,{ok:false,error:"Company data is temporarily unavailable"});
+        }
+      }
       if (url.pathname.startsWith("/v1/jobs")) {
         if (!jobStore) return json(res,503,{ok:false,error:"Persistent job storage is not configured"});
         if (req.method==="GET" && url.pathname==="/v1/jobs") {
