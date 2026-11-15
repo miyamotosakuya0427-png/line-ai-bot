@@ -2,7 +2,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { createVideoJob, advanceVideoJob } = require("./workflow");
+const { DEFAULT_NARRATION, createVideoJob, advanceVideoJob } = require("./workflow");
 
 function job() {
   return createVideoJob({
@@ -17,6 +17,9 @@ test("creates a planned YouTube video job", () => {
   assert.equal(result.platform, "youtube");
   assert.equal(result.stage, "planned");
   assert.equal(result.channel, "時をかける日本史");
+  assert.equal(result.narration.voiceName, "Hinata");
+  assert.equal(result.narration.voiceId, DEFAULT_NARRATION.voiceId);
+  assert.equal(result.narration.language, "ja");
 });
 
 test("requires channel, topic, and title", () => {
