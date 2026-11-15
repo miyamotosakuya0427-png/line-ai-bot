@@ -3,6 +3,7 @@ const test=require("node:test");
 const assert=require("node:assert/strict");
 const fs=require("node:fs");
 const path=require("node:path");
+const {createScriptMetrics}=require("../core/script-metrics");
 const file=path.join(__dirname,"episode-001-kameyama-finance.md");
 const script=fs.readFileSync(file,"utf8");
 
@@ -31,7 +32,9 @@ test("Kameyama episode includes pronunciation, voice identity, and publication s
 
 
 test("Kameyama narration draft is sized for an 8–12 minute spoken video",()=>{
- const body=script.split("## Narration script")[1].split("## Pronunciation / narration checklist")[0];
- const characters=[...body.replace(/### .*/g,"").replace(/\s/g,"")].length;
+ const metrics=createScriptMetrics(script);
+ const characters=metrics.characters;
+ assert.equal(metrics.status,"estimated_range_ok");
+ assert.equal(metrics.requiresRecordedTiming,true);
  assert.ok(characters>=3360&&characters<=4200,"narration character count was "+characters);
 });
