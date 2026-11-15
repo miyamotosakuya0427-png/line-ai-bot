@@ -117,3 +117,19 @@ test("worker retries transient errors and succeeds on a later attempt", async ()
     assert.deepEqual(second.job.result, { answer: "recovered" });
   } finally { await f.cleanup(); }
 });
+
+test("worker processes queued jobs in FIFO order", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "jarvis-fifo-"));
+  try {
+    let tick = 0;
+    const store = createJobStore({ filePath: path.join(dir, "jobs.jsonl"), clock: () => new Date(1763251200000 + tick++ * 1000).toISOString() });
+    const first = await store.create({ type: "task.order", payload: { label: "first" } });
+    await store.create({ type: "task.order", payload: { label: "second" } });
+    const processed = [];
+    const worker = createWorker({ store, handlers: { "task.order": async payload => { processed.push(payload.label); } } });
+    await worker.start();
+    await worker.runNext();
+    assert.deepEqual(processed, ["first"]);
+    worker.stop();
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
