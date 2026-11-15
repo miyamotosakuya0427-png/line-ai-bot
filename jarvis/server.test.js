@@ -603,12 +603,14 @@ test("JARVIS dashboard is served with restrictive security headers and no server
 test("video batch plan endpoint queues an idempotent ONE CONTENT draft task without external actions", async t => {
   const {createJobStore}=require("./core/job-store");
   const {createWorker}=require("./core/worker");
+  const {createVideoBatchContentHandler}=require("./core/video-batch-runner");
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-video-plan-e2e-"));
   t.after(()=>fs.rm(dir,{recursive:true,force:true}));
   const jobStore=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
   const videoBatchStore=createVideoBatchStore({filePath:path.join(dir,"videos.jsonl")});
   await videoBatchStore.createBatch({items:[{id:"V01",title:"江戸の町を変えた大火",topic:"明暦の大火と江戸の都市改造"}]});
-  const worker=createWorker({store:jobStore,handlers:{"department.content":async payload=>({draft:true,videoId:payload.videoId,request:payload.request,answer:"台本初稿："+payload.request})}});
+  const contentHandler=async payload=>({draft:true,videoId:payload.videoId,request:payload.request,answer:"台本初稿："+payload.request});
+  const worker=createWorker({store:jobStore,handlers:{"department.content":createVideoBatchContentHandler({contentHandler,videoBatchStore})}});
   await worker.start();
   const app=createServer({token,jobStore,videoBatchStore,worker});
   await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
@@ -639,11 +641,15 @@ test("video batch plan endpoint queues an idempotent ONE CONTENT draft task with
     const batchStatus=await fetch(root+"/v1/content/batches?limit=10",{headers:{Authorization:headers.Authorization}});
     const batchStatusData=await batchStatus.json();
     assert.equal(batchStatusData.videos[0].planJob.result.draft,true);
-    const stillUnverified=await videoBatchStore.get("V01");
-    assert.equal(stillUnverified.stage,"research");
+    const autoSaved=await videoBatchStore.get("V01");
+    assert.equal(autoSaved.stage,"script");
+    assert.equal(autoSaved.status,"in_progress");
+    assert.equal(autoSaved.draftStatus,"needs_source_review");
+    assert.equal(autoSaved.script,run.job.result.answer);
     const saveDraft=await fetch(root+"/v1/content/videos/V01/draft",{method:"POST",headers,body:JSON.stringify({jobId:run.job.id})});
-    assert.equal(saveDraft.status,201);
+    assert.equal(saveDraft.status,200);
     const savedDraft=await saveDraft.json();
+    assert.equal(savedDraft.created,false);
     assert.equal(savedDraft.video.stage,"script");
     assert.equal(savedDraft.video.draftStatus,"needs_source_review");
     assert.equal(savedDraft.video.script,run.job.result.answer);
