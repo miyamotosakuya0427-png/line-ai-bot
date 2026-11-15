@@ -9,6 +9,24 @@ const path=require("node:path");
 const {createVideoBatchStore,STAGES}=require("./core/video-batch-store");
 
 const token = "test-token-that-is-at-least-32-bytes-long";
+const STAGE_EVIDENCE={
+ sourceQa:{status:"passed",allClaimsVerified:true,verifiedClaimCount:4,primarySourceCount:2,reviewedBy:"test-reviewer"},
+ pronunciation:{status:"passed",readingsReviewed:true,termsChecked:8,reviewedBy:"test-reviewer"},
+ narration:{status:"recorded",durationSeconds:600,voiceName:"Hinata",voiceConfirmed:true,recordedBy:"test-recorder"},
+ assets:{status:"cleared",assetCount:5,rightsConfirmed:true,clearedBy:"test-editor"},
+ edit:{status:"rendered",projectId:"072f8671-af62-480c-8072-bb253faf58b7",compositionId:"cd7b6796-23cc-43a7-ae7c-c2e3cfb50d32",durationSeconds:600},
+ finalQa:{status:"passed",checklistPassed:true,openIssues:0,durationSeconds:600,checkedBy:"test-reviewer"}
+};
+async function advanceToOwnerReview(store,id,{fromSourceQa=false}={}){
+ if(!fromSourceQa){await store.saveDraft(id,{script:"台本初稿。出典と読みを確認する。",jobId:"server-test-"+id});await store.updateStage(id,"source_qa");}
+ await store.updateStage(id,"pronunciation",{evidence:{sourceQa:STAGE_EVIDENCE.sourceQa}});
+ await store.updateStage(id,"narration",{evidence:{pronunciation:STAGE_EVIDENCE.pronunciation}});
+ await store.updateStage(id,"assets",{evidence:{narration:STAGE_EVIDENCE.narration}});
+ await store.updateStage(id,"edit",{evidence:{assets:STAGE_EVIDENCE.assets}});
+ await store.updateStage(id,"final_qa",{evidence:{edit:STAGE_EVIDENCE.edit}});
+ await store.updateStage(id,"owner_review",{evidence:{finalQa:STAGE_EVIDENCE.finalQa}});
+}
+
 let server;
 let base;
 
@@ -689,16 +707,16 @@ test("video batch APIs require auth, persist 100-item queues, and expose owner r
     assert.equal(created.status,201);
     const result=await created.json();
     assert.equal(result.videos.length,100);
-    const stage=await fetch(root+"/v1/content/videos/V01/stage",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({stage:"script",notes:"企画確認"})});
+    await videoBatchStore.saveDraft("V01",{script:"台本初稿。出典と読みを確認する。",jobId:"api-test-V01"});
+    const stage=await fetch(root+"/v1/content/videos/V01/stage",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({stage:"source_qa",notes:"台本保存済み"})});
     assert.equal(stage.status,200);
-    assert.equal((await stage.json()).video.stage,"script");
+    assert.equal((await stage.json()).video.stage,"source_qa");
     const listed=await fetch(root+"/v1/content/batches?limit=200",{headers:{Authorization:"Bearer "+token}});
     assert.equal((await listed.json()).summary.total,100);
-    for(const stage of ["source_qa","pronunciation","narration","assets","edit","final_qa","owner_review"]) await videoBatchStore.updateStage("V01",stage);
+    await advanceToOwnerReview(videoBatchStore,"V01",{fromSourceQa:true});
     const inbox=await fetch(root+"/v1/content/approvals",{headers:{Authorization:"Bearer "+token}});
     assert.equal((await inbox.json()).pending.length,1);
-    for(const stage of STAGES.slice(1,STAGES.indexOf("owner_review"))) await videoBatchStore.updateStage("V02",stage);
-    await videoBatchStore.updateStage("V02","owner_review");
+    await advanceToOwnerReview(videoBatchStore,"V02");
     await videoBatchStore.decideReview("V02",{decision:"hold",note:"確認待ち",actor:"owner"});
     const heldInbox=await fetch(root+"/v1/content/approvals",{headers:{Authorization:"Bearer "+token}});
     assert.equal((await heldInbox.json()).pending.some(v=>v.id==="V02"),true);
