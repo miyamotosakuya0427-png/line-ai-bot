@@ -14,12 +14,9 @@ const recentEvents = new Map();
 function verifySignature(body, signature, secret = process.env.LINE_CHANNEL_SECRET) {
   if (!secret || typeof signature !== "string" || !signature) return false;
   const expected = crypto.createHmac("sha256", secret).update(body).digest();
-  let supplied;
-  try {
-    supplied = Buffer.from(signature, "base64");
-  } catch {
-    return false;
-  }
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signature)) return false;
+  const supplied = Buffer.from(signature, "base64");
+  if (supplied.toString("base64") !== signature) return false;
   return supplied.length === expected.length &&
     crypto.timingSafeEqual(supplied, expected);
 }
