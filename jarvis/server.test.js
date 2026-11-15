@@ -18,7 +18,7 @@ const STAGE_EVIDENCE={
  finalQa:{status:"passed",checklistPassed:true,openIssues:0,durationSeconds:600,checkedBy:"test-reviewer"}
 };
 async function advanceToOwnerReview(store,id,{fromSourceQa=false}={}){
- if(!fromSourceQa){await store.saveDraft(id,{script:"台本初稿。出典と読みを確認する。",jobId:"server-test-"+id});await store.updateStage(id,"source_qa",{evidence:{sourceQa:STAGE_EVIDENCE.sourceQa}});}
+ if(!fromSourceQa){await store.saveDraft(id,{script:"台本初稿。出典と読みを確認する。",jobId:"server-test-"+id});await assert.rejects(store.updateStage(id,"source_qa"),/Stage evidence required/);await store.updateStage(id,"source_qa",{evidence:{sourceQa:STAGE_EVIDENCE.sourceQa}});}
  await store.updateStage(id,"pronunciation",{evidence:{sourceQa:STAGE_EVIDENCE.sourceQa}});
  await store.updateStage(id,"narration",{evidence:{pronunciation:STAGE_EVIDENCE.pronunciation}});
  await store.updateStage(id,"assets",{evidence:{narration:STAGE_EVIDENCE.narration}});
