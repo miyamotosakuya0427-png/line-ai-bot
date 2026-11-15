@@ -18,6 +18,7 @@ const E={
 };
 async function advanceToOwnerReview(s,id){
  await s.saveDraft(id,{script:"台本初稿。出典と読みを確認する。",jobId:"test-job-"+id});
+ await assert.rejects(s.updateStage(id,"source_qa"),/Stage evidence required/);
  await s.updateStage(id,"source_qa",{evidence:{sourceQa:E.sourceQa}});
  await s.updateStage(id,"pronunciation",{evidence:{sourceQa:E.sourceQa}});
  await s.updateStage(id,"narration",{evidence:{pronunciation:E.pronunciation}});
