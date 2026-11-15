@@ -6,7 +6,7 @@ const { createServer } = require("./server");
 const fs=require("node:fs/promises");
 const os=require("node:os");
 const path=require("node:path");
-const {createVideoBatchStore}=require("./core/video-batch-store");
+const {createVideoBatchStore,STAGES}=require("./core/video-batch-store");
 
 const token = "test-token-that-is-at-least-32-bytes-long";
 let server;
@@ -663,6 +663,11 @@ test("video batch APIs require auth, persist 100-item queues, and expose owner r
     for(const stage of ["source_qa","pronunciation","narration","assets","edit","final_qa","owner_review"]) await videoBatchStore.updateStage("V01",stage);
     const inbox=await fetch(root+"/v1/content/approvals",{headers:{Authorization:"Bearer "+token}});
     assert.equal((await inbox.json()).pending.length,1);
+    for(const stage of STAGES.slice(1,STAGES.indexOf("owner_review"))) await videoBatchStore.updateStage("V02",stage);
+    await videoBatchStore.updateStage("V02","owner_review");
+    await videoBatchStore.decideReview("V02",{decision:"hold",note:"確認待ち",actor:"owner"});
+    const heldInbox=await fetch(root+"/v1/content/approvals",{headers:{Authorization:"Bearer "+token}});
+    assert.equal((await heldInbox.json()).pending.some(v=>v.id==="V02"),true);
     const review=await fetch(root+"/v1/content/videos/V01/review",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({decision:"approve",note:"確認済"})});
     assert.equal(review.status,200);
     const approved=await fetch(root+"/v1/content/videos/V01/action-approval",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({action:"publish",provider:"youtube",costEstimate:0,destination:"history-channel"})});
