@@ -8,8 +8,8 @@ const {createPaperTradingEngine}=require("./paper-trading");
 const MAX_EVENTS=500000;
 const MAX_JOURNAL_BYTES=256*1024*1024;
 function clone(v){return JSON.parse(JSON.stringify(v));}
-function createPaperTradingStore({filePath,policy={},clock=()=>new Date().toISOString()}={}){
- if(typeof filePath!=="string"||!path.isAbsolute(filePath))throw new Error("Paper trading store requires an absolute persistent file path");
+function createPaperTradingStore({filePath,policy={},clock=()=>new Date().toISOString(),maxJournalBytes=MAX_JOURNAL_BYTES,maxEvents=MAX_EVENTS}={}){
+ if(typeof filePath!=="string"||!path.isAbsolute(filePath))throw new Error("Paper trading store requires an absolute persistent file path");\n if(!Number.isInteger(maxJournalBytes)||maxJournalBytes<1024||maxJournalBytes>MAX_JOURNAL_BYTES||!Number.isInteger(maxEvents)||maxEvents<1||maxEvents>MAX_EVENTS)throw new Error("Invalid paper trading journal limits");
  let events=[];let engine=createPaperTradingEngine({policy,clock});let initialized=false;let poisoned=false;let queue=Promise.resolve();
  async function serialize(fn){const p=queue.then(fn);queue=p.catch(()=>{});return p;}
  async function ready(){if(poisoned)throw new Error("Paper trading journal write failed; restart and recover from durable journal before continuing");if(!initialized)await store.init();}
@@ -18,12 +18,12 @@ function createPaperTradingStore({filePath,policy={},clock=()=>new Date().toISOS
    if(initialized)return {ok:true,eventCount:events.length};
    await fs.mkdir(path.dirname(filePath),{recursive:true,mode:0o700});
    let raw="";try{raw=await fs.readFile(filePath,"utf8");}catch(e){if(e.code!=="ENOENT")throw e;}
-   if(Buffer.byteLength(raw)>MAX_JOURNAL_BYTES)throw new Error("Paper trading journal exceeds size limit");
+   if(Buffer.byteLength(raw)>maxJournalBytes)throw new Error("Paper trading journal exceeds size limit");
    const recovered=[];
    for(const [i,line] of raw.split("\n").entries()){
     if(!line)continue;let e;try{e=JSON.parse(line);}catch{throw new Error("Paper trading journal is corrupt at line "+(i+1));}
     if(!e||typeof e!=="object"||!["snapshot","open","close","lesson"].includes(e.type)||!e.data||typeof e.data!=="object")throw new Error("Paper trading journal has invalid event at line "+(i+1));
-    recovered.push(e);if(recovered.length>MAX_EVENTS)throw new Error("Paper trading journal exceeds event limit");
+    recovered.push(e);if(recovered.length>maxEvents)throw new Error("Paper trading journal exceeds event limit");
    }
    const next=createPaperTradingEngine({policy,clock});
    for(const [i,e] of recovered.entries()){
@@ -42,7 +42,7 @@ function createPaperTradingStore({filePath,policy={},clock=()=>new Date().toISOS
   await ready();
   return serialize(async()=>{
    if(poisoned)throw new Error("Paper trading journal requires restart");
-   if(events.length>=MAX_EVENTS)throw new Error("Paper trading journal event limit reached");
+   if(events.length>=maxEvents)throw new Error("Paper trading journal event limit reached");
    const event={type,data:clone(data),recordedAt:clock()};
    const result=apply(engine,event.data);
    const line=JSON.stringify(event)+"\n";
