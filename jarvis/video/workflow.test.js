@@ -39,6 +39,6 @@ test("rejects skipped stages and non-YouTube publishing URLs", () => {
   let result = advanceVideoJob(job(), "scripted", { script: "台本" });
   result = advanceVideoJob(result, "assets_ready", { assets: ["voice.wav"] });
   assert.throws(() => advanceVideoJob(result, "edited", {}), /順番/);
-  result = advanceVideoJob(result, "edited", {});
+  result = advanceVideoJob(result, "edited", { editProjectUrl: "https://example.com/project/1" });
   assert.throws(() => advanceVideoJob(result, "published", { publishedUrl: "https://example.com/video" }), /YouTube/);
 });
