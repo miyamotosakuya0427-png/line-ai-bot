@@ -508,3 +508,40 @@ test("LINE admin pending endpoint only exposes pending requests to an active ver
     assert.equal(denied.status,403);
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
+
+test("job API requires configured persistent storage and supports authenticated queue operations", async () => {
+  const fs=require("node:fs/promises"), os=require("node:os"), path=require("node:path");
+  const { createJobStore }=require("./core/job-store");
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-api-jobs-"));
+  const store=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
+  const app=createServer({token,jobStore:store});
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  const root=`http://127.0.0.1:${app.address().port}`;
+  const headers={Authorization:`Bearer ${token}`,"Content-Type":"application/json"};
+  try {
+    const created=await fetch(root+"/v1/jobs",{method:"POST",headers,body:JSON.stringify({type:"assistant.request",payload:{request:"今日の売上を確認して"}})});
+    assert.equal(created.status,201);
+    const data=await created.json();
+    assert.equal(data.job.status,"queued");
+    const listed=await fetch(root+"/v1/jobs?status=queued",{headers:{Authorization:headers.Authorization}});
+    assert.equal((await listed.json()).jobs.length,1);
+    const detail=await fetch(root+"/v1/jobs/"+data.job.id,{headers:{Authorization:headers.Authorization}});
+    assert.equal((await detail.json()).job.id,data.job.id);
+    const cancelled=await fetch(root+"/v1/jobs/"+data.job.id+"/cancel",{method:"POST",headers});
+    assert.equal((await cancelled.json()).job.status,"cancelled");
+    const invalid=await fetch(root+"/v1/jobs",{method:"POST",headers,body:JSON.stringify({type:"arbitrary.shell",payload:{request:"bad"}})});
+    assert.equal(invalid.status,400);
+  } finally {
+    await new Promise(resolve=>app.close(resolve));
+    await fs.rm(dir,{recursive:true,force:true});
+  }
+});
+
+test("job API stays unavailable when persistent storage is not configured", async () => {
+  const app=createServer({token});
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  try {
+    const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/jobs`,{headers:{Authorization:`Bearer ${token}`}});
+    assert.equal(response.status,503);
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
