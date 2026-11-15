@@ -612,13 +612,13 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
           "動画ID："+video.id,
           "タイトル："+video.title,
           "テーマ："+video.topic,
-          "台本全文：\\n"+video.script,
-          "登録済み出典候補（未検証）：\\n"+JSON.stringify(video.sources||[]),
+          "台本全文：\n"+video.script,
+          "登録済み出典候補（未検証）：\n"+JSON.stringify(video.sources||[]),
           "台本から検証が必要な個別主張を漏れなく抽出し、年号・人名・地名・官職・制度・金額・因果関係に分けて整理してください。",
           "各主張について、必要な一次資料・公的資料の種類、探すべき機関・所蔵先、照合すべき原文・ページ・条文・史料箇所、台本の危険な断定表現を示してください。",
           "出典候補のURLを新規に創作してはいけません。登録済みURLも本文未確認なら未検証と明記してください。主張ごとに「未検証」「要資料取得」「資料と照合済み」を区別し、実際に資料を読んでいない以上「検証済み」は使用禁止です。",
           "成果物は日本語の確認表と、修正が必要な台本箇所の指摘です。公開・外部送信・有料生成はしません。"
-        ].join("\\n");
+        ].join("\n");
         const sourceReviewKey="video-batch-source-review-"+video.id;
         const priorSourceReview=await jobStore.getByIdempotencyKey(sourceReviewKey);
         if(priorSourceReview?.status==="failed"){const retried=await jobStore.transition(priorSourceReview.id,"queued");return json(res,200,{ok:true,created:false,videoId:video.id,job:retried,verificationStatus:"not_verified",externalActionsEnabled:false});}

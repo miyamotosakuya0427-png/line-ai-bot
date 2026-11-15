@@ -688,6 +688,8 @@ test("video batch plan endpoint queues an idempotent ONE CONTENT draft task with
     assert.equal(sourceReview.status,201);
     const sourceReviewTask=await sourceReview.json();
     assert.equal(sourceReviewTask.verificationStatus,"not_verified");
+    assert.match(sourceReviewTask.job.payload.request,/台本全文：\n/);
+    assert.doesNotMatch(sourceReviewTask.job.payload.request,/台本全文：\\n/);
     const sourceReviewRun=await worker.runNext();
     assert.equal(sourceReviewRun.job.status,"succeeded");
     assert.equal(sourceReviewRun.job.result.verified,false);
