@@ -20,14 +20,14 @@ const INSTRUCTIONS=Object.freeze({
  trader:"あなたはONE TRADERトレード研究部の独立AIエージェントです。相場分析、バックテスト、ペーパートレードとリスク監視を行い、実資金注文・レバレッジ変更はしません。"
 });
 function createDepartmentHandlers(options={}) {
- const {researchFetchImpl=fetch,...openAIOptions}=options;
+ const {researchFetchImpl=fetch,store=null,...openAIOptions}=options;
  const handlers={};
  for(const department of DEPARTMENTS) {
   const instructions=INSTRUCTIONS[department.id];
   if(!instructions) throw new Error("Missing department agent instructions: "+department.id);
   handlers["department."+department.id]=createOpenAIHandler({...openAIOptions,instructions});
  }
- handlers["department.office"]=createSubsidyResearchHandler({...openAIOptions,researchFetchImpl});
+ handlers["department.office"]=createSubsidyResearchHandler({...openAIOptions,researchFetchImpl,store});
  return handlers;
 }
 module.exports={INSTRUCTIONS,createDepartmentHandlers};
