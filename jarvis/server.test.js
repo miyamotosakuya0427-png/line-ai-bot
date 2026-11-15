@@ -623,6 +623,8 @@ test("video batch plan endpoint queues an idempotent ONE CONTENT draft task with
     assert.equal(result.job.payload.videoId,"V01");
     assert.match(result.job.payload.request,/要一次資料確認/);
     assert.match(result.job.payload.request,/YouTube公開/);
+    assert.match(result.job.payload.request,/テンプレ大量生産/);
+    assert.match(result.job.payload.request,/AI開示方針/);
     assert.equal(result.externalActionsEnabled,false);
     const duplicate=await fetch(root+"/v1/content/videos/V01/plan",{method:"POST",headers,body:JSON.stringify({})});
     assert.equal(duplicate.status,200);
