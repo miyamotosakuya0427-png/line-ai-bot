@@ -20,3 +20,18 @@ test("ordinary department.content jobs pass through unchanged",async()=>{
 });
 
 test("creates an evidence checklist but never claims source verification",async()=>{let calls=0;let video={id:"V01",stage:"script",script:"台本初稿"};const store={get:async()=>video,saveDraft:async()=>null,saveSourceReview:async(id,{answer,jobId})=>{video={...video,sourceReview:{answer,jobId,verified:false}};return{created:true,video};}};const handler=createVideoBatchContentHandler({videoBatchStore:store,contentHandler:async()=>{calls++;return{answer:"確認すべき主張一覧"};}});const result=await handler({taskKind:"video-batch-source-review",videoId:"V01",request:"台本の主張を抽出"},{jobId:"qa-1"});assert.equal(result.sourceReviewSaved,true);assert.equal(result.verified,false);assert.equal(video.sourceReview.verified,false);assert.equal(calls,1);});
+
+test("source review fetches registered official sources and passes bounded evidence to ONE CONTENT without marking it verified",async()=>{
+ let received=null,saved=null,fetchCalls=[];
+ const video={id:"V02",stage:"script",script:"明暦三年に江戸で大火が起きた。",sources:["https://www.bousai.go.jp/report","https://www.city.okayama.lg.jp/history","https://attacker.example/blocked"]};
+ const store={get:async()=>video,saveDraft:async()=>null,saveSourceReview:async(id,values)=>{saved=values;return{created:true,video:{...video,sourceReview:values}};}};
+ const handler=createVideoBatchContentHandler({videoBatchStore:store,sourceFetcher:async(url,options)=>{fetchCalls.push({url,options});return{requestedUrl:url,finalUrl:url,fetchedAt:"2026-11-16T00:00:00.000Z",httpStatus:200,title:"公的資料",contentSha256:"a".repeat(64),text:"明暦三年に江戸で大火が起きた。本文抜粋。",verification:"source_page_fetched_not_claim_verified"};},contentHandler:async(payload)=>{received=payload;return{answer:"資料本文に該当する記述あり。ただし真偽は未検証。"};}});
+ const result=await handler({taskKind:"video-batch-source-review",videoId:"V02",request:"台本の主張を確認する"},{jobId:"source-job-2"});
+ assert.equal(fetchCalls.length,2);
+ assert.equal(fetchCalls[0].options.allowedHosts.length,0);
+ assert.match(received.request,/明暦三年に江戸で大火が起きた。本文抜粋。/);
+ assert.match(received.request,/主張の正しさを保証しません/);
+ assert.equal(saved.sourceSnapshots.length,2);
+ assert.equal(result.verified,false);
+ assert.equal(result.sourceCount,2);
+});
