@@ -13,6 +13,7 @@ function createWorker({ store, handlers = {} } = {}) {
 
   let active = Promise.resolve();
   let started = false;
+  let poller = null;
 
   async function recoverInterrupted() {
     const interrupted = await store.list({ status: "running", limit: 200 });
@@ -39,8 +40,8 @@ function createWorker({ store, handlers = {} } = {}) {
       }
 
       try {
-        await handler(running.payload, { jobId: running.id, attempt: running.attempts });
-        const succeeded = await store.transition(running.id, "succeeded");
+        const result = await handler(running.payload, { jobId: running.id, attempt: running.attempts });
+        const succeeded = await store.transition(running.id, "succeeded", { result: result === undefined ? undefined : (result && typeof result === "object" && !Array.isArray(result) ? result : { value: String(result).slice(0, 8000) }) });
         return { processed: true, job: succeeded };
       } catch (error) {
         const message = error && typeof error.message === "string" ? error.message : "Job failed";
@@ -60,6 +61,14 @@ function createWorker({ store, handlers = {} } = {}) {
       started = true;
       return { ok: true, recovered };
     },
+    startPolling({ intervalMs = 1500 } = {}) {
+      if (!started) throw new Error("Worker has not been started");
+      if (!Number.isInteger(intervalMs) || intervalMs < 250 || intervalMs > 60000) throw new Error("Invalid polling interval");
+      if (poller) return;
+      poller = setInterval(() => { runNext().catch(() => {}); }, intervalMs);
+      poller.unref?.();
+    },
+    stop() { if (poller) clearInterval(poller); poller = null; },
     runNext
   };
 }
