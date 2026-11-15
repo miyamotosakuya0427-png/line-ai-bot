@@ -4,7 +4,7 @@ function createOpenAIHandler({ apiKey = process.env.OPENAI_API_KEY || "", model 
   return async function handleAssistantRequest(payload) {
     if (!apiKey) throw new Error("OpenAI API is not configured");
     const request = typeof payload?.request === "string" ? payload.request.trim() : "";
-    if (!request || request.length > 4000) throw new Error("Invalid assistant request");
+    if (!request || request.length > maxRequestChars) throw new Error("Invalid assistant request");
     const companyContext = payload?.companyContext && typeof payload.companyContext === "object" && !Array.isArray(payload.companyContext)
       ? JSON.stringify(payload.companyContext).slice(0, 12000) : "";
     const input = companyContext
