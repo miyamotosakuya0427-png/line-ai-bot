@@ -13,7 +13,7 @@ function fakePool() {
         if (sql.startsWith("SELECT version FROM")) return { rowCount: 1, rows: [{ version: "0001_neon_event_store" }] };
         if (sql.startsWith("SELECT pg_advisory")) return { rowCount: 1, rows: [{}] };
         if (sql.startsWith("SELECT aggregate_version")) {
-          const row = state.rows.find(x => x.aggregate_type === params[0] && x.idempotency_key === params[1]);
+          const row = state.rows.find(x => x.aggregate_type === params[0] && x.aggregate_id === params[1] && x.idempotency_key === params[2]);
           return { rowCount: row ? 1 : 0, rows: row ? [{ aggregate_version: row.aggregate_version, event_type: row.event_type, payload: row.payload, created_at: row.created_at }] : [] };
         }
         if (sql.includes("COALESCE(MAX(aggregate_version)")) {
