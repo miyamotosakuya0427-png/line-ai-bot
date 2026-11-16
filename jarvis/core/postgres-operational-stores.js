@@ -61,7 +61,7 @@ function createPostgresOperationalStores({pool,clock=()=>new Date().toISOString(
    if(idempotencyKey&&(typeof idempotencyKey!=="string"||idempotencyKey.length>128))throw new Error("Invalid idempotency key");
    return tx(async c=>{
     if(idempotencyKey)await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",["job-idempotency:"+idempotencyKey]);
-    if(idempotencyKey){const old=await c.query("SELECT payload FROM jarvis.events WHERE aggregate_type='job' AND payload->>'idempotencyKey'=$1 ORDER BY event_id DESC LIMIT 1",[idempotencyKey]);if(old.rows[0])return{job:clone(old.rows[0].payload),created:false};}
+    if(idempotencyKey){const old=await c.query("SELECT payload FROM jarvis.events WHERE aggregate_type='job' AND aggregate_id=(SELECT aggregate_id FROM jarvis.events WHERE aggregate_type='job' AND payload->>'idempotencyKey'=$1 ORDER BY event_id ASC LIMIT 1) ORDER BY aggregate_version DESC LIMIT 1",[idempotencyKey]);if(old.rows[0])return{job:clone(old.rows[0].payload),created:false};}
     const count=await c.query("SELECT count(DISTINCT aggregate_id)::int AS n FROM jarvis.events WHERE aggregate_type='job'");
     if(count.rows[0].n>=MAX_JOBS)throw new Error("Job store capacity reached");
     const now=clock(),job={id:crypto.randomUUID(),type,payload:clone(payload),status:"queued",attempts:0,idempotencyKey,createdAt:now,updatedAt:now,error:null,result:null};
@@ -69,7 +69,7 @@ function createPostgresOperationalStores({pool,clock=()=>new Date().toISOString(
    });
   },
   async get(id){await init();const r=await pool.query("SELECT payload FROM jarvis.events WHERE aggregate_type='job' AND aggregate_id=$1 ORDER BY aggregate_version DESC LIMIT 1",[id]);return r.rows[0]?clone(r.rows[0].payload):null;},
-  async getByIdempotencyKey(key){await init();if(typeof key!=="string"||!key||key.length>128)throw new Error("Invalid idempotency key");const r=await pool.query("SELECT DISTINCT ON (aggregate_id) payload FROM jarvis.events WHERE aggregate_type='job' AND payload->>'idempotencyKey'=$1 ORDER BY aggregate_id,aggregate_version DESC LIMIT 1",[key]);return r.rows[0]?clone(r.rows[0].payload):null;},
+  async getByIdempotencyKey(key){await init();if(typeof key!=="string"||!key||key.length>128)throw new Error("Invalid idempotency key");const r=await pool.query("SELECT payload FROM jarvis.events WHERE aggregate_type='job' AND aggregate_id=(SELECT aggregate_id FROM jarvis.events WHERE aggregate_type='job' AND payload->>'idempotencyKey'=$1 ORDER BY event_id ASC LIMIT 1) ORDER BY aggregate_version DESC LIMIT 1",[key]);return r.rows[0]?clone(r.rows[0].payload):null;},
   async list({status,limit=50}={}){await init();if(status&&!JOB_STATES.has(status))throw new Error("Invalid job status");if(!Number.isInteger(limit)||limit<1||limit>200)throw new Error("Invalid list limit");return allLatest("job",limit,status);},
   async transition(id,nextStatus,{error=null,result=undefined}={}){
    await init();return tx(async c=>{
@@ -93,7 +93,7 @@ function createPostgresOperationalStores({pool,clock=()=>new Date().toISOString(
    if(!validText(summary,300,true)||!validText(details,MAX_DETAILS)||!validText(idempotencyKey,128))throw new Error("Invalid approval request fields");
    return tx(async c=>{
     if(idempotencyKey)await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",["approval-idempotency:"+idempotencyKey]);
-    if(idempotencyKey){const old=await c.query("SELECT DISTINCT ON (aggregate_id) payload FROM jarvis.events WHERE aggregate_type='approval' AND payload->>'idempotencyKey'=$1 ORDER BY aggregate_id,aggregate_version DESC LIMIT 1",[idempotencyKey]);if(old.rows[0])return{created:false,approval:clone(old.rows[0].payload)};}
+    if(idempotencyKey){const old=await c.query("SELECT payload FROM jarvis.events WHERE aggregate_type='approval' AND aggregate_id=(SELECT aggregate_id FROM jarvis.events WHERE aggregate_type='approval' AND payload->>'idempotencyKey'=$1 ORDER BY event_id ASC LIMIT 1) ORDER BY aggregate_version DESC LIMIT 1",[idempotencyKey]);if(old.rows[0])return{created:false,approval:clone(old.rows[0].payload)};}
     const count=await c.query("SELECT count(DISTINCT aggregate_id)::int AS n FROM jarvis.events WHERE aggregate_type='approval'");if(count.rows[0].n>=MAX_APPROVALS)throw new Error("Approval store capacity reached");
     const now=clock(),approval={id:crypto.randomUUID(),departmentId,actionClass,summary:summary.trim(),details:details.trim(),status:"pending",idempotencyKey,createdAt:now,updatedAt:now,decisionAt:null,decisionReason:"",executionStatus:"not_started",requestDigest:digest({departmentId,actionClass,summary:summary.trim(),details:details.trim()})};
     await append(c,"approval",approval.id,"created",approval,idempotencyKey||null);return{created:true,approval:clone(approval)};
