@@ -6,7 +6,7 @@ const path=require("node:path");
 const {createPostgresOperationalStores}=require("./postgres-operational-stores");
 
 const connectionString=process.env.JARVIS_TEST_DATABASE_URL||"";
-const enabled=Boolean(connectionString);
+const enabled=Boolean(connectionString)&&process.env.JARVIS_ALLOW_TEST_SCHEMA_RESET==="yes";
 
 test("real PostgreSQL multi-connection claims and approval integrity", {skip:!enabled}, async()=>{
  const {Pool}=require("pg");
