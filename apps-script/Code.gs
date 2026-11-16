@@ -390,7 +390,7 @@ function appendLineLink(ss, data) {
     row[columns["状態"]] = "確認待ち";
     const timestampColumn = headers.indexOf("申請日時");
     if (timestampColumn >= 0) row[timestampColumn] = new Date();
-    sheet.getRange(lastRow + 1, 1, 1, lastColumn).setValues([row.map(value => typeof value === "string" && /^\\s*=/.test(value) ? "'" + value : value)]);
+    sheet.getRange(lastRow + 1, 1, 1, lastColumn).setValues([row.map(value => typeof value === "string" && /^\s*=/.test(value) ? "'" + value : value)]);
     return output({ ok: true, appended: 1, status: "確認待ち" });
   } finally { lock.releaseLock(); }
 }
