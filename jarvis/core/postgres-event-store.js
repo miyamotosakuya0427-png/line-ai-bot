@@ -69,7 +69,7 @@ function createPostgresEventStore({ pool, clock = () => new Date().toISOString()
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             UNIQUE (aggregate_type, aggregate_id, aggregate_version)
           )`);
-          await client.query("CREATE UNIQUE INDEX IF NOT EXISTS events_idempotency_unique ON jarvis.events (aggregate_type, idempotency_key) WHERE idempotency_key IS NOT NULL");
+          await client.query("CREATE UNIQUE INDEX IF NOT EXISTS events_idempotency_unique ON jarvis.events (aggregate_type, aggregate_id, idempotency_key) WHERE idempotency_key IS NOT NULL");
           await client.query("CREATE INDEX IF NOT EXISTS events_aggregate_read ON jarvis.events (aggregate_type, aggregate_id, aggregate_version)");
           await client.query("CREATE INDEX IF NOT EXISTS events_created_at ON jarvis.events (created_at)");
           await client.query("INSERT INTO jarvis.schema_migrations (version) VALUES ($1) ON CONFLICT (version) DO NOTHING", [MIGRATION_VERSION]);
@@ -102,7 +102,7 @@ function createPostgresEventStore({ pool, clock = () => new Date().toISOString()
         await client.query("BEGIN");
         await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [aggregateType + ":" + aggregateId]);
         if (idempotencyKey) {
-          const prior = await client.query("SELECT aggregate_version, event_type, payload, created_at FROM jarvis.events WHERE aggregate_type = $1 AND idempotency_key = $2", [aggregateType, idempotencyKey]);
+          const prior = await client.query("SELECT aggregate_version, event_type, payload, created_at FROM jarvis.events WHERE aggregate_type = $1 AND aggregate_id = $2 AND idempotency_key = $3", [aggregateType, aggregateId, idempotencyKey]);
           if (prior.rows.length) {
             await client.query("COMMIT");
             return { created: false, version: Number(prior.rows[0].aggregate_version), eventType: prior.rows[0].event_type, payload: prior.rows[0].payload, createdAt: prior.rows[0].created_at };
