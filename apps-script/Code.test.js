@@ -256,6 +256,9 @@ test("daily report write revalidates active LINE identity and employee register"
   assert.equal(saved.saved, true);
   const duplicate = JSON.parse(app.appendDailyReport(ss, { report }).content);
   assert.equal(duplicate.duplicate, true);
+  const invalidDate = JSON.parse(app.appendDailyReport(ss, { report: { ...report, reportId: "DR-223e4567-e89b-12d3-a456-426614174000", workDate: "2026-02-31" } }).content);
+  assert.equal(invalidDate.ok, false);
+  assert.match(invalidDate.error, /Invalid daily report/);
   const forged = JSON.parse(app.appendDailyReport(ss, { report: { ...report, lineUserId: adminId } }).content);
   assert.equal(forged.ok, false);
   assert.match(forged.error, /active LINE link/);
