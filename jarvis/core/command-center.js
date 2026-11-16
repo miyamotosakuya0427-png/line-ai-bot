@@ -6,7 +6,7 @@ const ACTIONS=new Set(["read","analyze","draft","notify","internal_task","extern
 const SAFE_ACTIONS=new Set(["read","analyze","draft","notify","internal_task"]);
 const JOB_STATES=["queued","running","succeeded","failed","cancelled"];
 
-function createCommandCenter({jobStore=null,approvalStore=null,worker=null,clock=()=>new Date().toISOString()}={}){
+function createCommandCenter({jobStore=null,approvalStore=null,worker=null,departmentHandlers=null,clock=()=>new Date().toISOString()}={}){
   async function snapshot(){
     const jobs=jobStore?await jobStore.list({limit:200}):[];
     const approvals=approvalStore?await approvalStore.list({status:"pending",limit:200}):[];
@@ -15,7 +15,7 @@ function createCommandCenter({jobStore=null,approvalStore=null,worker=null,clock
       const latest=matching.sort((a,b)=>b.createdAt.localeCompare(a.createdAt))[0]||null;
       return {
         id:department.id,name:department.name,agent:department.agent,mission:department.mission,
-        runtimeConfigured:Boolean(jobStore&&worker),capabilities:department.canAutonomously,
+        runtimeConfigured:Boolean(jobStore&&worker&&departmentHandlers&&typeof departmentHandlers["department."+department.id]==="function"),capabilities:department.canAutonomously,
         requiresOwnerApproval:department.requiresOwnerApproval,
         recentJobs:matching.length,latestJob:latest?{id:latest.id,status:latest.status,createdAt:latest.createdAt,updatedAt:latest.updatedAt}:null
       };
