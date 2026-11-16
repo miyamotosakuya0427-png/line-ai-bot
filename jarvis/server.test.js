@@ -174,7 +174,8 @@ test("LINE linking verifies ID token and stores only a pending approval", async 
     const write=sent.find(x=>x.action==="appendLineLink");
     assert.equal(write.lineUserId,"U"+"a".repeat(32));
     assert.equal(write.employeeId,"EMP001");
-    assert.equal(write.employeeName,"信原 晴");
+    assert.equal(write.employeeName,undefined);
+    assert.equal(sent.some(x=>x.action==="readRows"),false);
     assert.equal(write.role,undefined);
     assert.equal(write.status,undefined);
   } finally { await new Promise(resolve=>app.close(resolve)); }
@@ -1046,10 +1047,9 @@ test("LINE link requests use uniform acknowledgements for unknown and already-li
     fetchImpl:async(url,options)=> {
       if(url==="https://api.line.me/oauth2/v2.1/verify") return {ok:true,json:async()=>({iss:"https://access.line.me",aud:"1234567890",sub:lineUserId,exp:Math.floor(Date.now()/1000)+300})};
       const body=JSON.parse(options.body);
-      if(body.action==="listSheets") return {ok:true,json:async()=>({ok:true,sheets:["01 従業員","13 LINE連携"]})};
-      if(body.action==="readRows" && body.sheetName==="01 従業員") return {ok:true,json:async()=>({ok:true,rows:[["従業員ID","氏名","状態"],["EMP001","社員A","有効"]]})};
-      if(body.action==="readRows" && body.sheetName==="13 LINE連携") return {ok:true,json:async()=>({ok:true,rows:[["連携ID","LINEユーザーID","LINE表示名","従業員ID","氏名","権限","状態"],["L1",lineUserId,"LINE","EMP001","社員A","一般","有効"]]})};
-      return {ok:true,json:async()=>({ok:true,appended:1})};
+      if(body.action==="appendLineLink" && body.employeeId==="EMP999") return {ok:true,json:async()=>({ok:false,error:"Employee ID is not an active employee"})};
+      if(body.action==="appendLineLink" && body.employeeId==="EMP001") return {ok:true,json:async()=>({ok:false,error:"LINE user or employee already has a link request"})};
+      return {ok:true,json:async()=>({ok:false,error:"unexpected action"})};
     }
   });
   await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
