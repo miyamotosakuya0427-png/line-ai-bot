@@ -504,7 +504,7 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
           if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
           const d=await readJson(req);
           if (!["approved","rejected"].includes(d.decision)||(d.reason!==undefined&&(typeof d.reason!=="string"||d.reason.length>1000))) return json(res,400,{ok:false,error:"Invalid approval decision"});
-          const approval=await approvalStore.decide(match[1],d.decision,{reason:d.reason||""});
+          const approval=await approvalStore.decide(match[1],d.decision,{reason:d.reason||"",actor:"owner-api"});
           if (!approval) return json(res,404,{ok:false,error:"Approval not found"});
           return json(res,200,{ok:true,approval,executionEnabled:false,message:d.decision==="approved"?"承認を記録しました。外部処理は別途接続・実行が必要です。":"却下を記録しました。外部処理は実行していません。"});
         }
