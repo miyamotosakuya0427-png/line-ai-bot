@@ -17,8 +17,8 @@ function validTimestamp(value){
   const year=Number(match[1]),month=Number(match[2]),day=Number(match[3]);
   const date=new Date(Date.UTC(year,month-1,day));
   if(year<1||date.getUTCFullYear()!==year||date.getUTCMonth()!==month-1||date.getUTCDate()!==day)return false;
-  if(match[8]){
-    const hours=Number(match[9]),minutes=Number(match[10]);
+  if(match[9]){
+    const hours=Number(match[10]),minutes=Number(match[11]);
     if(hours>14||minutes>59||(hours===14&&minutes!==0))return false;
   }
   return Number.isFinite(Date.parse(value));
