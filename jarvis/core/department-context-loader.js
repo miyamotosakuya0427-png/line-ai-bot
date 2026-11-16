@@ -13,6 +13,11 @@ const SHEETS=Object.freeze({
   payments:"10 入金"
 });
 const MAX_ROWS=100;
+function japanDate(date){
+  const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Tokyo",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(date);
+  const values=Object.fromEntries(parts.map(part=>[part.type,part.value]));
+  return values.year+"-"+values.month+"-"+values.day;
+}
 
 function createDepartmentContextLoader({sheetsUrl="",sheetsToken="",fetchImpl=fetch,clock=()=>new Date()}={}){
   const configured=Boolean(sheetsUrl&&sheetsToken);
@@ -66,7 +71,7 @@ function createDepartmentContextLoader({sheetsUrl="",sheetsToken="",fetchImpl=fe
         }catch(error){return {status:"unavailable",reason:typeof error.code==="string"?error.code:"DATA_VALIDATION_FAILED",sources:[SHEETS.sales,SHEETS.expenses],sampleLimit:MAX_ROWS-1};}})(),
         (async()=>{try{
           const [invoiceRows,paymentRows]=await Promise.all([readSheet(SHEETS.invoices),readSheet(SHEETS.payments)]);
-          return {status:"available",data:readReceivablesSheets({invoiceRows,paymentRows,asOfDate:clock().toISOString().slice(0,10)}),sources:[SHEETS.invoices,SHEETS.payments],sampleLimit:MAX_ROWS-1};
+          return {status:"available",data:readReceivablesSheets({invoiceRows,paymentRows,asOfDate:japanDate(clock())}),sources:[SHEETS.invoices,SHEETS.payments],sampleLimit:MAX_ROWS-1};
         }catch(error){return {status:"unavailable",reason:typeof error.code==="string"?error.code:"DATA_VALIDATION_FAILED",sources:[SHEETS.invoices,SHEETS.payments],sampleLimit:MAX_ROWS-1};}})()
       ]);
       return {generatedAt,status:salesExpenses.status==="available"||invoices.status==="available"?"partial":"unavailable",financial:salesExpenses,receivables:invoices,
@@ -76,4 +81,4 @@ function createDepartmentContextLoader({sheetsUrl="",sheetsToken="",fetchImpl=fe
   }
   return {load,configured,sheets:Object.freeze({...SHEETS})};
 }
-module.exports={SHEETS,MAX_ROWS,createDepartmentContextLoader};
+module.exports={SHEETS,MAX_ROWS,japanDate,createDepartmentContextLoader};
