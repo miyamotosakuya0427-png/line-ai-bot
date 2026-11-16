@@ -132,6 +132,7 @@ test("LIFF page is served without exposing server credentials", async () => {
     assert.equal(response.status,200);
     assert.match(html,/株式会社One LINE連携/);
     assert.match(html,/employee-id/);
+    assert.match(html,/pendingDailyReportId/);
     assert.doesNotMatch(html,/\/v1\/line\/employees/);
     assert.match(html,/1234567890-AbCdEfGh/);
     assert.doesNotMatch(html,/JARVIS_API_TOKEN|JARVIS_SHEETS_TOKEN/);
@@ -224,6 +225,30 @@ test("LINE linking rejects an unverified ID token", async () => {
       body:JSON.stringify({idToken:"unverified-test-token-1",employeeId:"EMP001"})
     });
     assert.equal(response.status,401);
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
+
+test("LINE ID token verification rejects wrong issuer, audience, and expired claims", async () => {
+  let claims={iss:"https://access.line.me",aud:"1234567890",sub:"U"+"c".repeat(32),exp:Math.floor(Date.now()/1000)+300};
+  const app=createServer({
+    token,
+    lineLoginChannelId:"1234567890",
+    fetchImpl:async()=>({ok:true,json:async()=>({...claims})})
+  });
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  try {
+    for (const patch of [
+      {iss:"https://attacker.example"},
+      {aud:"9999999999"},
+      {exp:Math.floor(Date.now()/1000)-1}
+    ]) {
+      claims={iss:"https://access.line.me",aud:"1234567890",sub:"U"+"c".repeat(32),exp:Math.floor(Date.now()/1000)+300,...patch};
+      const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/line/link`,{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({idToken:"untrusted-test-id-token",employeeId:"EMP001"})
+      });
+      assert.equal(response.status,401);
+    }
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
 
