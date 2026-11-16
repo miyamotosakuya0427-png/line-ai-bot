@@ -48,14 +48,22 @@ function createJobStore({ filePath, clock = () => new Date().toISOString(), maxE
     const bytes = Buffer.byteLength(line, "utf8");
     if (eventCount >= maxEvents) throw new Error("JARVIS job journal event capacity reached");
     if (journalBytes + bytes > maxJournalBytes) throw new Error("JARVIS job journal size limit reached");
-    const handle = await fs.open(filePath, "a", 0o600);
     try {
-      await handle.writeFile(line, "utf8");
-      await handle.sync();
-    } finally { await handle.close(); }
-    await fs.chmod(filePath, 0o600);
-    eventCount += 1;
-    journalBytes += bytes;
+      const handle = await fs.open(filePath, "a", 0o600);
+      try {
+        await handle.writeFile(line, "utf8");
+        await handle.sync();
+      } finally { await handle.close(); }
+      await fs.chmod(filePath, 0o600);
+      eventCount += 1;
+      journalBytes += bytes;
+    } catch (error) {
+      // A failed append may have written a partial or fully durable record before
+      // reporting an error. Force the next operation through journal recovery rather
+      // than appending again to an uncertain tail in this process.
+      initialized = false;
+      throw error;
+    }
   }
   async function init() {
     return serialize(async () => {
