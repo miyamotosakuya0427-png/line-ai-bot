@@ -1,7 +1,7 @@
 "use strict";
 const test=require("node:test");
 const assert=require("node:assert/strict");
-const {createPaperTradingEngine,DEFAULT_POLICY,TARGETS_ARE_HYPOTHESES,normalizeSnapshot}=require("./paper-trading");
+const {createPaperTradingEngine,DEFAULT_POLICY,TARGETS_ARE_HYPOTHESES,normalizeSnapshot,validTimestamp}=require("./paper-trading");
 
 function setup(){
  let now="2026-11-16T09:00:00+09:00";
@@ -65,9 +65,7 @@ test("analysis reports strategy-level performance without claiming predictive re
  assert.equal(a.targetAssessment.status,"RESEARCH_ONLY_NOT_A_PROMISE");
  assert.ok(a.limitations.length>=4);
 });
-
 test("position cap blocks new entries without permanently halting the paper engine",()=>{
- const {engine}=setup();
  const capped=createPaperTradingEngine({policy:{maxOpenPositions:1}});
  open(capped);
  assert.equal(capped.riskState().halted,false);
@@ -88,4 +86,12 @@ test("daily loss halt expires on the next market day while drawdown remains belo
  assert.equal(engine.riskState().halted,false);
  open(engine,{id:"trade-2"});
  assert.equal(engine.listTrades({status:"open"}).length,1);
+});
+test("all trading timestamps must be timezone-qualified and calendar-valid",()=>{
+ assert.equal(validTimestamp("2026-02-30T09:00:00Z"),false);
+ assert.equal(validTimestamp("2026-11-16T09:00:00"),false);
+ assert.equal(validTimestamp("2026-11-16T09:00:00+09:00"),true);
+ const {engine}=setup();
+ assert.throws(()=>engine.recordSnapshot({source:"example.exchange",symbol:"7203",capturedAt:"2026-02-30T09:00:00Z",price:1000}),/capture timestamp/);
+ assert.throws(()=>open(engine,{openedAt:"2026-11-16T09:00:00"}),/open timestamp/);
 });
