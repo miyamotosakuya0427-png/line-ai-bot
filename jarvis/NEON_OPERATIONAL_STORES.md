@@ -47,6 +47,6 @@ The production runtime is not activated by this PR. No connection string is incl
 
 ### Verification limits
 - Unit tests exercise fake-pool locking behavior, lease ownership, expiry/reclaim, and approval integrity.
-- An opt-in real PostgreSQL integration test is available only with `JARVIS_TEST_DATABASE_URL` pointing to a dedicated database whose name includes `test`. It drops and recreates the `jarvis` schema in that isolated database. CI does not configure this variable, so real multi-connection PostgreSQL integration remains unrun.
+- An opt-in real PostgreSQL integration test is available only when both `JARVIS_TEST_DATABASE_URL` and `JARVIS_ALLOW_TEST_SCHEMA_RESET=yes` are explicitly set, and the database name includes `test`. It drops and recreates the `jarvis` schema in that isolated database. CI does not configure these variables, so real multi-connection PostgreSQL integration remains unrun.
 - Do not configure this test against Neon production or any database containing user data.
 - JSONL migration, checksum reconciliation, rollback, and live Neon validation remain separate follow-up work.
