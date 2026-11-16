@@ -495,7 +495,9 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
               (d.details!==undefined&&(typeof d.details!=="string"||d.details.length>8000))||
               (d.idempotencyKey!==undefined&&(typeof d.idempotencyKey!=="string"||d.idempotencyKey.length>128))) return json(res,400,{ok:false,error:"Invalid approval request"});
           if (!["external_submit","financial","contract","publish","delete","permission_change","unknown"].includes(d.actionClass)) return json(res,400,{ok:false,error:"This action class does not require owner approval"});
-          const result=await approvalStore.create({departmentId:d.departmentId,actionClass:d.actionClass,summary:d.summary,details:d.details||"",idempotencyKey:d.idempotencyKey||""});
+          const hasExecutionBinding=d.resourceId!==undefined||d.operationPayload!==undefined||d.expiresAt!==undefined;
+          if(hasExecutionBinding&&(typeof d.resourceId!=="string"||!d.resourceId.trim()||d.resourceId.length>256||!d.operationPayload||typeof d.operationPayload!=="object"||Array.isArray(d.operationPayload)||Buffer.byteLength(JSON.stringify(d.operationPayload),"utf8")>16*1024||typeof d.expiresAt!=="string"||!Number.isFinite(Date.parse(d.expiresAt))||Date.parse(d.expiresAt)<=now().getTime()))return json(res,400,{ok:false,error:"Approval execution binding requires a resource ID, JSON payload under 16 KB, and future expiry"});
+          const result=await approvalStore.create({departmentId:d.departmentId,actionClass:d.actionClass,summary:d.summary,details:d.details||"",idempotencyKey:d.idempotencyKey||"",resourceId:hasExecutionBinding?d.resourceId:"",operationPayload:hasExecutionBinding?d.operationPayload:null,expiresAt:hasExecutionBinding?d.expiresAt:null});
           return json(res,result.created?201:200,{ok:true,created:result.created,approval:result.approval,executionEnabled:false,message:"承認記録のみを保存しました。外部送信・公開・支払い等は実行していません。"});
         }
         const match=new RegExp("^/v1/approvals/([0-9a-f-]{36})/decision$").exec(url.pathname);
