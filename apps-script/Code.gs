@@ -6,7 +6,6 @@ const LINE_SHEET = "13 LINE連携";
 const AUDIT_SHEET = "14 管理者操作履歴";
 const INITIAL_ADMIN_PROPERTY = "JARVIS_INITIAL_ADMIN_LINE_USER_ID";
 const READABLE_SHEETS = new Set(["01 従業員", "日報", "03 日報", "04 売上", "05 経費", "09 請求", "10 入金", "13 LINE連携"]);
-const WRITABLE_SHEETS = new Set(["04 売上", "05 経費", "06 外注費", "07 材料費", "08 重機・車両", "09 請求", "10 入金"]);
 const AUDIT_HEADERS = [
   "記録日時", "操作者LINEユーザーID", "操作", "対象連携ID",
   "対象従業員ID", "変更前状態", "変更後状態", "処理結果"
@@ -65,31 +64,8 @@ function doPost(e) {
       });
     }
 
-    if (data.action === "appendRows") {
-      if (!WRITABLE_SHEETS.has(sheetName)) return output({ ok: false, error: "Sheet is not allowlisted for generic writes" });
-      if (!Array.isArray(data.rows) || data.rows.length < 1 || data.rows.length > 50) {
-        return output({ ok: false, error: "Invalid rows" });
-      }
-      if (!data.rows.every(row =>
-        Array.isArray(row) && row.length >= 1 && row.length <= 20 &&
-        row.every(value => ["string", "number", "boolean"].includes(typeof value) || value === null)
-      )) return output({ ok: false, error: "Invalid row format" });
+    if (data.action === "appendRows") return output({ ok: false, error: "Generic writes are disabled; use a dedicated validated action" });
 
-      const width = Math.max(...data.rows.map(row => row.length));
-      const safeRows = data.rows.map(row =>
-        row.concat(Array(width - row.length).fill("")).map(value =>
-          typeof value === "string" && /^\s*=/.test(value) ? "'" + value : value
-        )
-      );
-      const lock = LockService.getScriptLock();
-      lock.waitLock(10000);
-      try {
-        sheet.getRange(sheet.getLastRow() + 1, 1, safeRows.length, width).setValues(safeRows);
-      } finally {
-        lock.releaseLock();
-      }
-      return output({ ok: true, appended: safeRows.length });
-    }
     return output({ ok: false, error: "Unknown action" });
   } catch (err) {
     console.error(err);
