@@ -80,3 +80,17 @@ test("PostgreSQL job claims are exclusive, renewable, and reclaimable after leas
  const completed=await jobs.transition(job.id,"succeeded",{leaseOwner:"worker-c",result:{ok:true}});
  assert.equal(completed.status,"succeeded");assert.equal(completed.lease,undefined);
 });
+
+test("PostgreSQL approvals bind immutable target, payload, expiry, and authorized one-time execution claim",async()=>{
+ const pool=fakePool(),{approvals}=createPostgresOperationalStores({pool,clock:()=>"2026-11-17T00:00:00.000Z",authorizeActor:async actor=>actor==="owner-api"});
+ const payload={videoId:"V205",destination:"youtube",operation:"publish"};
+ const created=await approvals.create({departmentId:"content",actionClass:"publish",summary:"Publish V205",resourceId:"V205",operationPayload:payload,expiresAt:"2026-11-17T01:00:00.000Z"});
+ const decided=await approvals.decide(created.approval.id,"approved",{actor:"owner-api"});
+ assert.equal(decided.decidedBy,"owner-api");
+ await assert.rejects(approvals.verifyExecutionRequest(decided.id,{resourceId:"V206",operationPayload:payload}),/integrity/);
+ assert.equal((await approvals.verifyExecutionRequest(decided.id,{resourceId:"V205",operationPayload:payload})).ok,true);
+ await assert.rejects(approvals.claimExecution(decided.id,{resourceId:"V205",operationPayload:payload,actor:"guest"}),/not authorized/);
+ const claimed=await approvals.claimExecution(decided.id,{resourceId:"V205",operationPayload:payload,actor:"owner-api"});
+ assert.equal(claimed.executionStatus,"claimed");
+ await assert.rejects(approvals.claimExecution(decided.id,{resourceId:"V205",operationPayload:payload,actor:"owner-api"}),/already been claimed/);
+});
