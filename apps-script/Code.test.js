@@ -249,6 +249,27 @@ test("administrator can reject an invalid pending identity without approving it"
   assert.equal(ss.sheets["13 LINE連携"].rows[2][7], "却下");
 });
 
+test("daily report identity lookup rejects multiple active employee links for one LINE identity", () => {
+  const app = loadAppsScript();
+  const ss = makeSpreadsheet([
+    headers,
+    ["LINK-1", applicantId, "申請者", "EMP001", "従業員A", "", "一般", "有効"],
+    ["LINK-2", applicantId, "申請者", "EMP003", "宮本朔也", "", "一般", "有効"]
+  ]);
+  assert.equal(app.findActiveLineLink(ss, applicantId, "EMP001", "従業員A"), false);
+});
+
+test("daily report identity lookup rejects multiple active LINE identities for one employee", () => {
+  const app = loadAppsScript();
+  const secondLineId = "U" + "c".repeat(32);
+  const ss = makeSpreadsheet([
+    headers,
+    ["LINK-1", applicantId, "申請者", "EMP001", "従業員A", "", "一般", "有効"],
+    ["LINK-2", secondLineId, "別申請者", "EMP001", "従業員A", "", "一般", "有効"]
+  ]);
+  assert.equal(app.findActiveLineLink(ss, applicantId, "EMP001", "従業員A"), false);
+});
+
 test("daily report write revalidates active LINE identity and employee register", () => {
   const app = loadAppsScript();
   const ss = makeSpreadsheet([
