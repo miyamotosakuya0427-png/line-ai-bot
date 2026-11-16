@@ -61,6 +61,9 @@ All API endpoints except `GET /health` and the dashboard shell require `Authoriz
 - `GET /v1/content/workflow` (authenticated video production stages, quality checklist, and approval gates)
 - `GET /v1/subsidy/sources` (authenticated official source catalog and One-specific priority topics)
 - `GET /v1/status`
+- `GET /v1/approvals` (authenticated approval journal; bearer-token access, without separate human identity proof)
+- `POST /v1/approvals` (record an owner approval request)
+- `POST /v1/approvals/:id/decision` (record approved/rejected decision; never executes external work)
 - `GET /v1/jobs`
 - `POST /v1/jobs`
 - `GET /v1/jobs/:id`
@@ -71,9 +74,11 @@ See [core design and deployment](./core/README.md) and [deployment checklist](./
 
 ## Not yet complete
 
-This is a tested foundation, not a fully autonomous office system. Department roles and read-only official-source catalog are implemented, but independent model instances, scheduled live research, push notifications, persistent research history, and per-department task queues are not yet connected. Daily-report analytics and aggregate-grounded AI Q&A are limited to the first 99 daily-report rows returned by Apps Script; they are not complete historical financial or profitability reports. Full-history sales/expense/invoice ingestion, tax/accounting adjustments, cost allocation, payroll analytics, arbitrary office actions, Google Sheets writes from the AI worker, desktop control, video generation/publishing, and multiple worker instances are not implemented. Those integrations require separate allowlists, permissions, and end-to-end tests.
+This is a tested foundation, not a fully autonomous office system. Department role-scoped handlers and a durable task queue are implemented, but separate model instances, push notifications, persistent long-term research history, and multiple worker instances are not. Daily-report analytics and financial aggregates are limited to the first 99 rows per sheet returned by Apps Script; they are not complete historical financial or profitability reports. Tax/accounting adjustments, cost allocation, payroll analytics, arbitrary office actions, Google Sheets writes from the AI worker, desktop control, direct Descript/Metricool/vidIQ service integration, automatic video rendering, and external publishing are not implemented. The video batch queue and owner review inbox can register and manage up to 100 ideas, but they do not generate or publish media. Those integrations require separate allowlists, permissions, provider credentials, and end-to-end tests.
 
 Production deployment remains intentionally disabled until the paid persistent disk and service configuration are approved.
+
+The approval journal uses `JARVIS_APPROVAL_STORE_PATH`; if omitted while `JARVIS_JOB_STORE_PATH` is configured, it defaults to `<JARVIS_JOB_STORE_PATH>.approvals` on the same persistent volume. The authenticated approval API and dashboard persist pending/approved/rejected decisions. Approval is a recorded authorization state only: this release does not execute YouTube publishing, external submissions, payments, purchases, deletion, or permission changes. Each external integration must separately verify the approval record and implement its own execution safeguards. The dashboard labels approved requests as not executed.
 
 
 ## Financial sheet schema
@@ -103,9 +108,19 @@ The source catalog prioritizes construction equipment and ICT, battery/solar/ele
 The content department uses a staged workflow: research, script and source verification, Japanese kanji/name reading and pronunciation review, narration, authorized visual assets, edit/captions, final QA, owner review, publication, and post-publication analytics. QA checks cover historical sourcing, dates/names/amounts, spoken-vs-script alignment, audible completeness, subtitle accuracy and mobile readability, asset rights, black frames/audio loss/export integrity, and honest titles/thumbnails. Paid voice/video generation requires explicit approval for that generation; subscription/purchases require owner approval; publication and scheduling are owner-only actions. The current implementation exposes the workflow and checklist at authenticated `GET /v1/content/workflow`; the opt-in scheduler queues a daily planning task only; it does not yet provide automatic narration generation, video rendering/editing, or autonomous publishing. Existing Descript projects must be inspected before marking any stage complete. The channel is `https://www.youtube.com/@samurai-b6i` and the working project is `江戸大名、借金まみれの真実`.
 
 
+### Researched video drafts
+
+Two independently tracked 8–12 minute narration drafts are stored under `jarvis/content/`: `episode-001-kameyama-finance.md` and `episode-002-meireki-fire.md`. Each includes a source register, pronunciation checklist, visual plan, and explicit fact-check caveats. Their tests enforce key numerical/source claims and a target narration length. These are script drafts, not rendered or published videos.
+
+The Descript registry records measured project media durations: the Edo-daimyo composition is 74 seconds with a 33.28-second audio file; the Edo-fire composition is 24 seconds with audio assets around 32.31 and 32.83 seconds, plus a separate 32.31-second pronunciation-check project. The existing audio names identify Kenichi and one transcript speaker label is Hayama, while the selected default preference is Hinata. These assets must not be treated as finished 8–12 minute videos or overwritten without review.
+
+Descript, Metricool, and vidIQ connections available inside ChatGPT are not automatically available inside the Render-hosted JARVIS process. No server-side credentials/adapters for those ChatGPT connectors have been verified. Do not mark media editing, export, scheduling, or publishing as integrated until a separate supported server-side API connection and end-to-end test exist.
+
 ### Video agent execution and scheduler
 
 The JARVIS worker registers an isolated role-scoped AI handler for each department (`department.<id>`). Authenticated `POST /v1/departments/:id/tasks` and `POST /v1/content/tasks` enqueue durable, idempotent tasks; results are visible in the job journal. ONE CONTENT has a dedicated Japanese-history prompt for 8–12 minute drafts, fact/source uncertainty handling, kanji readings, narration/subtitle alignment, and strict non-publication rules.
+
+Important integration boundary: Descript, Metricool, and vidIQ connections available inside ChatGPT are not automatically available inside the Render-hosted JARVIS process. The current Render service has no verified server-side credentials/adapters for those ChatGPT connectors. JARVIS can prepare durable research and production tasks, but it cannot directly edit/export Descript projects, sync Metricool analytics, or schedule/publish YouTube posts until a supported server-side API integration is configured and tested. Do not copy ChatGPT connector secrets into the repository.
 
 The daily content planner is opt-in via `JARVIS_CONTENT_AUTOPLAN_ENABLED=true` and requires the persistent job store, `JARVIS_WORKER_ENABLED=true`, and a running service. It enqueues one idempotent planning task per Japan-local date at 08:45 JST. It creates a concept/outline/source-checklist draft only; it does not generate paid audio/video or publish. The flag is not enabled in the current Render environment and this PR is not deployed.
 
@@ -119,7 +134,7 @@ ONE OFFICE has an official-source fetcher with an HTTPS host allowlist derived f
 
 ### Tax and management agent context
 
-When a tax or management task asks about sales, expenses, invoices, collections, profit, accounting, tax, or cash flow, JARVIS attempts a read-only fetch of the allowlisted financial tabs. It validates exact headers, uses the bounded 99-row sample, and attaches only aggregates to the department task. Customer/payee names, invoice identifiers, receipt URLs, bank accounts, employee personal data, and free-text notes are not attached. If the tabs are missing or fail schema validation, the task receives an explicit unavailable status rather than invented figures. Invoice/collection reconciliation is included only when both optional invoice and payment tabs pass validation. The optional tab names `09 請求` and `10 入金` and their exact headers are implementation assumptions from the proposed sheet design, not a verified live spreadsheet schema; the reader fails closed if they are absent or differ. Do not treat receivables figures as live until the actual sheet names and headers are confirmed.
+When a tax or management task asks about sales, expenses, invoices, collections, profit, accounting, tax, or cash flow, JARVIS attempts a read-only fetch of the allowlisted financial tabs. It validates exact headers, uses the bounded 99-row sample, and attaches only aggregates to the department task. Customer/payee names, site names, expense item descriptions, invoice identifiers, receipt URLs, bank accounts, employee personal data, and free-text notes are not attached; project aggregates use only the internal site ID and expense categories use only the structured `区分` field. If the tabs are missing or fail schema validation, the task receives an explicit unavailable status rather than invented figures. Invoice/collection reconciliation is included only when both optional invoice and payment tabs pass validation. The optional tab names `09 請求` and `10 入金` and their exact headers are implementation assumptions from the proposed sheet design, not a verified live spreadsheet schema; the reader fails closed if they are absent or differ. Do not treat receivables figures as live until the actual sheet names and headers are confirmed.
 
 
 The subsidy monitor also stores bounded SHA-256 fingerprints for successfully fetched official pages in each completed job result and compares them with the previous completed run. It classifies each source as new, changed, unchanged, or unverified; an unavailable page is never interpreted as a closed subsidy. Only source metadata/fingerprints are retained for comparison, not full page dumps.
@@ -128,3 +143,40 @@ The subsidy monitor also stores bounded SHA-256 fingerprints for successfully fe
 ### Department-specific company context
 
 Construction tasks about site activity or daily reports receive read-only aggregate analytics from `03 日報` (maximum 99 sampled rows): site counts, worker-days, estimated person-hours, equipment, and recent work dates. Employee names, IDs, phone numbers, pay, free-text notes, and row-level reports are not passed to the construction agent. Missing or invalid sheet data is reported as unavailable rather than estimated.
+- `GET /v1/content/batches` and `POST /v1/content/batches` (authenticated persistent video queue, up to 100 ideas per batch)
+- `GET /v1/content/approvals` (video owner-review inbox)
+- `GET /v1/content/videos/:id/plan` (read the associated ONE CONTENT draft-job status/result)
+- `POST /v1/content/videos/:id/plan` (enqueue an authenticated ONE CONTENT research/script draft job; the worker saves a successful result into the video record and marks it `needs_source_review`)
+- `POST /v1/content/videos/:id/draft` (save the matching successful ONE CONTENT result into the video script field and mark it `needs_source_review`; this does not mark the sources as verified)
+- `GET /v1/content/videos/:id/script-metrics` (authenticated Japanese spoken-character count and estimated duration range; the result explicitly requires recorded timing)
+- `GET /v1/content/batches` includes the same script metrics for dashboard display.
+- `POST /v1/content/videos/:id/stage`, `/review`, and `/action-approval` (ordered stage updates, review decisions, and scoped expiring action-approval records)
+
+Stage advancement is evidence-gated: source QA must record verified claims and primary sources; pronunciation review must record checked readings; narration must have a confirmed voice and measured 8–12 minute recording; assets must have rights clearance; editing must reference a real rendered project/composition; final QA must pass with zero open issues; analytics requires a YouTube URL and publication timestamp. Missing evidence blocks advancement. Evidence is a recorded assertion from the authenticated caller, not independent provider verification; do not enter it until the underlying work has actually been checked.
+
+### Video batch queue
+
+Japanese narration timing is estimated using a configurable 330–400 spoken-character/minute range. This is a planning estimate only; the dashboard labels it as such and requires the actual recorded narration duration before the episode can be treated as finished. An English-oriented word counter is not used to determine Japanese runtime.
+
+
+The video batch journal is stored at `<JARVIS_JOB_STORE_PATH>.video-batches.jsonl` and is initialized alongside the job journal. It supports up to 100 ideas per batch, separate channel identifiers, ordered production stages, owner review decisions (approve / request changes / hold), and scoped action-approval records with provider, cost estimate, destination, and expiry. Finance-channel bulk registration is blocked in both the dashboard and store/API until a verified destination and financial controls are configured. Queue registration only creates ideas; it does not start research, paid generation, editing, uploads, scheduling, or publication. A provider executor is not connected. Approval actions are verified records only and must not be treated as completed external work.
+
+The general approval journal and video-specific review inbox are separate: `/v1/approvals` handles cross-department authorization records, while `/v1/content/approvals` is the video-batch review inbox. Both use the shared JARVIS bearer token. This authenticates API access but does not independently prove the human owner's identity. Add a separate owner identity control before enabling consequential external execution.
+
+### YouTube originality and AI disclosure
+
+The content agent and final QA checklist require each episode to contribute distinct research, narrative, commentary, and educational value. YouTube's monetization policy identifies repetitive or mass-produced template content with little variation or original value as inauthentic content; a shared series format is acceptable only when the substance of each episode is materially distinct. Official policy: https://support.google.com/youtube/answer/1311392?hl=ja
+
+AI-assisted scripts, outlines, titles, thumbnails, and captions alone generally do not require an AI disclosure. Realistic AI-generated or materially altered depictions of real people, places, or events, and AI-generated music that is the main focus, require a disclosure review during upload. Reconstructed scenes must not be presented as actual archival footage. Official guidance: https://support.google.com/youtube/answer/14328491?hl=ja
+
+A separate 100-topic finance/economics idea backlog is stored at `jarvis/content/finance-100-ideas.md`. It is a research-first idea list only: the finance channel destination is not configured, the ideas are not inserted into the production queue, and no finance videos are generated or published.
+
+
+
+## History-source retrieval (safe, opt-in)
+- Video plans may include source candidates; ONE CONTENT retrieves at most the first 10 HTTPS pages per video before drafting and reports any omitted candidates.
+- Configure `JARVIS_HISTORY_SOURCE_HOSTS` as a comma-separated exact-host allowlist (for example, `www.ndl.go.jp,www.archives.go.jp`). Leave it unset to fail closed: source URLs are recorded as unavailable and are not fetched.
+- Only exact allowlisted HTTPS hosts, HTML/XHTML pages, HTTP 200 responses, and pages up to 500 KB are accepted. Redirects are refused, and fetched page text is treated as untrusted input to resist prompt injection. Redirects are not followed; PDFs and other binary documents remain unsupported by this retrieval adapter.
+- Snapshots include fetch time, HTTP status, page title, excerpt, character count, and SHA-256 of extracted text.
+- A fetched page is retrieval evidence only. It does not prove that the page is a primary source, that the page is authentic, or that any historical claim is true. Source-QA still requires a human/qualified review of each claim against the underlying source.
+- No source fetching occurs for ordinary department jobs. No external upload, paid generation, or publication is enabled by this feature.

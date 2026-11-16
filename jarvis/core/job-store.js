@@ -94,6 +94,12 @@ function createJobStore({ filePath, clock = () => new Date().toISOString() } = {
       const job = jobs.get(id);
       return job ? publicJob(job) : null;
     },
+    async getByIdempotencyKey(key) {
+      await ready();
+      if (typeof key !== "string" || !key || key.length > 128) throw new Error("Invalid idempotency key");
+      const job = [...jobs.values()].find(item => item.idempotencyKey === key);
+      return job ? publicJob(job) : null;
+    },
     async list({ status, limit = 50 } = {}) {
       await ready();
       if (status && !STATES.has(status)) throw new Error("Invalid job status");

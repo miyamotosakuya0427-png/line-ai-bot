@@ -6,11 +6,12 @@ const token="t".repeat(64);
 const employeeHeaders=["従業員ID","氏名","LINE表示名","職種","役職","単価","電話番号","入社日","登録日","状態","備考"];
 const dailyHeaders=["日報ID","記録日時","作業日","従業員ID","氏名","現場名","作業内容","開始時刻","終了時刻","休憩（分）","作業人数","使用機械・車両","使用材料","連絡事項"];
 
-function fixture({jobStore=null}={}) {
+function fixture({jobStore=null,approvalStore=null}={}) {
   const calls=[];
   const app=createServer({
     token,
     jobStore,
+    approvalStore,
     sheetsUrl:"https://script.google.com/macros/s/test-id/exec",
     sheetsToken:"s".repeat(128),
     fetchImpl:async(url,options)=>{
@@ -259,5 +260,36 @@ test("construction agent receives aggregate daily-report analytics without emplo
  try{
   const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/departments/construction/tasks`,{method:"POST",headers:{Authorization:`Bearer ${token}`,"Content-Type":"application/json"},body:JSON.stringify({request:"日報から現場別稼働と重機を分析して"})});
   assert.equal(response.status,201);assert.equal(queued.type,"department.construction");assert.equal(queued.payload.companyContext.dailyReportAnalytics.reportCount,1);assert.equal(queued.payload.companyContext.dailyReportAnalytics.siteCount,1);assert.equal(JSON.stringify(queued.payload.companyContext).includes("宮本朔也"),false);assert.equal(JSON.stringify(queued.payload.companyContext).includes("非公開メモ"),false);
+ }finally{await new Promise(resolve=>app.close(resolve));}
+});
+
+
+test("owner approval API is authenticated, durable-store-backed, and never executes external actions",async()=>{
+ const records=new Map();
+ const approvalStore={
+  create:async value=>{const approval={id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",...value,status:"pending",executionStatus:"not_started"};records.set(approval.id,approval);return{created:true,approval};},
+  list:async()=>[...records.values()],
+  decide:async(id,decision,{reason}={})=>{const item=records.get(id);if(!item)return null;if(item.status!=="pending")throw new Error("already decided");const updated={...item,status:decision,decisionReason:reason,executionStatus:"not_started"};records.set(id,updated);return updated;}
+ };
+ const {app}=fixture({approvalStore});await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+ try{
+  const base="http://127.0.0.1:"+app.address().port;
+  const denied=await fetch(base+"/v1/approvals");assert.equal(denied.status,401);
+  const created=await fetch(base+"/v1/approvals",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({departmentId:"content",actionClass:"publish",summary:"江戸大名動画の公開",idempotencyKey:"publish-1"})});
+  const result=await created.json();assert.equal(created.status,201);assert.equal(result.approval.status,"pending");assert.equal(result.executionEnabled,false);assert.equal(result.approval.executionStatus,"not_started");
+  const listed=await fetch(base+"/v1/approvals?status=pending",{headers:{Authorization:"Bearer "+token}});assert.equal((await listed.json()).approvals.length,1);
+  const decided=await fetch(base+"/v1/approvals/"+result.approval.id+"/decision",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({decision:"approved",reason:"代表者確認済み"})});
+  const decision=await decided.json();assert.equal(decided.status,200);assert.equal(decision.approval.status,"approved");assert.equal(decision.executionEnabled,false);assert.equal(decision.approval.executionStatus,"not_started");
+ }finally{await new Promise(resolve=>app.close(resolve));}
+});
+
+test("owner approval API rejects non-owner actions and invalid departments",async()=>{
+ const store={create:async()=>{throw new Error("must not be called");},list:async()=>[],decide:async()=>null};
+ const {app}=fixture({approvalStore:store});await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+ try{
+  const base="http://127.0.0.1:"+app.address().port;
+  const headers={Authorization:"Bearer "+token,"Content-Type":"application/json"};
+  const invalidAction=await fetch(base+"/v1/approvals",{method:"POST",headers,body:JSON.stringify({departmentId:"content",actionClass:"draft",summary:"台本作成"})});assert.equal(invalidAction.status,400);
+  const invalidDept=await fetch(base+"/v1/approvals",{method:"POST",headers,body:JSON.stringify({departmentId:"unknown",actionClass:"publish",summary:"公開"})});assert.equal(invalidDept.status,400);
  }finally{await new Promise(resolve=>app.close(resolve));}
 });

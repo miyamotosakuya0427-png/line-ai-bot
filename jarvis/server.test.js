@@ -3,8 +3,30 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { createServer } = require("./server");
+const fs=require("node:fs/promises");
+const os=require("node:os");
+const path=require("node:path");
+const {createVideoBatchStore,STAGES}=require("./core/video-batch-store");
 
 const token = "test-token-that-is-at-least-32-bytes-long";
+const STAGE_EVIDENCE={
+ sourceQa:{status:"passed",allClaimsVerified:true,verifiedClaimCount:1,primarySourceCount:1,reviewedBy:"test-reviewer",sources:[{url:"https://www.bousai.go.jp/primary-source",title:"内閣府 防災資料",sourceType:"primary",accessedAt:"2026-11-16T00:00:00.000Z",excerpt:"一次資料の原文に基づく確認済みの記述を含む抜粋です。"}],claims:[{claim:"明暦の大火に関する確認済みの記述",status:"verified",sourceUrls:["https://www.bousai.go.jp/primary-source"]}]},
+ pronunciation:{status:"passed",readingsReviewed:true,termsChecked:8,reviewedBy:"test-reviewer"},
+ narration:{status:"recorded",durationSeconds:600,voiceName:"Hinata",voiceConfirmed:true,recordedBy:"test-recorder"},
+ assets:{status:"cleared",assetCount:5,rightsConfirmed:true,clearedBy:"test-editor"},
+ edit:{status:"rendered",projectId:"072f8671-af62-480c-8072-bb253faf58b7",compositionId:"cd7b6796-23cc-43a7-ae7c-c2e3cfb50d32",durationSeconds:600},
+ finalQa:{status:"passed",checklistPassed:true,openIssues:0,durationSeconds:600,checkedBy:"test-reviewer"}
+};
+async function advanceToOwnerReview(store,id,{fromSourceQa=false}={}){
+ if(!fromSourceQa){await store.saveDraft(id,{script:"台本初稿。出典と読みを確認する。",jobId:"server-test-"+id});await assert.rejects(store.updateStage(id,"source_qa"),/Stage evidence required/);await store.updateStage(id,"source_qa",{evidence:{sourceQa:STAGE_EVIDENCE.sourceQa}});}
+ await store.updateStage(id,"pronunciation",{evidence:{sourceQa:STAGE_EVIDENCE.sourceQa}});
+ await store.updateStage(id,"narration",{evidence:{pronunciation:STAGE_EVIDENCE.pronunciation}});
+ await store.updateStage(id,"assets",{evidence:{narration:STAGE_EVIDENCE.narration}});
+ await store.updateStage(id,"edit",{evidence:{assets:STAGE_EVIDENCE.assets}});
+ await store.updateStage(id,"final_qa",{evidence:{edit:STAGE_EVIDENCE.edit}});
+ await store.updateStage(id,"owner_review",{evidence:{finalQa:STAGE_EVIDENCE.finalQa}});
+}
+
 let server;
 let base;
 
@@ -593,4 +615,152 @@ test("JARVIS dashboard is served with restrictive security headers and no server
     assert.match(html,/メモリ内だけ/);
     assert.doesNotMatch(html,new RegExp(token));
   } finally { await new Promise(resolve=>app.close(resolve)); }
+});
+
+
+test("video batch plan endpoint queues an idempotent ONE CONTENT draft task without external actions", async t => {
+  const {createJobStore}=require("./core/job-store");
+  const {createWorker}=require("./core/worker");
+  const {createVideoBatchContentHandler}=require("./core/video-batch-runner");
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-video-plan-e2e-"));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const jobStore=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
+  const videoBatchStore=createVideoBatchStore({filePath:path.join(dir,"videos.jsonl")});
+  await videoBatchStore.createBatch({items:[{id:"V01",title:"江戸の町を変えた大火",topic:"明暦の大火と江戸の都市改造",sources:["https://www.example.jp/history"]}]});
+  const contentHandler=async payload=>({draft:true,videoId:payload.videoId,request:payload.request,answer:"台本初稿："+payload.request});
+  const worker=createWorker({store:jobStore,handlers:{"department.content":createVideoBatchContentHandler({contentHandler,videoBatchStore})}});
+  await worker.start();
+  const app=createServer({token,jobStore,videoBatchStore,worker});
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  const root="http://127.0.0.1:"+app.address().port;
+  const headers={Authorization:"Bearer "+token,"Content-Type":"application/json"};
+  try {
+    const first=await fetch(root+"/v1/content/videos/V01/plan",{method:"POST",headers,body:JSON.stringify({})});
+    assert.equal(first.status,201);
+    const result=await first.json();
+    assert.equal(result.created,true);
+    assert.equal(result.job.type,"department.content");
+    assert.equal(result.job.payload.videoId,"V01");
+    assert.deepEqual(result.job.payload.researchSources,["https://www.example.jp/history"]);
+    assert.match(result.job.payload.request,/要一次資料確認/);
+    assert.match(result.job.payload.request,/YouTube公開/);
+    assert.match(result.job.payload.request,/テンプレ大量生産/);
+    assert.match(result.job.payload.request,/AI開示方針/);
+    assert.equal(result.externalActionsEnabled,false);
+    const duplicate=await fetch(root+"/v1/content/videos/V01/plan",{method:"POST",headers,body:JSON.stringify({})});
+    assert.equal(duplicate.status,200);
+    assert.equal((await duplicate.json()).created,false);
+    const run=await worker.runNext();
+    assert.equal(run.job.status,"succeeded");
+    assert.equal(run.job.result.videoId,"V01");
+    const taskStatus=await fetch(root+"/v1/content/videos/V01/plan",{headers:{Authorization:headers.Authorization}});
+    const taskStatusData=await taskStatus.json();
+    assert.equal(taskStatus.status,200);
+    assert.equal(taskStatusData.job.status,"succeeded");
+    const batchStatus=await fetch(root+"/v1/content/batches?limit=10",{headers:{Authorization:headers.Authorization}});
+    const batchStatusData=await batchStatus.json();
+    assert.equal(batchStatusData.videos[0].planJob.result.draft,true);
+    assert.equal(batchStatusData.videos[0].scriptMetrics.status,"too_short");
+    assert.equal(batchStatusData.videos[0].scriptMetrics.requiresRecordedTiming,true);
+    const metricsResponse=await fetch(root+"/v1/content/videos/V01/script-metrics",{headers:{Authorization:headers.Authorization}});
+    assert.equal(metricsResponse.status,200);
+    const metricsData=await metricsResponse.json();
+    assert.equal(metricsData.scriptMetrics.characters,batchStatusData.videos[0].scriptMetrics.characters);
+    assert.equal(metricsData.scriptMetrics.status,"too_short");
+    const metricsDenied=await fetch(root+"/v1/content/videos/V01/script-metrics");
+    assert.equal(metricsDenied.status,401);
+    const autoSaved=await videoBatchStore.get("V01");
+    assert.equal(autoSaved.stage,"script");
+    assert.equal(autoSaved.status,"in_progress");
+    assert.equal(autoSaved.draftStatus,"needs_source_review");
+    assert.equal(autoSaved.script,run.job.result.answer);
+    const saveDraft=await fetch(root+"/v1/content/videos/V01/draft",{method:"POST",headers,body:JSON.stringify({jobId:run.job.id})});
+    assert.equal(saveDraft.status,200);
+    const savedDraft=await saveDraft.json();
+    assert.equal(savedDraft.created,false);
+    assert.equal(savedDraft.video.stage,"script");
+    assert.equal(savedDraft.video.draftStatus,"needs_source_review");
+    assert.equal(savedDraft.video.script,run.job.result.answer);
+    const duplicateSave=await fetch(root+"/v1/content/videos/V01/draft",{method:"POST",headers,body:JSON.stringify({jobId:run.job.id})});
+    assert.equal(duplicateSave.status,200);
+    assert.equal((await duplicateSave.json()).created,false);
+
+    const denied=await fetch(root+"/v1/content/videos/V01/plan",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+    assert.equal(denied.status,401);
+  } finally {
+    worker.stop();
+    await new Promise(resolve=>app.close(resolve));
+  }
+});
+
+test("video batch APIs require auth, persist 100-item queues, and expose owner review", async t => {
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-video-api-"));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const videoBatchStore=createVideoBatchStore({filePath:path.join(dir,"videos.jsonl")});
+  const app=createServer({token,videoBatchStore});
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  const root="http://127.0.0.1:"+app.address().port;
+  try {
+    const denied=await fetch(root+"/v1/content/batches");
+    assert.equal(denied.status,401);
+    const items=Array.from({length:100},(_,i)=>({id:"V"+String(i+1).padStart(2,"0"),title:"企画"+(i+1),topic:"歴史テーマ"+(i+1)}));
+    const created=await fetch(root+"/v1/content/batches",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({items,idempotencyKey:"api-batch-100"})});
+    assert.equal(created.status,201);
+    const result=await created.json();
+    assert.equal(result.videos.length,100);
+    await videoBatchStore.saveDraft("V01",{script:"台本初稿。出典と読みを確認する。",jobId:"api-test-V01"});
+    const stage=await fetch(root+"/v1/content/videos/V01/stage",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({stage:"source_qa",notes:"台本保存済み",evidence:{sourceQa:STAGE_EVIDENCE.sourceQa}})});
+    assert.equal(stage.status,200);
+    assert.equal((await stage.json()).video.stage,"source_qa");
+    const listed=await fetch(root+"/v1/content/batches?limit=200",{headers:{Authorization:"Bearer "+token}});
+    assert.equal((await listed.json()).summary.total,100);
+    await advanceToOwnerReview(videoBatchStore,"V01",{fromSourceQa:true});
+    const inbox=await fetch(root+"/v1/content/approvals",{headers:{Authorization:"Bearer "+token}});
+    assert.equal((await inbox.json()).pending.length,1);
+    await advanceToOwnerReview(videoBatchStore,"V02");
+    await videoBatchStore.decideReview("V02",{decision:"hold",note:"確認待ち",actor:"owner"});
+    const heldInbox=await fetch(root+"/v1/content/approvals",{headers:{Authorization:"Bearer "+token}});
+    assert.equal((await heldInbox.json()).pending.some(v=>v.id==="V02"),true);
+    const review=await fetch(root+"/v1/content/videos/V01/review",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({decision:"approve",note:"確認済"})});
+    assert.equal(review.status,200);
+    const approved=await fetch(root+"/v1/content/videos/V01/action-approval",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({action:"publish",provider:"youtube",costEstimate:0,destination:"history-channel"})});
+    assert.equal(approved.status,201);
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
+
+
+test("authenticated batch planning endpoint enqueues a complete batch idempotently", async t => {
+  const {createJobStore}=require("./core/job-store");
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-video-batch-enqueue-api-"));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const jobStore=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
+  const videoBatchStore=createVideoBatchStore({filePath:path.join(dir,"videos.jsonl")});
+  const batch=await videoBatchStore.createBatch({items:[
+    {id:"V81",title:"江戸の火災",topic:"江戸時代の火災対策"},
+    {id:"V82",title:"城下町の形成",topic:"城下町の都市構造"}
+  ]});
+  const app=createServer({token,jobStore,videoBatchStore});
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  const root="http://127.0.0.1:"+app.address().port;
+  const headers={Authorization:"Bearer "+token,"Content-Type":"application/json"};
+  try {
+    const denied=await fetch(root+"/v1/content/batches/plan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({batchId:batch.batchId})});
+    assert.equal(denied.status,401);
+    const first=await fetch(root+"/v1/content/batches/plan",{method:"POST",headers,body:JSON.stringify({batchId:batch.batchId})});
+    assert.equal(first.status,202);
+    const data=await first.json();
+    assert.equal(data.selected,2);
+    assert.equal(data.queued.length,2);
+    assert.equal(data.existing.length,0);
+    assert.equal(data.externalActionsEnabled,false);
+    assert.equal(data.workerEnabled,false);
+    const second=await fetch(root+"/v1/content/batches/plan",{method:"POST",headers,body:JSON.stringify({batchId:batch.batchId})});
+    assert.equal(second.status,200);
+    const repeated=await second.json();
+    assert.equal(repeated.queued.length,0);
+    assert.equal(repeated.existing.length,2);
+    assert.equal((await jobStore.list({status:"queued",limit:20})).length,2);
+  } finally {
+    await new Promise(resolve=>app.close(resolve));
+  }
 });

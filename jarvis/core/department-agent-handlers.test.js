@@ -10,5 +10,5 @@ test("every department has its own isolated AI handler and scoped instructions",
 test("department handler passes its own role prompt to the model",async()=>{
  let body;const handlers=createDepartmentHandlers({apiKey:"test-key",fetchImpl:async(url,options)=>{body=JSON.parse(options.body);return {ok:true,json:async()=>({output_text:"確認結果"})};}});
  const result=await handlers["department.content"]({request:"次の動画の企画を作成"});
- assert.equal(result.answer,"確認結果");assert.match(body.instructions,/ONE CONTENT/);assert.match(body.instructions,/Hinata/);
+ assert.equal(result.answer,"確認結果");assert.match(body.instructions,/ONE CONTENT/);assert.match(body.instructions,/Hinata/);assert.equal(body.max_output_tokens,6500);
 });

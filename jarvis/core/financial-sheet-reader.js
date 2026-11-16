@@ -46,15 +46,15 @@ function readFinancialSheets({salesRows,expenseRows}) {
     const date=parseDate(cell(row,salesMap,"日付"));
     const amountYen=parseYen(cell(row,salesMap,"税抜売上"));
     if (!date||amountYen===null) throw new Error("売上シートに日付または税抜売上の不正データがあります");
-    records.push({kind:"revenue",date,project:String(cell(row,salesMap,"現場名")).trim()||"現場未設定",category:"工事売上",amountYen});
+    records.push({kind:"revenue",date,project:String(cell(row,salesMap,"現場ID")).trim()||"現場ID未設定",category:"工事売上",amountYen});
   }
   for (const row of expenseRows.slice(1)) {
     if (!row.some(value=>String(value??"").trim())) continue;
     const date=parseDate(cell(row,expenseMap,"日付"));
     const amountYen=parseYen(cell(row,expenseMap,"税抜金額"));
     if (!date||amountYen===null) throw new Error("経費シートに日付または税抜金額の不正データがあります");
-    const category=[cell(row,expenseMap,"区分"),cell(row,expenseMap,"項目")].map(v=>String(v).trim()).filter(Boolean).join(" / ")||"経費";
-    records.push({kind:"expense",date,project:String(cell(row,expenseMap,"現場名")).trim()||"現場未設定",category,amountYen});
+    const category=String(cell(row,expenseMap,"区分")).trim()||"経費";
+    records.push({kind:"expense",date,project:String(cell(row,expenseMap,"現場ID")).trim()||"現場ID未設定",category,amountYen});
   }
   return {...summarizeFinancialRecords(records),salesRecordCount:salesRows.length-1,expenseRecordCount:expenseRows.length-1,
     sourceSheets:[SALES_SHEET,EXPENSE_SHEET],sampleLimit:MAX_DATA_ROWS,
@@ -81,7 +81,7 @@ function readReceivablesSheets({invoiceRows,paymentRows,asOfDate}) {
     const outstandingYen=String(outstandingRaw??"").trim()===""?Math.max(0,amountYen-receivedYen):parseYen(outstandingRaw);
     if(outstandingYen===null||receivedYen>amountYen)throw new Error("請求シートの入金・未入金額が不正です");
     invoiceIds.add(invoiceId);
-    invoices.push({invoiceId,dueDate,project:String(cell(row,invoiceMap,"現場名")).trim()||"現場未設定",amountYen,receivedYen,outstandingYen});
+    invoices.push({invoiceId,dueDate,project:String(cell(row,invoiceMap,"現場ID")).trim()||"現場ID未設定",amountYen,receivedYen,outstandingYen});
   }
   let paymentTotalYen=0;
   const paymentByInvoice=new Map();

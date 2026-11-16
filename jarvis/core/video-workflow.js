@@ -15,8 +15,8 @@ const VIDEO_SERIES=Object.freeze({
 });
 
 const EXISTING_PROJECTS=Object.freeze([
- {id:"072f8671-af62-480c-8072-bb253faf58b7",title:"江戸大名、借金まみれの真実",compositionId:"cd7b6796-23cc-43a7-ae7c-c2e3cfb50d32",durationSeconds:74,media:{images:5,audio:"HeyGen音声_Kenichi_江戸大名借金.wav"},publishCount:0,transcriptSpeakerLabel:"Hayama",verification:"Descript project inspected; existing audio filename says Kenichi and transcript speaker label says Hayama, while selected default voice preference is Hinata; do not overwrite without review",historicalReview:{status:"primary-source-verified",sourceUrl:"https://www.bunka.pref.mie.lg.jp/rekishi/kenshi/asp/hakken/detail228.html",verifiedClaims:["安永5〜6年（1776〜1777年）の亀山藩予算書","歳入約1万6,900両","支出約4万5,700両","赤字約3万300両"],note:"三重県県史編さんグループの公開資料とナレーション原稿の主要数値が一致"}},
- {id:"5b28e058-e58b-41a7-9a26-0164aaea9ca6",title:"時をかける日本史｜江戸の大火",compositionId:"8a30994f-210a-4dd7-aa85-31904ea6368b",durationSeconds:24,media:{images:5,audio:"江戸の大火_ナレーション_Kenichi_読み修正版.wav"},publishCount:0,verification:"Separate Descript project; not the Edo-daimyo video"}
+ {id:"072f8671-af62-480c-8072-bb253faf58b7",title:"江戸大名、借金まみれの真実",compositionId:"cd7b6796-23cc-43a7-ae7c-c2e3cfb50d32",durationSeconds:74,media:{images:5,audio:"HeyGen音声_Kenichi_江戸大名借金.wav",audioDurationSeconds:33.276961},publishCount:0,transcriptSpeakerLabel:"Hayama",verification:"Descript project inspected; existing audio filename says Kenichi and transcript speaker label says Hayama, while selected default voice preference is Hinata; do not overwrite without review",historicalReview:{status:"primary-source-verified",sourceUrl:"https://www.bunka.pref.mie.lg.jp/rekishi/kenshi/asp/hakken/detail228.html",verifiedClaims:["安永5〜6年（1776〜1777年）の亀山藩予算書","歳入約1万6,900両","支出約4万5,700両","赤字約3万300両"],note:"三重県県史編さんグループの公開資料とナレーション原稿の主要数値が一致"}},
+ {id:"5b28e058-e58b-41a7-9a26-0164aaea9ca6",title:"時をかける日本史｜江戸の大火",compositionId:"8a30994f-210a-4dd7-aa85-31904ea6368b",durationSeconds:24,media:{images:5,audio:"江戸の大火_ナレーション_Kenichi_読み修正版.wav",audioDurationSeconds:32.827528,previousAudioDurationSeconds:32.309569},readCheckProject:{id:"6c1431bd-671b-41f9-b781-e5ad1cde851b",title:"江戸の大火｜ナレーション読み確認",durationSeconds:32.309569},publishCount:0,verification:"Separate Descript project; 24-second scene-material composition and separate 32.3-second read-check audio project; not the Edo-daimyo video"}
 ]);
 
 const STAGES=Object.freeze([
@@ -42,8 +42,23 @@ const QA_CHECKS=Object.freeze([
  "画像・BGM・効果音の利用権限と出典を確認した",
  "映像の黒画面・静止画の長時間放置・音声欠落・書き出し破損がない",
  "タイトル・サムネイル・説明文が内容を誇張していない",
- "公開先・公開設定・予約日時は代表者承認待ちである"
+ "公開先・公開設定・予約日時は代表者承認待ちである",
+ "各動画に固有の史料・論点・独自解説があり、単純なテンプレート差し替えの量産になっていない",
+ "転載・引用素材は出典を記録し、実質的な独自解説・教育的価値・変換がある",
+ "写実的なAI生成・改変映像やAI生成音楽について、YouTubeのAI開示要否を確認した"
 ]);
+
+const YOUTUBE_POLICY=Object.freeze({
+  monetizationUrl:"https://support.google.com/youtube/answer/1311392?hl=ja",
+  aiDisclosureUrl:"https://support.google.com/youtube/answer/14328491?hl=ja",
+  rules:Object.freeze([
+    "各動画は独自の調査・ナラティブ・教育的価値を提供する。題材名だけを入れ替えたテンプレ大量生産は収益化対象外となるリスクがある。",
+    "シリーズ共通の構成やイントロは利用できるが、各回の実質的な内容は十分に異なり、独自の説明・価値を持たせる。",
+    "AIによる台本・構成・タイトル・サムネイル作成の補助だけでは通常AI開示不要。",
+    "実在人物の発言・行動を偽装する、実在の場所や出来事に見える写実的なAI映像を生成・改変する、主題となるAI生成音楽を使う場合は投稿時のAI開示要否を確認する。",
+    "生成した再現映像を実際の史料映像・記録映像として見せない。必要に応じて再現・イメージ映像と明示する。"
+  ])
+});
 
 const APPROVAL_GATES=Object.freeze({
  paid_generation:"当該生成の直前に代表者の明示承認が必要。承認なしで生成APIを呼ばない",
@@ -89,6 +104,6 @@ function setQualityCheck(plan,checkId,passed,notes="") {
  return {...plan,qa:{checks}};
 }
 function getVideoWorkflow({autoplanEnabled=false}={}) {
- return {series:VIDEO_SERIES,projects:EXISTING_PROJECTS,stages:STAGES,qualityChecks:QA_CHECKS,approvalGates:APPROVAL_GATES,automationStatus:autoplanEnabled?"daily-planner-enabled":"opt-in-not-enabled",autoplanEnabled,publicationEnabled:false,paidGenerationEnabled:false,notes:["Existing production project is not automatically marked complete; inspect the real editor project and media before advancing stages.","Scheduled production requires a connected persistent worker and an approved budget."]};
+ return {series:VIDEO_SERIES,projects:EXISTING_PROJECTS,stages:STAGES,qualityChecks:QA_CHECKS,youtubePolicy:YOUTUBE_POLICY,approvalGates:APPROVAL_GATES,automationStatus:autoplanEnabled?"daily-planner-enabled":"opt-in-not-enabled",autoplanEnabled,publicationEnabled:false,paidGenerationEnabled:false,notes:["Existing production project is not automatically marked complete; inspect the real editor project and media before advancing stages.","Scheduled production requires a connected persistent worker and an approved budget."]};
 }
-module.exports={VIDEO_SERIES,EXISTING_PROJECTS,STAGES,QA_CHECKS,APPROVAL_GATES,createVideoPlan,markStageComplete,setVoiceGenerationMode,setOwnerApproval,setQualityCheck,getVideoWorkflow};
+module.exports={VIDEO_SERIES,EXISTING_PROJECTS,STAGES,QA_CHECKS,YOUTUBE_POLICY,APPROVAL_GATES,createVideoPlan,markStageComplete,setVoiceGenerationMode,setOwnerApproval,setQualityCheck,getVideoWorkflow};
