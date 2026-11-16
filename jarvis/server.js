@@ -658,7 +658,7 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
       }
       const ownerContentApprovalRoute =
         (req.method==="GET" && url.pathname==="/v1/content/approvals") ||
-        (req.method==="POST" && /^\\/v1\\/content\\/videos\\/V[0-9]{2,8}\\/(review|action-approval)$/.test(url.pathname));
+        (req.method==="POST" && url.pathname.startsWith("/v1/content/videos/") && (url.pathname.endsWith("/review") || url.pathname.endsWith("/action-approval")));
       if (url.pathname.startsWith("/v1/content/batches") || url.pathname.startsWith("/v1/content/approvals") || url.pathname.startsWith("/v1/content/videos/")) {
         if (!ownerContentApprovalRoute && !isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         if (ownerContentApprovalRoute && !isAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authentication required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
