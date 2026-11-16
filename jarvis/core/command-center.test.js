@@ -71,3 +71,13 @@ test("command center reports disabled dependencies honestly",async()=>{
  assert.equal(view.execution.queueConfigured,false);assert.equal(view.execution.workerConfigured,false);
  assert.equal(view.execution.externalActionsEnabled,false);assert.equal(view.jobSample.mayBePartial,false);
 });
+
+test("command center distinguishes configured data adapters from worker readiness",async()=>{
+ const contextLoader={configured:true,supports:id=>["hr","construction","jarvis","management","tax"].includes(id)};
+ const cc=createCommandCenter({departmentContextLoader:contextLoader});
+ const view=await cc.snapshot();
+ assert.equal(view.execution.companyDataAdapterConfigured,true);
+ assert.equal(view.departments.find(x=>x.id==="hr").dataAdapterConfigured,true);
+ assert.equal(view.departments.find(x=>x.id==="content").dataAdapterConfigured,false);
+ assert.equal(view.departments.find(x=>x.id==="hr").runtimeConfigured,false);
+});
