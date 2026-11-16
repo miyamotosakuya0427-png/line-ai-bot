@@ -726,6 +726,15 @@ test("video batch APIs require auth, persist 100-item queues, and expose owner r
     const stage=await fetch(root+"/v1/content/videos/V01/stage",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({stage:"source_qa",notes:"台本保存済み"})});
     assert.equal(stage.status,200);
     assert.equal((await stage.json()).video.stage,"source_qa");
+    const sourceQa={status:"passed",allClaimsVerified:true,verifiedClaimCount:1,primarySourceCount:1,reviewedBy:"api-reviewer",claims:[{claim:"明暦三年の大火",status:"verified",sourceUrl:"https://www.bousai.go.jp/report",sourceTitle:"公的資料",quote:"明暦三年に江戸で大火が起きた。"}]};
+    const toPronunciation=await fetch(root+"/v1/content/videos/V01/stage",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({stage:"pronunciation",evidence:{sourceQa}})});
+    assert.equal(toPronunciation.status,200);
+    const pronunciation={status:"passed",readingsReviewed:true,termsChecked:1,reviewedBy:"api-reviewer",terms:[{term:"明暦三年",reading:"めいれきさんねん",status:"confirmed",sourceUrl:"https://www.bousai.go.jp/report",sourceTitle:"公的資料",quote:"明暦三年に江戸で大火が起きた。",reviewedBy:"api-reviewer"}]};
+    const toNarration=await fetch(root+"/v1/content/videos/V01/stage",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({stage:"narration",evidence:{pronunciation}})});
+    assert.equal(toNarration.status,200);
+    const audio=await fetch(root+"/v1/content/videos/V01/narration-asset",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({fileName:"narration.wav",mimeType:"audio/wav",durationSeconds:32.8,sha256:"f".repeat(64),voiceName:"Kenichi",provider:"heygen",jobId:"api-audio-1"})});
+    assert.equal(audio.status,201);
+    assert.equal((await audio.json()).video.narrationAsset.audioListened,false);
     const listed=await fetch(root+"/v1/content/batches?limit=200",{headers:{Authorization:"Bearer "+token}});
     assert.equal((await listed.json()).summary.total,100);
     await advanceToOwnerReview(videoBatchStore,"V01",{fromSourceQa:true});
