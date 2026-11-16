@@ -8,7 +8,7 @@ test("reads only exact approved financial headers and aggregates tax-exclusive y
  const result=readFinancialSheets({salesRows:sales,expenseRows:expenses});
  assert.equal(result.revenueYen,1000000);assert.equal(result.expenseYen,400000);assert.equal(result.profitYen,600000);
  assert.equal(result.profitMargin,60);assert.equal(result.byProject[0].name,"P1");
- assert.deepEqual(result.sourceSheets,["売上","経費"]);
+ assert.deepEqual(result.sourceSheets,["04 売上","05 経費"]);
 });
 test("fails closed on unknown headers, invalid amounts, and malformed dates",()=>{
  assert.throws(()=>readFinancialSheets({salesRows:[["売上ID","別の日付"]],expenseRows:expenses}),/見出し/);
