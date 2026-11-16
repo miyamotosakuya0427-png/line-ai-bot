@@ -846,6 +846,7 @@ test("command center AI plan endpoint is unavailable when planner is not configu
 });
 
 test("approval decisions and inbox require a separate owner token", async t => {
+  const ownerToken="owner-test-token-that-is-at-least-32-bytes-long";
   const {createApprovalStore}=require("./core/approval-store");
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-owner-approval-auth-"));
   t.after(()=>fs.rm(dir,{recursive:true,force:true}));
