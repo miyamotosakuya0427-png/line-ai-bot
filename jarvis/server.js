@@ -20,6 +20,7 @@ const { createVideoBatchContentHandler } = require("./core/video-batch-runner");
 const { createScriptMetrics } = require("./core/script-metrics");
 const { createPaperTradingStore } = require("./core/paper-trading-store");
 const { createInfluenceEventStore } = require("./core/influence-event-store");
+const { createCommandCenter } = require("./core/command-center");
 const PORT = Number(process.env.PORT || 3000);
 const MAX_BODY_BYTES = 24 * 1024;
 const TOKEN = process.env.JARVIS_API_TOKEN || "";
@@ -696,6 +697,23 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         if (url.pathname==="/v1/departments") return json(res,200,{ok:true,departments:DEPARTMENTS,approvalPolicy:APPROVAL});
         return json(res,200,{ok:true,sources:SUBSIDY_SOURCES,priorityTopics:PRIORITY_TOPICS,reportFields:REPORT_FIELDS,monitoringEnabled:Boolean(worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"),monitoringSchedule:"08:30 Asia/Tokyo",monitoringNote:worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"?"毎日公式サイトを取得し、担当AIが確認できる状態です。":"定期調査はJARVIS_WORKER_ENABLED=trueとJARVIS_SUBSIDY_AUTOMONITOR_ENABLED=trueの設定後に有効化されます。"});
+      }
+      if (url.pathname==="/v1/command-center" || url.pathname==="/v1/command-center/dispatch") {
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        const commandCenter=createCommandCenter({jobStore,approvalStore,worker,clock:()=>now().toISOString()});
+        if(req.method==="GET"&&url.pathname==="/v1/command-center"){
+          return json(res,200,{ok:true,...await commandCenter.snapshot()});
+        }
+        if(req.method==="POST"&&url.pathname==="/v1/command-center/dispatch"){
+          if(!req.headers["content-type"]?.toLowerCase().startsWith("application/json"))return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+          const d=await readJson(req);
+          if(typeof d.request!=="string"||!Array.isArray(d.departmentIds)||(d.actionClass!==undefined&&typeof d.actionClass!=="string")||(d.idempotencyKey!==undefined&&typeof d.idempotencyKey!=="string"))return json(res,400,{ok:false,error:"Invalid command-center dispatch request"});
+          try{
+            const result=await commandCenter.dispatch(d);
+            return json(res,200,result);
+          }catch(error){return json(res,400,{ok:false,error:error.message});}
+        }
+        return json(res,405,{ok:false,error:"Method Not Allowed"},{Allow:"GET, POST"});
       }
       if (req.method==="GET" && url.pathname==="/v1/status") return json(res,200,{ok:true,system:"ONE JARVIS",version:"1.3.0",mode:"read-only",googleSheetsConfigured:Boolean(sheetsUrl&&sheetsToken),jobQueueConfigured:Boolean(jobStore),workerEnabled:Boolean(worker),contentAutoplanEnabled:Boolean(worker&&process.env.JARVIS_CONTENT_AUTOPLAN_ENABLED==="true"),subsidyAutomonitorEnabled:Boolean(worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"),approvalsConfigured:Boolean(approvalStore)});
       if (req.method==="GET" && url.pathname==="/v1/sheets/list") {
