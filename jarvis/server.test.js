@@ -626,7 +626,7 @@ test("video batch plan endpoint queues an idempotent ONE CONTENT draft task with
   t.after(()=>fs.rm(dir,{recursive:true,force:true}));
   const jobStore=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
   const videoBatchStore=createVideoBatchStore({filePath:path.join(dir,"videos.jsonl")});
-  await videoBatchStore.createBatch({items:[{id:"V01",title:"江戸の町を変えた大火",topic:"明暦の大火と江戸の都市改造"}]});
+  await videoBatchStore.createBatch({items:[{id:"V01",title:"江戸の町を変えた大火",topic:"明暦の大火と江戸の都市改造",sources:["https://www.example.jp/history"]}]});
   const contentHandler=async payload=>({draft:true,videoId:payload.videoId,request:payload.request,answer:"台本初稿："+payload.request});
   const worker=createWorker({store:jobStore,handlers:{"department.content":createVideoBatchContentHandler({contentHandler,videoBatchStore})}});
   await worker.start();
@@ -641,6 +641,7 @@ test("video batch plan endpoint queues an idempotent ONE CONTENT draft task with
     assert.equal(result.created,true);
     assert.equal(result.job.type,"department.content");
     assert.equal(result.job.payload.videoId,"V01");
+    assert.deepEqual(result.job.payload.researchSources,["https://www.example.jp/history"]);
     assert.match(result.job.payload.request,/要一次資料確認/);
     assert.match(result.job.payload.request,/YouTube公開/);
     assert.match(result.job.payload.request,/テンプレ大量生産/);
