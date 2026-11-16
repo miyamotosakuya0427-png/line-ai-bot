@@ -11,7 +11,7 @@ function clone(value){return JSON.parse(JSON.stringify(value));}
 function validText(value,max,required=false){return typeof value==="string"&&value.length<=max&&(!required||Boolean(value.trim()));}
 function publicApproval(item){return clone(item);}
 function digest(value){return crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");}
-function approvalRequestDigest(a){return digest({departmentId:a.departmentId,actionClass:a.actionClass,summary:a.summary,details:a.details,resourceId:a.resourceId||null,operationPayload:a.operationPayload??null,expiresAt:a.expiresAt||null});}
+function approvalRequestDigest(a){if(a.digestVersion!==2)return digest({departmentId:a.departmentId,actionClass:a.actionClass,summary:a.summary,details:a.details});return digest({departmentId:a.departmentId,actionClass:a.actionClass,summary:a.summary,details:a.details,resourceId:a.resourceId||null,operationPayload:a.operationPayload??null,expiresAt:a.expiresAt||null});}
 
 function createApprovalStore({filePath,pool,clock=()=>new Date().toISOString(),authorizeActor=null}={}){
  if(pool)return require("./postgres-operational-stores").createPostgresOperationalStores({pool,clock}).approvals;
@@ -38,10 +38,10 @@ function createApprovalStore({filePath,pool,clock=()=>new Date().toISOString(),a
    await ready();return serialize(async()=>{
     if(!validText(departmentId,64,true)||!/^[a-z][a-z0-9_-]*$/.test(departmentId))throw new Error("Invalid department id");
     if(!ACTIONS.has(actionClass))throw new Error("Invalid approval action class");
-    if(!validText(summary,300,true)||!validText(details,MAX_DETAILS)||!validText(idempotencyKey,128)||!validText(resourceId,256)||!(operationPayload===null||(operationPayload&&typeof operationPayload==="object"&&!Array.isArray(operationPayload)))||!(expiresAt===null||(typeof expiresAt==="string"&&Number.isFinite(Date.parse(expiresAt))&&Date.parse(expiresAt)>Date.parse(clock()))))throw new Error("Invalid approval request fields");
+    if(!validText(summary,300,true)||!validText(details,MAX_DETAILS)||!validText(idempotencyKey,128)||!validText(resourceId,256)||!(operationPayload===null||(operationPayload&&typeof operationPayload==="object"&&!Array.isArray(operationPayload)&&bytes(operationPayload)<=MAX_JOB_PAYLOAD))||!(expiresAt===null||(typeof expiresAt==="string"&&Number.isFinite(Date.parse(expiresAt))&&Date.parse(expiresAt)>Date.parse(clock()))))throw new Error("Invalid approval request fields");
     if(idempotencyKey){const existing=[...items.values()].find(x=>x.idempotencyKey===idempotencyKey);if(existing)return{created:false,approval:publicApproval(existing)};}
     if(items.size>=MAX_APPROVALS)throw new Error("Approval store capacity reached");
-    const now=clock(),approval={id:crypto.randomUUID(),departmentId,actionClass,summary:summary.trim(),details:details.trim(),resourceId:resourceId||null,operationPayload:operationPayload===null?null:clone(operationPayload),expiresAt:expiresAt||null,status:"pending",idempotencyKey,createdAt:now,updatedAt:now,decisionAt:null,decisionReason:"",executionStatus:"not_started"};approval.requestDigest=approvalRequestDigest(approval);
+    const now=clock(),approval={id:crypto.randomUUID(),departmentId,actionClass,summary:summary.trim(),details:details.trim(),resourceId:resourceId||null,operationPayload:operationPayload===null?null:clone(operationPayload),expiresAt:expiresAt||null,status:"pending",idempotencyKey,createdAt:now,updatedAt:now,decisionAt:null,decisionReason:"",executionStatus:"not_started",digestVersion:2};approval.requestDigest=approvalRequestDigest(approval);
     await append({type:"approval",approval});items.set(approval.id,approval);return{created:true,approval:publicApproval(approval)};
    });
   },
