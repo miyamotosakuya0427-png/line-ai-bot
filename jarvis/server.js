@@ -656,8 +656,12 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         if(!video)return json(res,404,{ok:false,error:"Video not found"});
         return json(res,200,{ok:true,videoId:video.id,scriptMetrics:createScriptMetrics(video.script||"")});
       }
+      const ownerContentApprovalRoute =
+        (req.method==="GET" && url.pathname==="/v1/content/approvals") ||
+        (req.method==="POST" && /^\\/v1\\/content\\/videos\\/V[0-9]{2,8}\\/(review|action-approval)$/.test(url.pathname));
       if (url.pathname.startsWith("/v1/content/batches") || url.pathname.startsWith("/v1/content/approvals") || url.pathname.startsWith("/v1/content/videos/")) {
-        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        if (!ownerContentApprovalRoute && !isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        if (ownerContentApprovalRoute && !isAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authentication required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
         if (!videoBatchStore) return json(res,503,{ok:false,error:"Persistent video batch storage is not configured"});
         if (req.method==="GET" && url.pathname==="/v1/content/batches") {
           const limit=Number(url.searchParams.get("limit")||200),channelId=url.searchParams.get("channelId")||undefined,status=url.searchParams.get("status")||undefined;
