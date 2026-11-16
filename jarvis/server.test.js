@@ -756,6 +756,21 @@ test("video batch APIs require auth, persist 100-item queues, and expose owner r
 });
 
 
+test("video owner approval inbox fails closed without a separate owner token", async t => {
+  const {createVideoBatchStore}=require("./core/video-batch-store");
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-video-owner-auth-"));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const videoBatchStore=createVideoBatchStore({filePath:path.join(dir,"videos.jsonl")});
+  const app=createServer({token,ownerToken:"",videoBatchStore});
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  const root="http://127.0.0.1:"+app.address().port;
+  try {
+    const response=await fetch(root+"/v1/content/approvals",{headers:{Authorization:"Bearer "+token}});
+    assert.equal(response.status,503);
+    assert.equal((await response.json()).error,"Owner authentication is not configured");
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
+
 test("command center API exposes authenticated department overview and safe dispatch", async t => {
   const {createJobStore}=require("./core/job-store");
   const {createApprovalStore}=require("./core/approval-store");
