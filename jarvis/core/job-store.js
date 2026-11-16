@@ -65,6 +65,10 @@ function createJobStore({ filePath, clock = () => new Date().toISOString(), maxE
       try { raw = await fs.readFile(filePath, "utf8"); }
       catch (error) { if (error.code !== "ENOENT") throw error; }
       const recovered = new Map();
+      const journalLines = raw.split("\n").filter(Boolean);
+      if (journalLines.length > maxEvents) throw new Error("JARVIS job journal exceeds configured event limit");
+      journalBytes = Buffer.byteLength(raw, "utf8");
+      if (journalBytes > maxJournalBytes) throw new Error("JARVIS job journal exceeds configured size limit");
       for (const [index,line] of raw.split("\n").entries()) {
         if (!line) continue;
         let event;
@@ -81,6 +85,7 @@ function createJobStore({ filePath, clock = () => new Date().toISOString(), maxE
       }
       if (recovered.size > MAX_JOBS) throw new Error("JARVIS job journal exceeds the configured job limit");
       jobs = recovered;
+      eventCount = journalLines.length;
       initialized = true;
     });
   }
