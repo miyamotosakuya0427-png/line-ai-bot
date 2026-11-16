@@ -299,7 +299,7 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         if (!employeeId||!employeeName) return json(res,403,{ok:false,error:"従業員情報を確認できません。管理者に確認してください。"});
         const reportId="DR-"+crypto.randomUUID();
         const saved=await callSheets("appendDailyReport",{report:{
-          reportId,recordedAt:new Date().toISOString(),workDate,employeeId,employeeName,siteName,workDetails,
+          reportId,recordedAt:new Date().toISOString(),workDate,lineUserId:identity.lineUserId,employeeId,employeeName,siteName,workDetails,
           startTime,endTime,breakMinutes,workerCount,equipment,materials,notes
         }});
         return json(res,201,{ok:true,reportId,employeeName,workDate,saved:saved.saved===true});
