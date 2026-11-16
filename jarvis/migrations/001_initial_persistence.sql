@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS jarvis_jobs (
   type VARCHAR(80) NOT NULL,
   payload JSONB NOT NULL DEFAULT '{}'::jsonb,
   status VARCHAR(20) NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','running','succeeded','failed','cancelled')),
-  attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 2147483647),
   max_attempts INTEGER NOT NULL DEFAULT 5 CHECK (max_attempts BETWEEN 1 AND 20),
   run_after TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   locked_at TIMESTAMPTZ,
@@ -18,7 +18,7 @@ CREATE INDEX IF NOT EXISTS jarvis_jobs_claim_idx ON jarvis_jobs(status, run_afte
 CREATE TABLE IF NOT EXISTS jarvis_job_attempts (
   id BIGSERIAL PRIMARY KEY,
   job_id UUID NOT NULL REFERENCES jarvis_jobs(id) ON DELETE CASCADE,
-  attempt_no INTEGER NOT NULL CHECK (attempt_no > 0),
+  attempt_no INTEGER NOT NULL CHECK (attempt_no BETWEEN 1 AND 2147483647),
   status VARCHAR(20) NOT NULL CHECK (status IN ('running','retrying','succeeded','failed')),
   error_code VARCHAR(100),
   error_message VARCHAR(1000),
