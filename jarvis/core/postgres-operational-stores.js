@@ -38,10 +38,7 @@ function createPostgresOperationalStores({pool,clock=()=>new Date().toISOString(
   await c.query("INSERT INTO jarvis.events(aggregate_type,aggregate_id,aggregate_version,event_type,payload,idempotency_key,created_at) VALUES($1,$2,$3,$4,$5::jsonb,$6,$7)",[type,id,version,event,JSON.stringify(payload),key,clock()]);
  }
  async function allLatest(type,limit,status){
-  const args=[type],where=status?"AND e.payload->>'status'=$2":"";
-  if(status)args.push(status);
-  args.push(limit);
-  const r=await pool.query(`SELECT DISTINCT ON (aggregate_id) aggregate_id,payload FROM jarvis.events e WHERE aggregate_type=$1 ${where} ORDER BY aggregate_id,aggregate_version DESC LIMIT $${args.length}`,args);
+  const r=await pool.query("SELECT payload FROM (SELECT DISTINCT ON (aggregate_id) aggregate_id,payload FROM jarvis.events WHERE aggregate_type=$1 ORDER BY aggregate_id,aggregate_version DESC) latest WHERE ($2::text IS NULL OR payload->>'status'=$2) ORDER BY payload->>'createdAt' DESC LIMIT $3",[type,status||null,limit]);
   return r.rows.map(x=>x.payload).sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
  }
  const jobs={
