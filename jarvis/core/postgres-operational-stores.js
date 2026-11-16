@@ -14,7 +14,8 @@ function bytes(v){try{return Buffer.byteLength(JSON.stringify(v),"utf8");}catch{
 function validJobPayload(v){return !!v&&typeof v==="object"&&!Array.isArray(v)&&bytes(v)<=MAX_JOB_PAYLOAD;}
 function validText(v,max,required=false){return typeof v==="string"&&v.length<=max&&(!required||!!v.trim());}
 function digest(v){return crypto.createHash("sha256").update(JSON.stringify(v)).digest("hex");}
-function createPostgresOperationalStores({pool,clock=()=>new Date().toISOString()}={}){
+function approvalRequestDigest(a){return digest({departmentId:a.departmentId,actionClass:a.actionClass,summary:a.summary,details:a.details,resourceId:a.resourceId||null,operationPayload:a.operationPayload??null,expiresAt:a.expiresAt||null});}
+function createPostgresOperationalStores({pool,clock=()=>new Date().toISOString(),authorizeActor=null}={}){
  if(!pool||typeof pool.connect!=="function"||typeof pool.query!=="function")throw new Error("PostgreSQL pool is required");
  let readyPromise;
  async function init(){
@@ -117,16 +118,16 @@ function createPostgresOperationalStores({pool,clock=()=>new Date().toISOString(
  };
  const approvals={
   async init(){await init();const r=await pool.query("SELECT count(*)::int AS n FROM (SELECT DISTINCT ON (aggregate_id) aggregate_id FROM jarvis.events WHERE aggregate_type='approval' ORDER BY aggregate_id,aggregate_version DESC) q");if(r.rows[0].n>MAX_APPROVALS)throw new Error("Approval store capacity reached");return{ok:true,count:r.rows[0].n};},
-  async create({departmentId,actionClass,summary,details="",idempotencyKey=""}={}){
+  async create({departmentId,actionClass,summary,details="",idempotencyKey="",resourceId="",operationPayload=null,expiresAt=null}={}){
    await init();
    if(!validText(departmentId,64,true)||!/^[a-z][a-z0-9_-]*$/.test(departmentId))throw new Error("Invalid department id");
    if(!ACTIONS.has(actionClass))throw new Error("Invalid approval action class");
-   if(!validText(summary,300,true)||!validText(details,MAX_DETAILS)||!validText(idempotencyKey,128))throw new Error("Invalid approval request fields");
+   if(!validText(summary,300,true)||!validText(details,MAX_DETAILS)||!validText(idempotencyKey,128)||!validText(resourceId,256)||!(operationPayload===null||(operationPayload&&typeof operationPayload==="object"&&!Array.isArray(operationPayload)))||!(expiresAt===null||(typeof expiresAt==="string"&&Number.isFinite(Date.parse(expiresAt))&&Date.parse(expiresAt)>Date.parse(clock()))))throw new Error("Invalid approval request fields");
    return tx(async c=>{
     if(idempotencyKey)await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",["approval-idempotency:"+idempotencyKey]);
     if(idempotencyKey){const old=await c.query("SELECT payload FROM jarvis.events WHERE aggregate_type='approval' AND aggregate_id=(SELECT aggregate_id FROM jarvis.events WHERE aggregate_type='approval' AND payload->>'idempotencyKey'=$1 ORDER BY event_id ASC LIMIT 1) ORDER BY aggregate_version DESC LIMIT 1",[idempotencyKey]);if(old.rows[0])return{created:false,approval:clone(old.rows[0].payload)};}
     const count=await c.query("SELECT count(DISTINCT aggregate_id)::int AS n FROM jarvis.events WHERE aggregate_type='approval'");if(count.rows[0].n>=MAX_APPROVALS)throw new Error("Approval store capacity reached");
-    const now=clock(),approval={id:crypto.randomUUID(),departmentId,actionClass,summary:summary.trim(),details:details.trim(),status:"pending",idempotencyKey,createdAt:now,updatedAt:now,decisionAt:null,decisionReason:"",executionStatus:"not_started",requestDigest:digest({departmentId,actionClass,summary:summary.trim(),details:details.trim()})};
+    const now=clock(),approval={id:crypto.randomUUID(),departmentId,actionClass,summary:summary.trim(),details:details.trim(),resourceId:resourceId||null,operationPayload:operationPayload===null?null:clone(operationPayload),expiresAt:expiresAt||null,status:"pending",idempotencyKey,createdAt:now,updatedAt:now,decisionAt:null,decisionReason:"",executionStatus:"not_started"};approval.requestDigest=approvalRequestDigest(approval);
     await append(c,"approval",approval.id,"created",approval,idempotencyKey||null);return{created:true,approval:clone(approval)};
    });
   },
@@ -139,10 +140,32 @@ function createPostgresOperationalStores({pool,clock=()=>new Date().toISOString(
     if(!["approved","rejected"].includes(decision))throw new Error("Invalid approval decision");
     if(current.status!=="pending")throw new Error("Approval has already been decided");
     if(!validText(reason,1000)||!validText(actor,128,true))throw new Error("Invalid approval decision metadata");
-    const expected=digest({departmentId:current.departmentId,actionClass:current.actionClass,summary:current.summary,details:current.details});
+    if(current.expiresAt&&Date.parse(current.expiresAt)<=Date.parse(clock()))throw new Error("Approval has expired");
+    const expected=approvalRequestDigest(current);
     if(current.requestDigest&&current.requestDigest!==expected)throw new Error("Approval request integrity check failed");
     const next={...current,status:decision,updatedAt:clock(),decisionAt:clock(),decisionReason:reason.trim(),decidedBy:actor.trim(),executionStatus:"not_started"};
     await append(c,"approval",id,"decided",next);return clone(next);
+   });
+  },
+  async verifyExecutionRequest(id,{resourceId,operationPayload}={}){
+   await init();const current=await approvals.get(id);if(!current)return null;
+   if(current.status!=="approved"||current.executionStatus!=="not_started")throw new Error("Approval is not available for execution");
+   if(!current.resourceId||!current.expiresAt||!current.operationPayload)throw new Error("Approval is not bound to an executable resource and payload");
+   if(Date.parse(current.expiresAt)<=Date.parse(clock()))throw new Error("Approval has expired");
+   if(resourceId!==current.resourceId||digest(operationPayload)!==digest(current.operationPayload)||approvalRequestDigest({...current,resourceId,operationPayload})!==current.requestDigest)throw new Error("Approval request integrity check failed");
+   return{ok:true,approval:current,requestDigest:current.requestDigest};
+  },
+  async claimExecution(id,{resourceId,operationPayload,actor}={}){
+   await init();
+   if(typeof authorizeActor!=="function"||!validText(actor,128,true)||!(await authorizeActor(actor)))throw new Error("Execution authorization is not configured or actor is not authorized");
+   return tx(async c=>{
+    await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",["approval:"+id]);
+    const current=await latest(c,"approval",id);if(!current)return null;
+    if(current.status!=="approved"||current.executionStatus!=="not_started")throw new Error("Approval execution has already been claimed or is not approved");
+    if(!current.resourceId||!current.expiresAt||!current.operationPayload||Date.parse(current.expiresAt)<=Date.parse(clock()))throw new Error("Approval is not executable or has expired");
+    if(resourceId!==current.resourceId||digest(operationPayload)!==digest(current.operationPayload)||approvalRequestDigest({...current,resourceId,operationPayload})!==current.requestDigest)throw new Error("Approval request integrity check failed");
+    const next={...current,executionStatus:"claimed",executionClaim:{id:crypto.randomUUID(),actor:actor.trim(),claimedAt:clock(),requestDigest:current.requestDigest},updatedAt:clock()};
+    await append(c,"approval",id,"execution_claimed",next);return clone(next);
    });
   }
  };
