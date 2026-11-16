@@ -36,4 +36,4 @@ jobs:
           package-manager-cache: false
       - run: npm install --ignore-scripts --no-audit --no-fund
       - run: npm test
-      - run: node --check core/postgres-event-store.js && node --check core/postgres-operational-stores.js && node --check server.js && node --check core/job-store.js && node --check core/approval-store.js
+      - run: node --check core/postgres-event-store.js && node --check core/postgres-operational-stores.js && node --check server.js && node --check core/job-store.js && node --check core/approval-store.js && node --check core/worker.js && node --check core/postgres-operational-stores.test.js && node --check core/postgres-operational-stores.integration.test.js && node --check core/approval-store.test.js
