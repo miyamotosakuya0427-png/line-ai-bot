@@ -4,7 +4,7 @@ const assert=require("node:assert/strict");
 const {stripHtml,normalizeAllowedHosts,fetchHistorySourceSnapshots}=require("./history-source-research");
 test("retrieves only allowlisted HTTPS HTML and stores a bounded, hashed snapshot",async()=>{
  let requested="";
- const snapshots=await fetchHistorySourceSnapshots({sources:["https://www.example.jp/history"],allowedHosts:["www.example.jp"],now:()=>new Date("2026-11-16T00:00:00.000Z"),fetchImpl:async(url,options)=>{requested=url;assert.equal(options.redirect,"manual");return{status:200,ok:true,headers:{get:()=>"text/html; charset=utf-8"},text:async()=>"<html><title>史料ページ</title><script>secret()</script><p>これは公開史料に関する十分な長さの説明本文です。江戸時代の記録。</p></html>"};}});
+ const snapshots=await fetchHistorySourceSnapshots({sources:["https://www.example.jp/history"],allowedHosts:["www.example.jp"],now:()=>new Date("2026-11-16T00:00:00.000Z"),fetchImpl:async(url,options)=>{requested=url;assert.equal(options.redirect,"manual");return{status:200,ok:true,headers:{get:()=>"text/html; charset=utf-8"},text:async()=>"<html><title>史料ページ</title><script>secret()</script><p>これは公開史料に関する十分な長さの説明本文です。江戸時代の記録がここに詳しく記載されています。</p></html>"};}});
  assert.equal(requested,"https://www.example.jp/history");
  assert.equal(snapshots[0].fetchStatus,"fetched");
  assert.equal(snapshots[0].title,"史料ページ");
