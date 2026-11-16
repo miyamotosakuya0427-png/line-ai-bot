@@ -336,12 +336,12 @@ function findEmployeeRecord(ss, employeeId) {
   const idCol = headers.indexOf("従業員ID");
   const nameCol = headers.indexOf("氏名");
   const statusCol = headers.indexOf("状態");
-  if (idCol < 0 || nameCol < 0) return null;
+  if (idCol < 0 || nameCol < 0 || statusCol < 0) return null;
   const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, lastColumn).getDisplayValues();
   const matches = rows.filter(row => String(row[idCol] || "").trim() === employeeId);
   if (matches.length !== 1) return null;
   const row = matches[0];
-  if (statusCol >= 0 && String(row[statusCol] || "有効").trim() === "無効") return null;
+  if (String(row[statusCol] || "").trim() !== "有効") return null;
   const name = String(row[nameCol] || "").trim();
   return name ? { employeeId, name } : null;
 }
