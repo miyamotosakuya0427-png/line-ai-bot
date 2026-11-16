@@ -5,6 +5,8 @@ const EMPLOYEE_SHEET = "01 従業員";
 const LINE_SHEET = "13 LINE連携";
 const AUDIT_SHEET = "14 管理者操作履歴";
 const INITIAL_ADMIN_PROPERTY = "JARVIS_INITIAL_ADMIN_LINE_USER_ID";
+const READABLE_SHEETS = new Set(["01 従業員", "日報", "03 日報", "04 売上", "05 経費", "09 請求", "10 入金", "13 LINE連携"]);
+const WRITABLE_SHEETS = new Set(["04 売上", "05 経費", "06 外注費", "07 材料費", "08 重機・車両", "09 請求", "10 入金"]);
 const AUDIT_HEADERS = [
   "記録日時", "操作者LINEユーザーID", "操作", "対象連携ID",
   "対象従業員ID", "変更前状態", "変更後状態", "処理結果"
@@ -44,12 +46,14 @@ function doPost(e) {
     if (data.action === "bootstrapAdmin") return bootstrapAdmin(ss, data, props);
     if (data.action === "reviewLineLink") return reviewLineLink(ss, data);
     if (data.action === "appendDailyReport") return appendDailyReport(ss, data);
+    if (data.action === "appendLineLink") return appendLineLink(ss, data);
 
     const sheetName = String(data.sheetName || "");
     const sheet = ss.getSheetByName(sheetName);
     if (!sheet) return output({ ok: false, error: "Sheet not found" });
 
     if (data.action === "readRows") {
+      if (!READABLE_SHEETS.has(sheetName)) return output({ ok: false, error: "Sheet is not allowlisted for reading" });
       const start = Math.max(1, Number(data.startRow) || 1);
       const count = Math.min(100, Math.max(1, Number(data.numRows) || 20));
       const last = sheet.getLastRow();
@@ -62,6 +66,7 @@ function doPost(e) {
     }
 
     if (data.action === "appendRows") {
+      if (!WRITABLE_SHEETS.has(sheetName)) return output({ ok: false, error: "Sheet is not allowlisted for generic writes" });
       if (!Array.isArray(data.rows) || data.rows.length < 1 || data.rows.length > 50) {
         return output({ ok: false, error: "Invalid rows" });
       }
@@ -282,6 +287,51 @@ function appendDailyReport(ss, data) {
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * LINE連携申請専用の追記処理。権限・状態は呼び出し側から受け取らず固定する。
+ */
+function appendLineLink(ss, data) {
+  const lineUserId = String(data.lineUserId || "").trim();
+  const displayName = String(data.displayName || "").trim();
+  const employeeId = String(data.employeeId || "").trim();
+  const employeeName = String(data.employeeName || "").trim();
+  if (!/^U[0-9a-f]{32}$/i.test(lineUserId) || !displayName || displayName.length > 100 ||
+      !/^[A-Z]{2,3}[0-9]{3,6}$/.test(employeeId) || !employeeName || employeeName.length > 100) {
+    return output({ ok: false, error: "Invalid LINE link request" });
+  }
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    const sheet = ss.getSheetByName(LINE_SHEET);
+    if (!sheet) return output({ ok: false, error: "LINE sheet not found" });
+    const lastColumn = sheet.getLastColumn();
+    if (lastColumn < 1) return output({ ok: false, error: "LINE sheet headers are missing" });
+    const headers = sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0].map(v => String(v).trim());
+    const required = ["連携ID", "LINEユーザーID", "LINE表示名", "従業員ID", "氏名", "権限", "状態"];
+    const columns = Object.fromEntries(required.map(name => [name, headers.indexOf(name)]));
+    if (required.some(name => columns[name] < 0)) return output({ ok: false, error: "Invalid LINE sheet headers" });
+    const lastRow = sheet.getLastRow();
+    if (lastRow >= 2) {
+      const rows = sheet.getRange(2, 1, lastRow - 1, lastColumn).getDisplayValues();
+      if (rows.some(row => String(row[columns["LINEユーザーID"]] || "").trim() === lineUserId || String(row[columns["従業員ID"]] || "").trim() === employeeId)) {
+        return output({ ok: false, error: "LINE user or employee already has a link request" });
+      }
+    }
+    const row = Array(lastColumn).fill("");
+    row[columns["連携ID"]] = "PENDING-" + Utilities.getUuid();
+    row[columns["LINEユーザーID"]] = lineUserId;
+    row[columns["LINE表示名"]] = displayName;
+    row[columns["従業員ID"]] = employeeId;
+    row[columns["氏名"]] = employeeName;
+    row[columns["権限"]] = "一般";
+    row[columns["状態"]] = "確認待ち";
+    const timestampColumn = headers.indexOf("申請日時");
+    if (timestampColumn >= 0) row[timestampColumn] = new Date();
+    sheet.getRange(lastRow + 1, 1, 1, lastColumn).setValues([row]);
+    return output({ ok: true, appended: 1, status: "確認待ち" });
+  } finally { lock.releaseLock(); }
 }
 
 function output(data) {
