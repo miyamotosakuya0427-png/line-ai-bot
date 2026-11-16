@@ -844,3 +844,53 @@ test("command center AI plan endpoint is unavailable when planner is not configu
     assert.equal(response.status,503);
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
+
+test("approval decisions and inbox require a separate owner token", async t => {
+  const {createApprovalStore}=require("./core/approval-store");
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-owner-approval-auth-"));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const approvalStore=createApprovalStore({filePath:path.join(dir,"approvals.jsonl")});
+  const app=createServer({token,ownerToken,approvalStore});
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  const root="http://127.0.0.1:"+app.address().port;
+  const regularHeaders={Authorization:"Bearer "+token,"Content-Type":"application/json"};
+  const ownerHeaders={Authorization:"Bearer "+ownerToken,"Content-Type":"application/json"};
+  try {
+    const created=await fetch(root+"/v1/approvals",{method:"POST",headers:regularHeaders,body:JSON.stringify({
+      departmentId:"office",actionClass:"external_submit",summary:"補助金申請の提出承認"
+    })});
+    assert.equal(created.status,201);
+    const item=(await created.json()).approval;
+    const regularList=await fetch(root+"/v1/approvals",{headers:{Authorization:"Bearer "+token}});
+    assert.equal(regularList.status,401);
+    const regularDecision=await fetch(root+"/v1/approvals/"+item.id+"/decision",{method:"POST",headers:regularHeaders,body:JSON.stringify({decision:"approved"})});
+    assert.equal(regularDecision.status,401);
+    const ownerDecision=await fetch(root+"/v1/approvals/"+item.id+"/decision",{method:"POST",headers:ownerHeaders,body:JSON.stringify({decision:"approved",reason:"代表者確認"})});
+    assert.equal(ownerDecision.status,200);
+    assert.equal((await ownerDecision.json()).approval.status,"approved");
+    const ownerList=await fetch(root+"/v1/approvals?status=approved",{headers:{Authorization:"Bearer "+ownerToken}});
+    assert.equal(ownerList.status,200);
+    assert.equal((await ownerList.json()).approvals.length,1);
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
+
+test("approval decision fails closed when owner token is not configured", async t => {
+  const {createApprovalStore}=require("./core/approval-store");
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-owner-approval-unconfigured-"));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const approvalStore=createApprovalStore({filePath:path.join(dir,"approvals.jsonl")});
+  const app=createServer({token,ownerToken:"",approvalStore});
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  const root="http://127.0.0.1:"+app.address().port;
+  try {
+    const created=await fetch(root+"/v1/approvals",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({
+      departmentId:"office",actionClass:"external_submit",summary:"owner-token-not-configured"
+    })});
+    assert.equal(created.status,201);
+    const item=(await created.json()).approval;
+    const response=await fetch(root+"/v1/approvals/"+item.id+"/decision",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({decision:"approved"})});
+    assert.equal(response.status,503);
+    assert.equal((await approvalStore.get(item.id)).status,"pending");
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
+
