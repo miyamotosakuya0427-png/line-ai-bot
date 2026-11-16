@@ -597,7 +597,7 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
           "AI開示方針：AIによる台本・構成・タイトル・サムネイル補助だけなら通常開示不要。一方、実在人物を偽装する、実在の場所や出来事に見える写実的なAI映像を生成・改変する、主題となるAI生成音楽を使う場合は投稿時の開示要否を確認する。再現映像を実際の記録映像として示さない。公式方針：https://support.google.com/youtube/answer/14328491?hl=ja",
           "禁止：有料音声/動画生成、外部アップロード、予約投稿、YouTube公開、購入、契約。台本・企画の下書きだけを作成し、外部操作は行わない。"
         ].join("\n");
-        const result=await jobStore.create({type:"department.content",payload:{request,departmentId:"content",videoId:video.id,taskKind:"video-batch-plan"},idempotencyKey:"video-batch-plan-"+video.id});
+        const result=await jobStore.create({type:"department.content",payload:{request,departmentId:"content",videoId:video.id,taskKind:"video-batch-plan",researchSources:video.sources},idempotencyKey:"video-batch-plan-"+video.id});
         return json(res,result.created?201:200,{ok:true,created:result.created,videoId:video.id,job:result.job,workerEnabled:Boolean(worker),externalActionsEnabled:false});
       }
       const scriptMetricsMatch=/^\/v1\/content\/videos\/(V[0-9]{2,8})\/script-metrics$/.exec(url.pathname);
