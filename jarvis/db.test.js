@@ -124,3 +124,34 @@ test("job retry delay cannot exceed one day", async () => {
   const store = createDbStore({ pool: { async query() { throw new Error("should not query"); }, async end() {} } });
   await assert.rejects(store.finishJob({ jobId: "job-1", success: false, retryDelayMs: 86400001 }), /retryDelayMs/);
 });
+
+test("database writes are not automatically retried after ambiguous connection failures", async () => {
+  let calls = 0;
+  const pool = {
+    async query() {
+      calls += 1;
+      const error = new Error("connection lost after request");
+      error.code = "ECONNRESET";
+      throw error;
+    },
+    async end() {}
+  };
+  const store = createDbStore({ pool, retryOptions: { attempts: 4, sleepImpl: async () => {} } });
+  await assert.rejects(store.query("INSERT INTO example(value) VALUES ($1)", ["x"]), /connection lost/);
+  assert.equal(calls, 1);
+});
+
+test("explicitly retryable health query retries transient connection errors", async () => {
+  let calls = 0;
+  const pool = {
+    async query() {
+      calls += 1;
+      if (calls === 1) { const error = new Error("temporary"); error.code = "ECONNRESET"; throw error; }
+      return { rows: [{ ok: 1 }], rowCount: 1 };
+    },
+    async end() {}
+  };
+  const store = createDbStore({ pool, retryOptions: { attempts: 2, sleepImpl: async () => {}, random: () => 0 } });
+  assert.equal(await store.ping(), true);
+  assert.equal(calls, 2);
+});
