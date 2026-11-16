@@ -36,7 +36,8 @@ async function retryTransient(operation, { attempts = 3, baseDelayMs = 100, maxD
   for (let attempt = 1; ; attempt += 1) {
     try { return await operation(attempt); }
     catch (error) {
-      if (!isTransient(error) || attempt >= attempts) throw new Error("PostgreSQL operation failed; retry safely after checking transaction outcome");
+      if (!isTransient(error)) throw error;
+      if (attempt >= attempts) throw new Error("PostgreSQL operation failed; retry safely after checking transaction outcome");
       await sleep(Math.min(maxDelayMs, baseDelayMs * (2 ** (attempt - 1))));
     }
   }
