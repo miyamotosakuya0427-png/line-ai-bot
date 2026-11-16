@@ -34,3 +34,12 @@ test("source URLs outside the configured allowlist are not fetched",async()=>{
  await handler({taskKind:"video-batch-plan",videoId:"V03",researchSources:["https://evil.example/source"]},{jobId:"job-303"});
  assert.equal(fetchCount,0);assert.equal(received.researchContext.sourceSnapshots[0].fetchStatus,"unavailable");
 });
+
+test("limits retrieval to ten source pages and reports omitted candidates",async()=>{
+ let calls=0,received,video={id:"V04",stage:"research",status:"planned"};
+ const store={get:async()=>video,saveDraft:async(id,{script,jobId})=>{video={...video,stage:"script",status:"in_progress",script,draftJobId:jobId};return{created:true,video};}};
+ const handler=createVideoBatchContentHandler({videoBatchStore:store,allowedSourceHosts:["www.example.jp"],researchFetchImpl:async url=>{calls++;return{status:200,ok:true,headers:{get:()=>"text/html"},text:async()=>"<title>史料</title><p>十分な長さを持つテスト用の資料本文です。追加の記述も含めて長さを確保しています。</p>"};},contentHandler:async payload=>{received=payload;return{answer:"台本"};}});
+ const sources=Array.from({length:12},(_,i)=>"https://www.example.jp/source-"+i);
+ await handler({taskKind:"video-batch-plan",videoId:"V04",researchSources:sources},{jobId:"job-404"});
+ assert.equal(calls,10);assert.equal(received.researchContext.sourceSnapshots.length,10);assert.equal(received.researchContext.omittedSourceCount,2);
+});
