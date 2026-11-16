@@ -183,6 +183,19 @@ function reviewLineLink(ss, data) {
     const currentStatus = String(sheet.getRange(rowNumber, statusCol + 1).getValue()).trim();
     if (currentStatus !== "確認待ち") return output({ ok: false, error: "Request is not pending" });
     const employeeId = String(sheet.getRange(rowNumber, employeeCol + 1).getValue() || "").trim();
+    const employeeNameCol = headers.indexOf("氏名");
+    if (employeeNameCol < 0) return output({ ok: false, error: "Invalid LINE sheet headers" });
+    const employeeName = String(sheet.getRange(rowNumber, employeeNameCol + 1).getValue() || "").trim();
+    const employee = findEmployeeRecord(ss, employeeId);
+    if (!employee || employee.name !== employeeName) return output({ ok: false, error: "Employee identity does not match the employee register" });
+    if (decision === "approve") {
+      const targetLineId = String(sheet.getRange(rowNumber, lineCol + 1).getValue() || "").trim();
+      const duplicateActive = values.slice(1).some((row, index) => index + 2 !== rowNumber &&
+        String(row[statusCol] || "").trim() === "有効" &&
+        (String(row[lineCol] || "").trim() === targetLineId ||
+         String(row[employeeCol] || "").trim() === employeeId));
+      if (duplicateActive) return output({ ok: false, error: "An active LINE link already exists for this user or employee" });
+    }
     const newStatus = decision === "approve" ? "有効" : "却下";
     const action = decision === "approve" ? "LINE連携承認" : "LINE連携却下";
 
@@ -266,6 +279,29 @@ function appendDailyReport(ss, data) {
 }
 
 /**
+ * 従業員台帳を唯一の正とし、IDと氏名の組み合わせを検証する。
+ */
+function findEmployeeRecord(ss, employeeId) {
+  if (!/^[A-Z]{2,3}[0-9]{3,6}$/.test(String(employeeId || ""))) return null;
+  const sheet = ss.getSheetByName(EMPLOYEE_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return null;
+  const lastColumn = sheet.getLastColumn();
+  if (lastColumn < 2) return null;
+  const headers = sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0].map(v => String(v).trim());
+  const idCol = headers.indexOf("従業員ID");
+  const nameCol = headers.indexOf("氏名");
+  const statusCol = headers.indexOf("状態");
+  if (idCol < 0 || nameCol < 0) return null;
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, lastColumn).getDisplayValues();
+  const matches = rows.filter(row => String(row[idCol] || "").trim() === employeeId);
+  if (matches.length !== 1) return null;
+  const row = matches[0];
+  if (statusCol >= 0 && String(row[statusCol] || "有効").trim() === "無効") return null;
+  const name = String(row[nameCol] || "").trim();
+  return name ? { employeeId, name } : null;
+}
+
+/**
  * LINE連携申請専用の追記処理。権限・状態は呼び出し側から受け取らず固定する。
  */
 function appendLineLink(ss, data) {
@@ -288,6 +324,10 @@ function appendLineLink(ss, data) {
     const required = ["連携ID", "LINEユーザーID", "LINE表示名", "従業員ID", "氏名", "権限", "状態"];
     const columns = Object.fromEntries(required.map(name => [name, headers.indexOf(name)]));
     if (required.some(name => columns[name] < 0)) return output({ ok: false, error: "Invalid LINE sheet headers" });
+    const employee = findEmployeeRecord(ss, employeeId);
+    if (!employee || employee.name !== employeeName) {
+      return output({ ok: false, error: "Employee ID and name must match the employee register" });
+    }
     const lastRow = sheet.getLastRow();
     if (lastRow >= 2) {
       const rows = sheet.getRange(2, 1, lastRow - 1, lastColumn).getDisplayValues();
