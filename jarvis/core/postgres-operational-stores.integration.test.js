@@ -3,13 +3,13 @@ const test=require("node:test");
 const assert=require("node:assert/strict");
 const fs=require("node:fs/promises");
 const path=require("node:path");
-const {Pool}=require("pg");
 const {createPostgresOperationalStores}=require("./postgres-operational-stores");
 
 const connectionString=process.env.JARVIS_TEST_DATABASE_URL||"";
 const enabled=Boolean(connectionString);
 
 test("real PostgreSQL multi-connection claims and approval integrity", {skip:!enabled}, async()=>{
+ const {Pool}=require("pg");
  const parsed=new URL(connectionString);
  const database=decodeURIComponent(parsed.pathname.replace(/^\//,""));
  if(!/(^|[_-])test([_-]|$)/i.test(database))throw new Error("JARVIS_TEST_DATABASE_URL must point to a dedicated database whose name includes test");
