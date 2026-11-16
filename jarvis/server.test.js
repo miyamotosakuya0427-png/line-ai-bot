@@ -206,6 +206,7 @@ test("daily report requires an active LINE link and appends a validated report",
     assert.equal(result.employeeName,"宮本朔也");
     const write=sent.find(x=>x.action==="appendDailyReport");
     assert.equal(write.report.employeeId,"EMP003");
+    assert.equal(write.report.lineUserId,"U"+"a".repeat(32));
     assert.equal(write.report.workDetails,"掘削作業");
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
@@ -961,6 +962,28 @@ test("approval decision fails closed when owner token is not configured", async 
     const response=await fetch(root+"/v1/approvals/"+item.id+"/decision",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({decision:"approved"})});
     assert.equal(response.status,503);
     assert.equal((await approvalStore.get(item.id)).status,"pending");
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
+
+
+test("Apps Script JSON internal errors map to an upstream failure instead of client input errors", async () => {
+  const app=createServer({
+    token,
+    lineLoginChannelId:"1234567890",
+    sheetsUrl:"https://script.google.com/macros/s/test-id/exec",
+    sheetsToken:"k".repeat(128),
+    fetchImpl:async(url,options)=>{
+      if(url==="https://api.line.me/oauth2/v2.1/verify") return {ok:true,json:async()=>({iss:"https://access.line.me",aud:"1234567890",sub:"U"+"a".repeat(32),exp:Math.floor(Date.now()/1000)+300})};
+      return {ok:true,json:async()=>({ok:false,error:"Internal error"})};
+    }
+  });
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  try {
+    const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/line/link`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({idToken:"verified-test-token-123456",employeeId:"EMP001"})
+    });
+    assert.equal(response.status,502);
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
 
