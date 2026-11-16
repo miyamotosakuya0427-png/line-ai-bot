@@ -19,7 +19,18 @@ function createPostgresOperationalStores({pool,clock=()=>new Date().toISOString(
  let readyPromise;
  async function init(){
   if(readyPromise)return readyPromise;
-  readyPromise=(async()=>{await pool.query("SELECT 1");return{ok:true};})();
+  readyPromise=(async()=>{
+   const client=await pool.connect();
+   try{
+    await client.query("BEGIN");
+    await client.query("CREATE INDEX IF NOT EXISTS events_job_idempotency_lookup ON jarvis.events ((payload->>'idempotencyKey'), event_id DESC) WHERE aggregate_type='job' AND payload ? 'idempotencyKey'");
+    await client.query("CREATE INDEX IF NOT EXISTS events_approval_idempotency_lookup ON jarvis.events ((payload->>'idempotencyKey'), event_id DESC) WHERE aggregate_type='approval' AND payload ? 'idempotencyKey'");
+    await client.query("CREATE INDEX IF NOT EXISTS events_operational_latest ON jarvis.events (aggregate_type, aggregate_id, aggregate_version DESC) WHERE aggregate_type IN ('job','approval')");
+    await client.query("INSERT INTO jarvis.schema_migrations(version) VALUES ('0002_job_approval_stores') ON CONFLICT (version) DO NOTHING");
+    await client.query("COMMIT");
+    return{ok:true};
+   }catch(e){try{await client.query("ROLLBACK");}catch{}throw e;}finally{client.release();}
+  })();
   try{return await readyPromise;}catch(e){readyPromise=null;throw e;}
  }
  async function tx(fn){
