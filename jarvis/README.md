@@ -49,21 +49,18 @@ Open the service root URL, enter the JARVIS API token, connect, and submit a req
 
 ## API overview
 
-All API endpoints except `GET /health` and the dashboard shell require `Authorization: Bearer <token>`.
+Most API endpoints require `Authorization: Bearer <JARVIS_API_TOKEN>`. Sensitive company data, raw Sheets access/diagnostics, approval inboxes, and video owner-review/action-approval routes require the separate `JARVIS_OWNER_TOKEN` instead. The owner-only routes accept the owner token alone; do not send both tokens in one Authorization header.
 
-- `GET /v1/company/overview` (read-only counts and five recent reports)
-- `GET /v1/company/employees` (approved non-sensitive employee fields)
-- `GET /v1/company/daily-reports?from=YYYY-MM-DD&to=YYYY-MM-DD&limit=20`
-- `GET /v1/company/analytics` (aggregate sample of up to 99 daily reports)
-- `GET /v1/company/financials` (read-only aggregate of up to 99 rows each from `売上` and `経費`; includes receivables when both invoice tabs exist)
-- `POST /v1/company/ask` with `{request}` (queues an AI question grounded in daily-report aggregates)
+- `GET /v1/company/overview`, `/employees`, `/daily-reports`, `/analytics`, `/financials` (owner token; read-only company data)
+- `POST /v1/company/ask` with `{request}` (owner token; queues an AI question grounded in bounded company aggregates)
+- `GET /v1/sheets/list`, `GET /v1/sheets/read`, `GET /health/sheets*` (owner token; raw/diagnostic access only)
+- `POST /v1/sheets/append` is retained only as a compatibility route; Apps Script generic `appendRows` writes are disabled and must not be used.
 - `GET /v1/departments` (authenticated department roles and approval policy)
 - `GET /v1/content/workflow` (authenticated video production stages, quality checklist, and approval gates)
 - `GET /v1/subsidy/sources` (authenticated official source catalog and One-specific priority topics)
 - `GET /v1/status`
-- `GET /v1/approvals` (authenticated approval journal; bearer-token access, without separate human identity proof)
-- `POST /v1/approvals` (record an owner approval request)
-- `POST /v1/approvals/:id/decision` (record approved/rejected decision; never executes external work)
+- `GET /v1/approvals`, `POST /v1/approvals`, `POST /v1/approvals/:id/decision` (owner token; records decisions only and never executes external work)
+- `GET /v1/content/approvals`, `POST /v1/content/videos/:id/review`, `POST /v1/content/videos/:id/action-approval` (owner token; video review and scoped external-action approval)
 - `GET /v1/jobs`
 - `POST /v1/jobs`
 - `GET /v1/jobs/:id`
@@ -71,6 +68,18 @@ All API endpoints except `GET /health` and the dashboard shell require `Authoriz
 - `POST /v1/jobs/:id/retry`
 
 See [core design and deployment](./core/README.md) and [deployment checklist](./DEPLOYMENT.md).
+
+
+## LINE identity and Google Sheets trust boundary
+
+- LIFF ID tokens are sent to the JARVIS server and verified with LINE's official ID-token verification endpoint. The server checks issuer, audience, subject format, and expiry before using the LINE subject.
+- The public employee directory endpoint is disabled. Employees enter the employee ID provided by the company; the server and Apps Script independently verify the employee ID/name against the active employee register.
+- LINE-link applications are always stored with role `一般` and status `確認待ち`. Only an active verified administrator may review a pending request. Initial administrator bootstrap additionally requires the manually configured `JARVIS_INITIAL_ADMIN_LINE_USER_ID` Script Property and the configured initial employee ID.
+- Daily reports require an active LINE-to-employee link. The server and Apps Script both validate the identity, employee status, report fields, and stable report ID; Apps Script checks the active link under the same script lock as the write.
+- Apps Script generic `appendRows` writes are disabled. New write operations must use dedicated actions with field validation, authorization, locking, and idempotency.
+- `JARVIS_SHEETS_TOKEN` is a server-to-server shared secret. It is not a user identity token. Never expose it to LIFF/browser clients. `JARVIS_OWNER_TOKEN` is a separate human-owner credential for sensitive company data, raw Sheets access, and approval routes.
+- Apps Script ContentService may return HTTP 200 with a JSON error payload. The Node server inspects the JSON result and maps internal errors to upstream failures.
+- Node VM tests cover a mock Apps Script runtime. They do not prove actual Google Apps Script deployment permissions, Script Properties, LockService concurrency, or live sheet schema behavior. Use a disposable test spreadsheet and test deployment before any production release.
 
 ## Not yet complete
 
