@@ -25,3 +25,28 @@ The production runtime is not activated by this PR. No connection string is incl
 - Existing API routes keep approval execution disabled; approval decisions only record the decision. Any future external action must add a separate, owner-authorized execution protocol that binds target ID, exact payload digest, expiry, approver, and one-time execution claim.
 - CI runs the full Node test suite and syntax checks for the PostgreSQL and store entry points. No dedicated lint command or security scanner is configured in this repository workflow.
 - No live PostgreSQL/Neon integration test, JSONL migration dry-run, checksum reconciliation, or rollback test has been performed.
+
+
+## Stage 3: atomic worker claims and approval integrity
+
+### PostgreSQL worker claims
+- PostgreSQL stores expose `jobs.claimNext({workerId, leaseMs})`, implemented as a transaction that selects the latest queued or expired-running aggregate with `FOR UPDATE SKIP LOCKED`, then appends a running event with a lease.
+- Claims record owner, heartbeat timestamp, expiry, and increment attempts. Expired leases can be reclaimed by a later claimant.
+- `jobs.heartbeat(id, {workerId, leaseMs})` renews only a currently owned, unexpired lease.
+- A lease-owning worker must supply its owner ID to terminal/retry transitions. Stale or expired owners are rejected.
+- Worker uses the claim API only when the store exposes it. JSONL stores retain the existing list/transition/recovery behavior.
+- Handler side effects remain at-least-once across a crash/lease-expiry boundary. External handlers must be idempotent; do not use this queue as exactly-once delivery.
+
+### Approval integrity
+- New approvals may bind a resource ID, exact JSON operation payload, and expiry. SHA-256 covers department, action class, summary, details, resource ID, payload, and expiry.
+- Old approval digests remain verifiable using the legacy digest format.
+- Decisions reject expired approvals and record the actor.
+- `verifyExecutionRequest`, `claimExecution`, and `validateExecutionClaim` provide preflight, one-time claim, and final pre-execution revalidation.
+- Execution claims require an injected `authorizeActor` function. The server does not currently inject this callback or expose an execution route, so execution claims remain disabled in the running application. Generic legacy approvals without resource/payload/expiry are non-executable.
+- No external action is performed by these methods. A future executor must revalidate immediately before acting and use provider-side idempotency keys where available.
+
+### Verification limits
+- Unit tests exercise fake-pool locking behavior, lease ownership, expiry/reclaim, and approval integrity.
+- An opt-in real PostgreSQL integration test is available only with `JARVIS_TEST_DATABASE_URL` pointing to a dedicated database whose name includes `test`. It drops and recreates the `jarvis` schema in that isolated database. CI does not configure this variable, so real multi-connection PostgreSQL integration remains unrun.
+- Do not configure this test against Neon production or any database containing user data.
+- JSONL migration, checksum reconciliation, rollback, and live Neon validation remain separate follow-up work.
