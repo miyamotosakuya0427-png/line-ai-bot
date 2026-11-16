@@ -19,6 +19,19 @@ const TARGETS_ARE_HYPOTHESES = Object.freeze({
 });
 
 function finitePositive(value) { return Number.isFinite(value) && value > 0; }
+function validTimestamp(value) {
+  if (typeof value !== "string") return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2})T([01]\d|2[0-3]):([0-5]\d):([0-5]\d)(?:\.\d{1,9})?(Z|([+-])(\d{2}):(\d{2}))$/.exec(value);
+  if (!match) return false;
+  const year=Number(match[1]),month=Number(match[2]),day=Number(match[3]);
+  const date=new Date(Date.UTC(year,month-1,day));
+  if (year<1||date.getUTCFullYear()!==year||date.getUTCMonth()!==month-1||date.getUTCDate()!==day) return false;
+  if (match[8]) {
+    const hours=Number(match[9]),minutes=Number(match[10]);
+    if (hours>14||minutes>59||(hours===14&&minutes!==0)) return false;
+  }
+  return Number.isFinite(Date.parse(value));
+}
 function validDate(value) { return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(value + "T00:00:00Z")); }
 function roundYen(value) { return Math.round(value); }
 function pct(value, base) { return base > 0 ? value / base * 100 : 0; }
@@ -29,7 +42,7 @@ function normalizeSnapshot(input) {
   const {source, symbol, capturedAt, price, currency="JPY"} = input;
   if (typeof source !== "string" || !/^[a-z0-9.-]{2,80}$/i.test(source)) throw new Error("Invalid market data source");
   if (typeof symbol !== "string" || !/^[A-Z0-9._:-]{1,32}$/.test(symbol)) throw new Error("Invalid symbol");
-  if (typeof capturedAt !== "string" || Number.isNaN(Date.parse(capturedAt))) throw new Error("Invalid capture timestamp");
+  if (!validTimestamp(capturedAt)) throw new Error("Invalid capture timestamp");
   if (!finitePositive(price)) throw new Error("Price must be positive");
   if (!/^[A-Z]{3}$/.test(currency)) throw new Error("Invalid currency");
   return {id:crypto.randomUUID(),source,symbol,capturedAt,price,currency,verified:false,verificationNote:"Source not independently verified"};
@@ -94,7 +107,7 @@ function createPaperTradingEngine({policy={}, clock=()=>new Date().toISOString()
       if (limits.requireStopPrice && !finitePositive(stopPrice)) throw new Error("A stop price is required");
       if (stopPrice && ((side==="long"&&stopPrice>=entryPrice)||(side==="short"&&stopPrice<=entryPrice))) throw new Error("Stop price is on the wrong side of entry");
       if (typeof strategyId!=="string"||strategyId.length<1||strategyId.length>80) throw new Error("A strategy id is required");
-      if (typeof openedAt!=="string"||Number.isNaN(Date.parse(openedAt))) throw new Error("Invalid open timestamp");
+      if (!validTimestamp(openedAt)) throw new Error("Invalid open timestamp");
       const notional=quantity*entryPrice;
       if (!Number.isFinite(notional)||notional>equity*100) throw new Error("Position notional exceeds simulation safety bound");
       const stopRisk=stopPrice?Math.abs(entryPrice-stopPrice)*quantity:0;
@@ -107,7 +120,7 @@ function createPaperTradingEngine({policy={}, clock=()=>new Date().toISOString()
       const trade=trades.find(t=>t.id===id);
       if (!trade||trade.status!=="open") throw new Error("Open paper trade not found");
       if (!finitePositive(exitPrice)||!Number.isFinite(feesYen)||feesYen<0||!Number.isFinite(slippageYen)||slippageYen<0) throw new Error("Invalid exit price or costs");
-      if (typeof closedAt!=="string"||Number.isNaN(Date.parse(closedAt))) throw new Error("Invalid close timestamp");
+      if (!validTimestamp(closedAt)) throw new Error("Invalid close timestamp");
       const direction=trade.side==="long"?1:-1;
       const gross=roundYen((exitPrice-trade.entryPrice)*trade.quantity*direction);
       const net=gross-roundYen(feesYen)-roundYen(slippageYen);
@@ -123,7 +136,7 @@ function createPaperTradingEngine({policy={}, clock=()=>new Date().toISOString()
       if (!trade) throw new Error("Lesson must reference a closed paper trade");
       if (!["process","data","risk","execution","strategy","discipline"].includes(category)) throw new Error("Invalid lesson category");
       for (const [key,value] of Object.entries({rootCause,preventiveRule})) if (typeof value!=="string"||value.trim().length<8||value.length>1000) throw new Error("Lesson "+key+" must be 8-1000 characters");
-      if(typeof createdAt!=="string"||Number.isNaN(Date.parse(createdAt)))throw new Error("Invalid lesson timestamp");
+      if(!validTimestamp(createdAt))throw new Error("Invalid lesson timestamp");
       const lesson={id,tradeId,category,rootCause:rootCause.trim(),preventiveRule:preventiveRule.trim(),evidence:String(evidence).slice(0,1000),createdAt,repeatCount:0};
       const signature=lesson.category+"|"+lesson.preventiveRule.toLowerCase();
       for (const prior of mistakes) if ((prior.category+"|"+prior.preventiveRule.toLowerCase())===signature) lesson.repeatCount++;
@@ -151,7 +164,7 @@ function createPaperTradingEngine({policy={}, clock=()=>new Date().toISOString()
     },
     riskState,
     listTrades({status,limit=100}={}) {
-      if (status&&!["open","closed"].includes(status)) throw new Error("Invalid trade status");
+      if (status&& !["open","closed"].includes(status)) throw new Error("Invalid trade status");
       if (!Number.isInteger(limit)||limit<1||limit>1000) throw new Error("Invalid trade limit");
       return clone(trades.filter(t=>!status||t.status===status).slice(-limit));
     },
@@ -159,4 +172,4 @@ function createPaperTradingEngine({policy={}, clock=()=>new Date().toISOString()
   };
 }
 
-module.exports={DEFAULT_POLICY,TARGETS_ARE_HYPOTHESES,createPaperTradingEngine,normalizeSnapshot};
+module.exports={DEFAULT_POLICY,TARGETS_ARE_HYPOTHESES,validTimestamp,createPaperTradingEngine,normalizeSnapshot};
