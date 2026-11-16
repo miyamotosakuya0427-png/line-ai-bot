@@ -21,6 +21,7 @@ const { createScriptMetrics } = require("./core/script-metrics");
 const { createPaperTradingStore } = require("./core/paper-trading-store");
 const { createInfluenceEventStore } = require("./core/influence-event-store");
 const { createCommandCenter } = require("./core/command-center");
+const { createCommandPlanner } = require("./core/command-center-planner");
 const PORT = Number(process.env.PORT || 3000);
 const MAX_BODY_BYTES = 24 * 1024;
 const TOKEN = process.env.JARVIS_API_TOKEN || "";
@@ -98,7 +99,7 @@ dailyForm.addEventListener("submit",async(event)=>{event.preventDefault();if(!id
 </script></body></html>`;
 }
 
-function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,approvalStore=null,videoBatchStore=null,paperTradingStore=null,influenceEventStore=null,worker=null,now=()=>new Date()}={}) {
+function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,approvalStore=null,videoBatchStore=null,paperTradingStore=null,influenceEventStore=null,worker=null,commandPlanner=null,now=()=>new Date()}={}) {
   async function callSheets(action, fields={}) {
     if (!sheetsUrl || !sheetsToken) { const e=new Error("Google Sheets integration is not configured"); e.statusCode=503; throw e; }
     const u=new URL(sheetsUrl);
@@ -698,17 +699,24 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         if (url.pathname==="/v1/departments") return json(res,200,{ok:true,departments:DEPARTMENTS,approvalPolicy:APPROVAL});
         return json(res,200,{ok:true,sources:SUBSIDY_SOURCES,priorityTopics:PRIORITY_TOPICS,reportFields:REPORT_FIELDS,monitoringEnabled:Boolean(worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"),monitoringSchedule:"08:30 Asia/Tokyo",monitoringNote:worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"?"毎日公式サイトを取得し、担当AIが確認できる状態です。":"定期調査はJARVIS_WORKER_ENABLED=trueとJARVIS_SUBSIDY_AUTOMONITOR_ENABLED=trueの設定後に有効化されます。"});
       }
-      if (url.pathname==="/v1/command-center" || url.pathname==="/v1/command-center/dispatch") {
+      if (url.pathname==="/v1/command-center" || url.pathname==="/v1/command-center/dispatch" || url.pathname==="/v1/command-center/plan") {
         if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         const commandCenter=createCommandCenter({jobStore,approvalStore,worker,clock:()=>now().toISOString()});
         if(req.method==="GET"&&url.pathname==="/v1/command-center"){
           return json(res,200,{ok:true,...await commandCenter.snapshot()});
         }
-        if(req.method==="POST"&&url.pathname==="/v1/command-center/dispatch"){
+        if(req.method==="POST"&&(url.pathname==="/v1/command-center/dispatch"||url.pathname==="/v1/command-center/plan")){
           if(!req.headers["content-type"]?.toLowerCase().startsWith("application/json"))return json(res,415,{ok:false,error:"Content-Type must be application/json"});
           const d=await readJson(req);
-          if(typeof d.request!=="string"||!Array.isArray(d.departmentIds)||(d.actionClass!==undefined&&typeof d.actionClass!=="string")||(d.idempotencyKey!==undefined&&typeof d.idempotencyKey!=="string"))return json(res,400,{ok:false,error:"Invalid command-center dispatch request"});
+          if(typeof d.request!=="string"||!d.request.trim()||d.request.length>4000||(d.idempotencyKey!==undefined&&(typeof d.idempotencyKey!=="string"||d.idempotencyKey.length>100)))return json(res,400,{ok:false,error:"Invalid command-center request"});
           try{
+            if(url.pathname==="/v1/command-center/plan"){
+              if(!commandPlanner)return json(res,503,{ok:false,error:"AI command planner is not configured"});
+              const plan=await commandPlanner.plan({request:d.request});
+              const result=await commandCenter.dispatch({request:d.request,departmentIds:plan.departmentIds,actionClass:plan.actionClass,idempotencyKey:d.idempotencyKey||""});
+              return json(res,200,{...result,plan:{departmentIds:plan.departmentIds,actionClass:plan.actionClass,rationale:plan.rationale,model:plan.model||null}});
+            }
+            if(!Array.isArray(d.departmentIds)||(d.actionClass!==undefined&&typeof d.actionClass!=="string"))return json(res,400,{ok:false,error:"Invalid command-center dispatch request"});
             const result=await commandCenter.dispatch(d);
             return json(res,200,result);
           }catch(error){return json(res,400,{ok:false,error:error.message});}
@@ -766,7 +774,8 @@ if (require.main===module) {
     if (worker) { await worker.start(); worker.startPolling({intervalMs:Number(process.env.JARVIS_WORKER_POLL_MS||1500)}); }
     const contentScheduler=worker&&process.env.JARVIS_CONTENT_AUTOPLAN_ENABLED==="true"?startDailyContentPlanner({store:jobStore}):null;
     const subsidyScheduler=worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"?startDailySubsidyMonitor({store:jobStore}):null;
-    const server=createServer({jobStore,approvalStore,videoBatchStore,paperTradingStore,influenceEventStore,worker}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
+    const commandPlanner=createCommandPlanner();
+    const server=createServer({jobStore,approvalStore,videoBatchStore,paperTradingStore,influenceEventStore,worker,commandPlanner}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
     const shutdown=signal=>{ console.log(`Received ${signal}; shutting down.`); if(subsidyScheduler)subsidyScheduler.stop(); if(contentScheduler)contentScheduler.stop(); if(worker)worker.stop(); server.close(error=>{if(error){console.error("Graceful shutdown failed.");process.exit(1);}process.exit(0);}); setTimeout(()=>process.exit(1),10000).unref(); };
     process.on("SIGTERM",()=>shutdown("SIGTERM")); process.on("SIGINT",()=>shutdown("SIGINT"));
     server.listen(PORT,"0.0.0.0",()=>console.log(`ONE JARVIS running on port ${PORT}`));
