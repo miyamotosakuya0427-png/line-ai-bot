@@ -384,7 +384,7 @@ test("Sheets diagnostics accept the owner token without requiring the general AP
       headers:{Authorization:"Bearer " + "o".repeat(64)}
     });
     assert.equal(response.status, 200);
-    assert.equal(calls, 1);
+    assert.equal(calls, 4);
   } finally { await new Promise(resolve => app.close(resolve)); }
 });
 
