@@ -343,9 +343,10 @@ test("Google Sheets list route forwards authenticated request to Apps Script", a
 
 test("raw Google Sheets reads require the separate owner token", async () => {
   let calls = 0;
-  const app = createServer({ ownerToken: token,
+  const separateOwnerToken = "o".repeat(64);
+  const app = createServer({
     token,
-    ownerToken: "owner-token-that-is-at-least-32-bytes-long",
+    ownerToken: separateOwnerToken,
     sheetsUrl: "https://script.google.com/macros/s/test-id/exec",
     sheetsToken: "a".repeat(128),
     fetchImpl: async () => { calls += 1; return { ok:true, json:async()=>({ok:true,rows:[["private"]]}) }; }
@@ -356,7 +357,7 @@ test("raw Google Sheets reads require the separate owner token", async () => {
     const denied = await fetch(url, { headers:{Authorization:`Bearer ${token}`} });
     assert.equal(denied.status, 401);
     assert.equal(calls, 0);
-    const allowed = await fetch(url, { headers:{Authorization:"Bearer owner-token-that-is-at-least-32-bytes-long"} });
+    const allowed = await fetch(url, { headers:{Authorization:"Bearer " + separateOwnerToken} });
     assert.equal(allowed.status, 200);
     assert.equal(calls, 1);
   } finally { await new Promise(resolve => app.close(resolve)); }
@@ -366,7 +367,7 @@ test("company financial and employee records require owner authorization", async
   let calls = 0;
   const app = createServer({ ownerToken: token,
     token,
-    ownerToken: "owner-token-that-is-at-least-32-bytes-long",
+    ownerToken: "o".repeat(64),
     sheetsUrl: "https://script.google.com/macros/s/test-id/exec",
     sheetsToken: "b".repeat(128),
     fetchImpl: async () => { calls += 1; return { ok:true, json:async()=>({ok:true,sheets:[]}) }; }
