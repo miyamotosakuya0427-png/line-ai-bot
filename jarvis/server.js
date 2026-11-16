@@ -774,15 +774,29 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
 if (require.main===module) {
   (async()=>{
     if (!TOKEN||Buffer.byteLength(TOKEN,"utf8")<32) throw new Error("JARVIS_API_TOKEN must be configured with at least 32 bytes.");
-    const jobStore=JOB_STORE_PATH?createJobStore({filePath:JOB_STORE_PATH}):null;
+    let postgresPool=null;
+    let jobStore=null,approvalStore=null;
+    if(process.env.JARVIS_STORAGE_MODE==="postgres"){
+      if(!process.env.DATABASE_URL)throw new Error("PostgreSQL storage mode requires DATABASE_URL.");
+      const {createNeonPool,createPostgresEventStore}=require("./core/postgres-event-store");
+      const {createPostgresOperationalStores}=require("./core/postgres-operational-stores");
+      postgresPool=createNeonPool({connectionString:process.env.DATABASE_URL});
+      const eventStore=createPostgresEventStore({pool:postgresPool});
+      await eventStore.migrate();
+      const operational=createPostgresOperationalStores({pool:postgresPool});
+      jobStore=operational.jobs;approvalStore=operational.approvals;
+      await jobStore.init();await approvalStore.init();
+    }else{
+      jobStore=JOB_STORE_PATH?createJobStore({filePath:JOB_STORE_PATH}):null;
+      approvalStore=APPROVAL_STORE_PATH?createApprovalStore({filePath:APPROVAL_STORE_PATH}):null;
+    }
     const videoBatchStore=JOB_STORE_PATH?createVideoBatchStore({filePath:JOB_STORE_PATH+".video-batches.jsonl"}):null;
     const paperTradingStore=JOB_STORE_PATH?createPaperTradingStore({filePath:JOB_STORE_PATH+".paper-trading.jsonl"}):null;
     if(paperTradingStore)await paperTradingStore.init();
     const influenceEventStore=JOB_STORE_PATH?createInfluenceEventStore({filePath:JOB_STORE_PATH+".influence-events.jsonl"}):null;
     if(influenceEventStore)await influenceEventStore.init();
     if(videoBatchStore)await videoBatchStore.init();
-    const approvalStore=APPROVAL_STORE_PATH?createApprovalStore({filePath:APPROVAL_STORE_PATH}):null;
-    if(approvalStore)await approvalStore.init();
+    if(process.env.JARVIS_STORAGE_MODE!=="postgres"&&approvalStore)await approvalStore.init();
     const workerEnabled=process.env.JARVIS_WORKER_ENABLED==="true";
     if (workerEnabled && (!jobStore || !process.env.OPENAI_API_KEY)) throw new Error("Worker requires JARVIS_JOB_STORE_PATH and OPENAI_API_KEY.");
     const departmentContextLoader=createDepartmentContextLoader({sheetsUrl:SHEETS_URL,sheetsToken:SHEETS_TOKEN});
@@ -794,9 +808,9 @@ if (require.main===module) {
     const subsidyScheduler=worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"?startDailySubsidyMonitor({store:jobStore}):null;
     const commandPlanner=createCommandPlanner();
     const server=createServer({jobStore,approvalStore,videoBatchStore,paperTradingStore,influenceEventStore,worker,departmentHandlers,departmentContextLoader,commandPlanner}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
-    const shutdown=signal=>{ console.log(`Received ${signal}; shutting down.`); if(subsidyScheduler)subsidyScheduler.stop(); if(contentScheduler)contentScheduler.stop(); if(worker)worker.stop(); server.close(error=>{if(error){console.error("Graceful shutdown failed.");process.exit(1);}process.exit(0);}); setTimeout(()=>process.exit(1),10000).unref(); };
+    const shutdown=signal=>{ console.log(`Received ${signal}; shutting down.`); if(subsidyScheduler)subsidyScheduler.stop(); if(contentScheduler)contentScheduler.stop(); if(worker)worker.stop(); server.close(async error=>{if(error){console.error("Graceful shutdown failed.");process.exit(1);}if(postgresPool){try{await postgresPool.end();}catch{console.error("Database pool shutdown failed.");}}process.exit(0);}); setTimeout(()=>process.exit(1),10000).unref(); };
     process.on("SIGTERM",()=>shutdown("SIGTERM")); process.on("SIGINT",()=>shutdown("SIGINT"));
     server.listen(PORT,"0.0.0.0",()=>console.log(`ONE JARVIS running on port ${PORT}`));
-  })().catch(error=>{console.error(error.message);process.exit(1);});
+  })().catch(error=>{console.error(process.env.JARVIS_STORAGE_MODE==="postgres"?"ONE JARVIS startup failed; check PostgreSQL configuration and connectivity.":error.message);process.exit(1);});
 }
 module.exports={createServer,isAuthorized,readJson};
