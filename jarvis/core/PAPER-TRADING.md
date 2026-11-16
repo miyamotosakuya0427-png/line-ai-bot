@@ -1,0 +1,65 @@
+# ONE TRADER — paper-trading research foundation
+
+This module is simulation-only. It has no broker adapter, exchange credentials, live market-data connector, or real-money order path.
+
+## Research objectives (not promised returns)
+
+The owner's research hypotheses are: 1,000,000 JPY starting capital, 500,000 JPY monthly profit (+50%), 20% daily return, and a proposed 20% stop-loss. These are targets to evaluate, not expected or guaranteed results. They must never be used to force trades or increase risk.
+
+## Default paper risk guardrails
+
+- Maximum modeled loss per trade: 0.5% of current simulated equity.
+- Daily realized loss halt: 2% of starting capital.
+- Peak-to-trough equity drawdown halt: 8%.
+- Maximum five concurrent paper positions.
+- A stop price is mandatory.
+- Duplicate trade IDs are rejected.
+- Fees and slippage are included in net P/L.
+- A daily realized-loss halt blocks new paper trades for the current market-local day and expires on the next market day; the clock must use the configured market timezone.
+- A peak-drawdown halt is latched and requires manual review; reaching the open-position cap blocks additional entries but does not permanently halt the engine.
+- Current daily-loss monitoring is based on realized P/L only; unrealized losses are not yet marked to market, so this is not a live-risk control.
+- A halt blocks new paper trades; it is not an instruction to reverse or liquidate any real position.
+
+These are conservative research defaults, not personalized financial advice or a live trading policy. They should be stress-tested before any future deployment.
+
+## Data and learning loop
+
+1. Store each market snapshot with source, symbol, timestamp, currency, and an explicit unverified provenance flag.
+2. Record each simulated entry/exit, strategy version, signal ID, stop, costs, and reason.
+3. Calculate win rate, profit factor, average win/loss, return, and per-strategy results.
+4. Attach a structured lesson to every reviewed failure: category, root cause, preventive rule, and evidence.
+5. Flag repeated preventive rules so JARVIS can review why the same failure recurred.
+6. Do not autonomously alter strategy code from a lesson. Proposed changes require a new strategy version and a fresh out-of-sample test.
+7. Report sample size and limitations; do not call a strategy profitable based on a small sample.
+
+## Validation gates before any real-money consideration
+
+- Verified licensed/authorized market-data source, timestamps, corporate actions, delisted symbols, and missing-data handling.
+- Separate training, validation, and untouched out-of-sample periods; walk-forward testing.
+- Realistic spread, commissions, taxes where applicable, slippage, partial fills, liquidity, and market-hours simulation.
+- Benchmark comparison, risk-adjusted returns, maximum drawdown, tail loss, consecutive losses, and regime analysis.
+- Minimum sample and duration set before looking at results; no cherry-picking.
+- Paper run over multiple market regimes with reconciled logs.
+- Independent security review, broker permission scoping, kill switch, and explicit owner approval.
+
+Passing a backtest or paper phase does not guarantee future performance. A 20% daily return and 50% monthly return are exceptionally aggressive and are not safe assumptions for planning. A 20% stop-loss may allow substantial capital loss; the default paper policy uses much tighter risk limits for research comparison.
+
+## Authenticated paper-only API
+
+When JARVIS is configured with `JARVIS_JOB_STORE_PATH` on a persistent mounted disk, the server also initializes a separate append-only journal at `JARVIS_JOB_STORE_PATH.paper-trading.jsonl`. The journal uses fsync-backed append records, replay validation, serialized writes, a bounded event count and file size checked before each append, and fail-closed recovery on corruption. A disk write error poisons the in-process store; restart and journal recovery are required before further writes.
+
+All endpoints below require the JARVIS bearer token:
+- `GET /v1/trading/status`
+- `GET /v1/trading/report`
+- `GET /v1/trading/trades?status=open&limit=100`
+- `POST /v1/trading/trades` — open simulated position only
+- `POST /v1/trading/trades/:id/close` — close simulated position only
+- `GET /v1/trading/snapshots?symbol=7203&limit=100`
+- `POST /v1/trading/snapshots`
+- `POST /v1/trading/lessons`
+
+There is intentionally no order-submission endpoint. The status response explicitly reports `mode=paper-only`, `realMoneyTradingEnabled=false`, and `brokerConnected=false`.
+
+## Current boundaries
+
+The simulation engine is now backed by a separate append-only persistent journal and authenticated paper-only HTTP APIs when the JARVIS persistent disk path is configured. It is not connected to live data providers, a scheduled data collector, the dashboard, or any broker. No real order can be placed by this module.

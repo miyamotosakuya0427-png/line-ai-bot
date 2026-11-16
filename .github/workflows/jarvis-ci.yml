@@ -14,18 +14,28 @@ on:
       - "apps-script/**"
       - ".github/workflows/jarvis-ci.yml"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: one-jarvis-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: jarvis
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
-          node-version: 20
-      - run: npm install
+          node-version: 24
+          package-manager-cache: false
       - run: npm test
       - run: node --check < ../apps-script/Code.gs
       - run: node --test ../apps-script/Code.test.js

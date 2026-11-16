@@ -19,8 +19,11 @@ const { createVideoBatchStore } = require("./core/video-batch-store");
 const { createVideoBatchContentHandler } = require("./core/video-batch-runner");
 const { enqueueVideoBatchPlans } = require("./core/video-batch-queue");
 const { createScriptMetrics } = require("./core/script-metrics");
+const { createPaperTradingStore } = require("./core/paper-trading-store");
+const { createInfluenceEventStore } = require("./core/influence-event-store");
+const { createCommandCenter } = require("./core/command-center");
 const PORT = Number(process.env.PORT || 3000);
-const MAX_BODY_BYTES = 10 * 1024;
+const MAX_BODY_BYTES = 24 * 1024;
 const TOKEN = process.env.JARVIS_API_TOKEN || "";
 const SHEETS_URL = process.env.JARVIS_SHEETS_URL || "";
 const SHEETS_TOKEN = process.env.JARVIS_SHEETS_TOKEN || "";
@@ -96,7 +99,7 @@ dailyForm.addEventListener("submit",async(event)=>{event.preventDefault();if(!id
 </script></body></html>`;
 }
 
-function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,approvalStore=null,videoBatchStore=null,worker=null,now=()=>new Date()}={}) {
+function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,approvalStore=null,videoBatchStore=null,paperTradingStore=null,influenceEventStore=null,worker=null,now=()=>new Date()}={}) {
   async function callSheets(action, fields={}) {
     if (!sheetsUrl || !sheetsToken) { const e=new Error("Google Sheets integration is not configured"); e.statusCode=503; throw e; }
     const u=new URL(sheetsUrl);
@@ -543,6 +546,52 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         }
         return json(res,404,{ok:false,error:"Not Found"});
       }
+      if (url.pathname.startsWith("/v1/signals/influence")) {
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        if (!influenceEventStore) return json(res,503,{ok:false,error:"Persistent influence event storage is not configured"});
+        if (req.method==="GET" && url.pathname==="/v1/signals/influence/events") {
+          const limit=Number(url.searchParams.get("limit")||100),platform=url.searchParams.get("platform")||undefined,actor=url.searchParams.get("actor")||undefined,since=url.searchParams.get("since")||undefined;
+          if (!Number.isInteger(limit)||limit<1||limit>500) return json(res,400,{ok:false,error:"Invalid event limit"});
+          return json(res,200,{ok:true,mode:"archive-only",realMoneyTradingEnabled:false,events:await influenceEventStore.list({limit,platform,actor,since})});
+        }
+        if (req.method==="POST" && url.pathname==="/v1/signals/influence/events") {
+          if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+          const d=await readJson(req);
+          const result=await influenceEventStore.add({...d,verification:"unverified"});
+          return json(res,result.created?201:200,{ok:true,created:result.created,event:result.event,analysisQueued:false,realMoneyTradingEnabled:false});
+        }
+        return json(res,404,{ok:false,error:"Not Found"});
+      }
+      if (url.pathname.startsWith("/v1/trading/")) {
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        if (!paperTradingStore) return json(res,503,{ok:false,error:"Persistent paper-trading storage is not configured"});
+        if (req.method==="GET" && url.pathname==="/v1/trading/status") return json(res,200,{ok:true,mode:"paper-only",realMoneyTradingEnabled:false,brokerConnected:false,report:await paperTradingStore.analyze(),risk:await paperTradingStore.riskState()});
+        if (req.method==="GET" && url.pathname==="/v1/trading/report") return json(res,200,{ok:true,report:await paperTradingStore.analyze()});
+        if (req.method==="GET" && url.pathname==="/v1/trading/trades") {
+          const status=url.searchParams.get("status")||undefined,limit=Number(url.searchParams.get("limit")||100);
+          if ((status&&!["open","closed"].includes(status))||!Number.isInteger(limit)||limit<1||limit>1000) return json(res,400,{ok:false,error:"Invalid trade list parameters"});
+          return json(res,200,{ok:true,trades:await paperTradingStore.listTrades({status,limit})});
+        }
+        if (req.method==="GET" && url.pathname==="/v1/trading/snapshots") {
+          const symbol=url.searchParams.get("symbol")||undefined,limit=Number(url.searchParams.get("limit")||100);
+          if (!Number.isInteger(limit)||limit<1||limit>1000) return json(res,400,{ok:false,error:"Invalid snapshot limit"});
+          return json(res,200,{ok:true,snapshots:await paperTradingStore.listSnapshots({symbol,limit})});
+        }
+        if (req.method==="POST" && ["/v1/trading/snapshots","/v1/trading/trades","/v1/trading/lessons"].includes(url.pathname)) {
+          if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+          const d=await readJson(req);
+          if (url.pathname==="/v1/trading/snapshots") return json(res,201,{ok:true,snapshot:await paperTradingStore.recordSnapshot(d)});
+          if (url.pathname==="/v1/trading/trades") return json(res,201,{ok:true,trade:await paperTradingStore.openPaperTrade(d)});
+          return json(res,201,{ok:true,lesson:await paperTradingStore.recordLesson(d)});
+        }
+        const closeMatch=/^\/v1\/trading\/trades\/([A-Za-z0-9._:-]{1,100})\/close$/.exec(url.pathname);
+        if (req.method==="POST"&&closeMatch) {
+          if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+          const d=await readJson(req);
+          return json(res,200,{ok:true,report:await paperTradingStore.closePaperTrade({...d,id:closeMatch[1]})});
+        }
+        return json(res,404,{ok:false,error:"Not Found"});
+      }
       const videoDraftMatch=new RegExp("^/v1/content/videos/(V[0-9]{2,8})/draft$").exec(url.pathname);
       if(req.method==="POST"&&videoDraftMatch){
         if(!isAuthorized(req,token))return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
@@ -658,6 +707,23 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         if (url.pathname==="/v1/departments") return json(res,200,{ok:true,departments:DEPARTMENTS,approvalPolicy:APPROVAL});
         return json(res,200,{ok:true,sources:SUBSIDY_SOURCES,priorityTopics:PRIORITY_TOPICS,reportFields:REPORT_FIELDS,monitoringEnabled:Boolean(worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"),monitoringSchedule:"08:30 Asia/Tokyo",monitoringNote:worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"?"毎日公式サイトを取得し、担当AIが確認できる状態です。":"定期調査はJARVIS_WORKER_ENABLED=trueとJARVIS_SUBSIDY_AUTOMONITOR_ENABLED=trueの設定後に有効化されます。"});
       }
+      if (url.pathname==="/v1/command-center" || url.pathname==="/v1/command-center/dispatch") {
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        const commandCenter=createCommandCenter({jobStore,approvalStore,worker,clock:()=>now().toISOString()});
+        if(req.method==="GET"&&url.pathname==="/v1/command-center"){
+          return json(res,200,{ok:true,...await commandCenter.snapshot()});
+        }
+        if(req.method==="POST"&&url.pathname==="/v1/command-center/dispatch"){
+          if(!req.headers["content-type"]?.toLowerCase().startsWith("application/json"))return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+          const d=await readJson(req);
+          if(typeof d.request!=="string"||!Array.isArray(d.departmentIds)||(d.actionClass!==undefined&&typeof d.actionClass!=="string")||(d.idempotencyKey!==undefined&&typeof d.idempotencyKey!=="string"))return json(res,400,{ok:false,error:"Invalid command-center dispatch request"});
+          try{
+            const result=await commandCenter.dispatch(d);
+            return json(res,200,result);
+          }catch(error){return json(res,400,{ok:false,error:error.message});}
+        }
+        return json(res,405,{ok:false,error:"Method Not Allowed"},{Allow:"GET, POST"});
+      }
       if (req.method==="GET" && url.pathname==="/v1/status") return json(res,200,{ok:true,system:"ONE JARVIS",version:"1.3.0",mode:"read-only",googleSheetsConfigured:Boolean(sheetsUrl&&sheetsToken),jobQueueConfigured:Boolean(jobStore),workerEnabled:Boolean(worker),contentAutoplanEnabled:Boolean(worker&&process.env.JARVIS_CONTENT_AUTOPLAN_ENABLED==="true"),subsidyAutomonitorEnabled:Boolean(worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"),approvalsConfigured:Boolean(approvalStore)});
       if (req.method==="GET" && url.pathname==="/v1/sheets/list") {
         const r=await callSheets("listSheets"); return json(res,200,{ok:true,sheets:r.sheets});
@@ -694,6 +760,10 @@ if (require.main===module) {
     if (!TOKEN||Buffer.byteLength(TOKEN,"utf8")<32) throw new Error("JARVIS_API_TOKEN must be configured with at least 32 bytes.");
     const jobStore=JOB_STORE_PATH?createJobStore({filePath:JOB_STORE_PATH}):null;
     const videoBatchStore=JOB_STORE_PATH?createVideoBatchStore({filePath:JOB_STORE_PATH+".video-batches.jsonl"}):null;
+    const paperTradingStore=JOB_STORE_PATH?createPaperTradingStore({filePath:JOB_STORE_PATH+".paper-trading.jsonl"}):null;
+    if(paperTradingStore)await paperTradingStore.init();
+    const influenceEventStore=JOB_STORE_PATH?createInfluenceEventStore({filePath:JOB_STORE_PATH+".influence-events.jsonl"}):null;
+    if(influenceEventStore)await influenceEventStore.init();
     if(videoBatchStore)await videoBatchStore.init();
     const approvalStore=APPROVAL_STORE_PATH?createApprovalStore({filePath:APPROVAL_STORE_PATH}):null;
     if(approvalStore)await approvalStore.init();
@@ -705,7 +775,7 @@ if (require.main===module) {
     if (worker) { await worker.start(); worker.startPolling({intervalMs:Number(process.env.JARVIS_WORKER_POLL_MS||1500)}); }
     const contentScheduler=worker&&process.env.JARVIS_CONTENT_AUTOPLAN_ENABLED==="true"?startDailyContentPlanner({store:jobStore}):null;
     const subsidyScheduler=worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"?startDailySubsidyMonitor({store:jobStore}):null;
-    const server=createServer({jobStore,approvalStore,videoBatchStore,worker}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
+    const server=createServer({jobStore,approvalStore,videoBatchStore,paperTradingStore,influenceEventStore,worker}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
     const shutdown=signal=>{ console.log(`Received ${signal}; shutting down.`); if(subsidyScheduler)subsidyScheduler.stop(); if(contentScheduler)contentScheduler.stop(); if(worker)worker.stop(); server.close(error=>{if(error){console.error("Graceful shutdown failed.");process.exit(1);}process.exit(0);}); setTimeout(()=>process.exit(1),10000).unref(); };
     process.on("SIGTERM",()=>shutdown("SIGTERM")); process.on("SIGINT",()=>shutdown("SIGINT"));
     server.listen(PORT,"0.0.0.0",()=>console.log(`ONE JARVIS running on port ${PORT}`));

@@ -1,0 +1,34 @@
+"use strict";
+const test=require("node:test");
+const assert=require("node:assert/strict");
+const fs=require("node:fs/promises");
+const os=require("node:os");
+const path=require("node:path");
+const {createServer}=require("./server");
+const {createPaperTradingStore}=require("./core/paper-trading-store");
+
+test("authenticated trading API is paper-only and persists a complete simulated round trip",async t=>{
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),"one-trading-api-"));
+ t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+ const store=createPaperTradingStore({filePath:path.join(dir,"journal.jsonl"),clock:()=>"2026-11-16T10:00:00+09:00"});
+ await store.init();
+ const token="test-token-".padEnd(40,"x");
+ const server=createServer({token,paperTradingStore:store});
+ await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
+ t.after(()=>new Promise(resolve=>server.close(resolve)));
+ const base="http://127.0.0.1:"+server.address().port;
+ const get=async(path,auth=true)=>fetch(base+path,{headers:auth?{Authorization:"Bearer "+token}:{}}); 
+ const post=async(path,body)=>fetch(base+path,{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify(body)});
+ assert.equal((await get("/v1/trading/status",false)).status,401);
+ const status=await (await get("/v1/trading/status")).json();
+ assert.equal(status.mode,"paper-only");assert.equal(status.realMoneyTradingEnabled,false);assert.equal(status.brokerConnected,false);
+ const snap=await post("/v1/trading/snapshots",{source:"market.example",symbol:"7203",capturedAt:"2026-11-16T10:00:00+09:00",price:1000});
+ assert.equal(snap.status,201);
+ const opened=await (await post("/v1/trading/trades",{id:"api-trade-1",symbol:"7203",side:"long",quantity:100,entryPrice:1000,stopPrice:995,strategyId:"api-test-v1"})).json();
+ assert.equal(opened.trade.status,"open");
+ const closed=await (await post("/v1/trading/trades/api-trade-1/close",{exitPrice:1010,feesYen:20,slippageYen:10})).json();
+ assert.equal(closed.report.trade.netPnlYen,970);
+ const report=await (await get("/v1/trading/report")).json();
+ assert.equal(report.report.sampleSize,1);
+ assert.equal((await get("/v1/trading/orders")).status,404);
+});
