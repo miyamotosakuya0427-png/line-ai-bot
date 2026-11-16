@@ -5,6 +5,7 @@ const crypto=require("node:crypto");
 
 const MAX_BATCH=100;
 const MAX_HISTORY=10000;
+const MAX_EVENTS=250000;
 const STAGES=Object.freeze(["research","script","source_qa","pronunciation","narration","assets","edit","final_qa","owner_review","publish_ready","analytics"]);
 const REVIEW_DECISIONS=new Set(["approve","request_changes","hold"]);
 const ACTIONS=new Set(["paid_generation","external_upload","schedule_publication","publish"]);
@@ -32,11 +33,12 @@ function validateStageEvidence(targetStage,p,evidence={}){
 }
 const EVIDENCE_KEY_BY_STAGE=Object.freeze({pronunciation:"sourceQa",narration:"pronunciation",assets:"narration",edit:"assets",final_qa:"edit",owner_review:"finalQa",analytics:"publication"});
 
-function createVideoBatchStore({filePath,clock=()=>new Date().toISOString()}={}){
+function createVideoBatchStore({filePath,clock=()=>new Date().toISOString(),maxEvents=MAX_EVENTS}={}){
  if(typeof filePath!=="string"||!path.isAbsolute(filePath))throw new Error("Video batch store requires an absolute persistent file path");
+ if(!Number.isInteger(maxEvents)||maxEvents<1||maxEvents>MAX_EVENTS)throw new Error("Invalid video journal event limit");
  let plans=new Map(),reviews=[],actionApprovals=[],keys=new Map(),initialized=false,queue=Promise.resolve(),eventCount=0;
  async function serial(fn){const p=queue.then(fn);queue=p.catch(()=>{});return p;}
- async function append(event){const h=await fs.open(filePath,"a",0o600);try{await h.writeFile(JSON.stringify(event)+"\n","utf8");await h.sync();}finally{await h.close();}await fs.chmod(filePath,0o600);eventCount++;}
+ async function append(event){if(eventCount>=maxEvents)throw new Error("Video batch journal event capacity reached; archive or expand storage before continuing");const h=await fs.open(filePath,"a",0o600);try{await h.writeFile(JSON.stringify(event)+"\n","utf8");await h.sync();}finally{await h.close();}await fs.chmod(filePath,0o600);eventCount++;}
  async function init(){return serial(async()=>{if(initialized)return;await fs.mkdir(path.dirname(filePath),{recursive:true,mode:0o700});let raw="";try{raw=await fs.readFile(filePath,"utf8");}catch(e){if(e.code!=="ENOENT")throw e;}for(const [i,line] of raw.split("\n").entries()){if(!line)continue;let e;try{e=JSON.parse(line);}catch{throw new Error("Video batch journal corrupt at line "+(i+1));}if(!e||typeof e!=="object"||!["plan","review","action_approval"].includes(e.kind)||typeof e.id!=="string")throw new Error("Invalid video batch journal event at line "+(i+1));if(e.kind==="plan")plans.set(e.id,e.value);if(e.kind==="review")reviews.push(e.value);if(e.kind==="action_approval")actionApprovals.push(e.value);if(e.idempotencyKey&&e.value?.batchId)keys.set(e.idempotencyKey,e.value.batchId);}eventCount=raw.split("\n").filter(Boolean).length;if(eventCount>MAX_HISTORY)throw new Error("Video batch journal exceeds configured event limit");initialized=true;});}
  async function ready(){if(!initialized)await init();}
  function normalizePlan(p,index){if(!p||typeof p!=="object"||Array.isArray(p))throw new Error("Each video plan must be an object");const id=typeof p.id==="string"?p.id.trim():"";const title=typeof p.title==="string"?p.title.trim():"";const topic=typeof p.topic==="string"?p.topic.trim():"";const channelId=p.channelId||"history";if(!/^V[0-9]{2,8}$/.test(id)||!validText(title,160)||!validText(topic,500)||!Object.hasOwn(CHANNELS,channelId))throw new Error("Invalid video plan at index "+index);if(channelId==="finance")throw new Error("Finance channel is not configured; bulk registration is disabled");const sources=Array.isArray(p.sources)?p.sources:[];if(sources.length>30||!sources.every(x=>validText(x,1000)))throw new Error("Invalid source list");return {id,title,topic,channelId,format:typeof p.format==="string"&&p.format.length<=80?p.format:"long-form",script:typeof p.script==="string"?p.script.slice(0,12000):"",sources:[...sources],asOfDate:p.asOfDate||null,riskDisclaimer:p.riskDisclaimer||"",status:"planned",stage:"research",createdAt:clock(),updatedAt:clock(),review:{decision:"pending",note:"",actor:null,at:null},financeQa:channelId==="finance"?{primarySourcesChecked:false,calculationsRechecked:false,asOfDate:p.asOfDate,riskDisclaimerPresent:true,misleadingClaimsChecked:false}:null};}
