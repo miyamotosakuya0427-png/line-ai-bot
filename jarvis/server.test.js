@@ -726,3 +726,71 @@ test("video batch APIs require auth, persist 100-item queues, and expose owner r
     assert.equal(approved.status,201);
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
+
+
+test("command center API exposes authenticated department overview and safe dispatch", async t => {
+  const {createJobStore}=require("./core/job-store");
+  const {createApprovalStore}=require("./core/approval-store");
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-command-center-api-"));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const jobStore=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
+  const approvalStore=createApprovalStore({filePath:path.join(dir,"approvals.jsonl")});
+  const app=createServer({token,jobStore,approvalStore});
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  const root="http://127.0.0.1:"+app.address().port;
+  const headers={Authorization:"Bearer "+token,"Content-Type":"application/json"};
+  try {
+    const denied=await fetch(root+"/v1/command-center");
+    assert.equal(denied.status,401);
+    const overview=await fetch(root+"/v1/command-center",{headers:{Authorization:headers.Authorization}});
+    assert.equal(overview.status,200);
+    const status=await overview.json();
+    assert.equal(status.system,"ONE JARVIS COMMAND CENTER");
+    assert.equal(status.departments.length,13);
+    assert.equal(status.execution.externalActionsEnabled,false);
+    const dispatched=await fetch(root+"/v1/command-center/dispatch",{method:"POST",headers,body:JSON.stringify({
+      request:"今月の経営数値と会計データを照合",
+      departmentIds:["management","tax"],
+      actionClass:"analyze",
+      idempotencyKey:"api-monthly-review"
+    })});
+    assert.equal(dispatched.status,200);
+    const result=await dispatched.json();
+    assert.equal(result.results.length,2);
+    assert.equal(result.results.every(x=>x.status==="queued"&&x.created),true);
+    const duplicate=await fetch(root+"/v1/command-center/dispatch",{method:"POST",headers,body:JSON.stringify({
+      request:"今月の経営数値と会計データを照合",
+      departmentIds:["management","tax"],
+      actionClass:"analyze",
+      idempotencyKey:"api-monthly-review"
+    })});
+    assert.equal((await duplicate.json()).results.every(x=>x.created===false),true);
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
+
+test("command center API stores external actions as owner approvals without queueing them", async t => {
+  const {createJobStore}=require("./core/job-store");
+  const {createApprovalStore}=require("./core/approval-store");
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-command-center-approval-api-"));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const jobStore=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
+  const approvalStore=createApprovalStore({filePath:path.join(dir,"approvals.jsonl")});
+  const app=createServer({token,jobStore,approvalStore});
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  const root="http://127.0.0.1:"+app.address().port;
+  const headers={Authorization:"Bearer "+token,"Content-Type":"application/json"};
+  try {
+    const response=await fetch(root+"/v1/command-center/dispatch",{method:"POST",headers,body:JSON.stringify({
+      request:"補助金の申請を提出",
+      departmentIds:["office"],
+      actionClass:"external_submit",
+      idempotencyKey:"api-subsidy-submit"
+    })});
+    assert.equal(response.status,200);
+    const result=await response.json();
+    assert.equal(result.results[0].status,"awaiting_owner_approval");
+    assert.equal(result.externalActionsEnabled,false);
+    assert.equal((await jobStore.list({limit:20})).length,0);
+    assert.equal((await approvalStore.list({status:"pending"})).length,1);
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
