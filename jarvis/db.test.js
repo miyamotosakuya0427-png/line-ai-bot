@@ -101,3 +101,26 @@ test("audit event IDs make duplicate writes idempotent", async () => {
 test("pool is not constructed when Neon URL is absent", () => {
   assert.throws(() => createDbStore({}), /NEON_DATABASE_URL/);
 });
+
+test("failed jobs are returned to the queue with a bounded retry delay", async () => {
+  let statement = "";
+  let values = [];
+  const pool = {
+    async query(sql, params) {
+      statement = sql;
+      values = params;
+      return { rows: [{ id: params[0], status: "queued" }], rowCount: 1 };
+    },
+    async end() {}
+  };
+  const store = createDbStore({ pool });
+  const result = await store.finishJob({ jobId: "job-1", success: false, retryDelayMs: 45000 });
+  assert.equal(result.status, "queued");
+  assert.match(statement, /attempts < max_attempts/);
+  assert.deepEqual(values, ["job-1", 45000]);
+});
+
+test("job retry delay cannot exceed one day", async () => {
+  const store = createDbStore({ pool: { async query() { throw new Error("should not query"); }, async end() {} } });
+  await assert.rejects(store.finishJob({ jobId: "job-1", success: false, retryDelayMs: 86400001 }), /retryDelayMs/);
+});
