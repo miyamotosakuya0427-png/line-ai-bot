@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS jarvis.events (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS events_idempotency_unique
-  ON jarvis.events (aggregate_type, idempotency_key)
+  ON jarvis.events (aggregate_type, aggregate_id, idempotency_key)
   WHERE idempotency_key IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS events_aggregate_read
