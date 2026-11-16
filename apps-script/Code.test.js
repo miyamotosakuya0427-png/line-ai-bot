@@ -220,3 +220,37 @@ test("administrator approval rejects a pending row whose employee identity no lo
   assert.match(response.error, /does not match/);
   assert.equal(ss.sheets["13 LINE連携"].rows[2][7], "確認待ち");
 });
+
+test("daily report write revalidates active LINE identity and employee register", () => {
+  const app = loadAppsScript();
+  const ss = makeSpreadsheet([
+    headers,
+    ["LINK-1", applicantId, "申請者", "EMP001", "従業員A", "", "一般", "有効"]
+  ]);
+  const report = {
+    reportId: "DR-123e4567-e89b-12d3-a456-426614174000",
+    recordedAt: "2026-11-17T10:00:00.000Z",
+    workDate: "2026-11-17",
+    lineUserId: applicantId,
+    employeeId: "EMP001",
+    employeeName: "従業員A",
+    siteName: "岡山現場",
+    workDetails: "掘削作業",
+    startTime: "08:00",
+    endTime: "17:00",
+    breakMinutes: 60,
+    workerCount: 3,
+    equipment: "バックホウ",
+    materials: "RC30",
+    notes: ""
+  };
+  const saved = JSON.parse(app.appendDailyReport(ss, { report }).text);
+  assert.equal(saved.ok, true);
+  assert.equal(saved.saved, true);
+  const duplicate = JSON.parse(app.appendDailyReport(ss, { report }).text);
+  assert.equal(duplicate.duplicate, true);
+  const forged = JSON.parse(app.appendDailyReport(ss, { report: { ...report, lineUserId: adminId } }).text);
+  assert.equal(forged.ok, false);
+  assert.match(forged.error, /active LINE link/);
+});
+
