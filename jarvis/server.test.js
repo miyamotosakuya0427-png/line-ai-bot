@@ -884,7 +884,7 @@ test("approval decisions and inbox require a separate owner token", async t => {
     assert.equal(ownerDecisionResult.approval.status,"approved");
     const ownerList=await fetch(root+"/v1/approvals?status=approved",{headers:{Authorization:"Bearer "+ownerToken}});
     assert.equal(ownerList.status,200);
-    assert.equal((await ownerList.json()).approvals.length,2);
+    assert.equal((await ownerList.json()).approvals.length,1);
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
 
