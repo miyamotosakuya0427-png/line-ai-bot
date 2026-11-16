@@ -51,6 +51,7 @@ function makeSpreadsheet(lineRows) {
     "01 従業員": makeSheet([
       employeeHeaders,
       ["EMP001", "従業員A", "", "", "", "", "", "", "", "有効", ""],
+      ["EMP002", "退職済み", "", "", "", "", "", "", "", "無効", ""],
       ["EMP003", "宮本朔也", "", "", "", "", "", "", "", "有効", ""]
     ])
   };
@@ -205,6 +206,11 @@ test("LINE link application requires a matching active employee and stores fixed
   }).content);
   assert.equal(mismatch.ok, false);
   assert.match(mismatch.error, /employee register/);
+  const inactive = JSON.parse(app.appendLineLink(ss, {
+    lineUserId: adminId, displayName: "退職者", employeeId: "EMP002", employeeName: "退職済み"
+  }).content);
+  assert.equal(inactive.ok, false);
+  assert.match(inactive.error, /employee register/);
 });
 
 test("administrator approval rejects a pending row whose employee identity no longer matches", () => {
