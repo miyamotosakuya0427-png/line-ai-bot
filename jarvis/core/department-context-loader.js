@@ -13,6 +13,7 @@ const SHEETS=Object.freeze({
   payments:"10 入金"
 });
 const MAX_ROWS=100;
+const SUPPORTED_CONTEXT_DEPARTMENTS=new Set(["hr","construction","jarvis","management","tax"]);
 function japanDate(date){
   const parts=new Intl.DateTimeFormat("en-CA",{timeZone:"Asia/Tokyo",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(date);
   const values=Object.fromEntries(parts.map(part=>[part.type,part.value]));
@@ -79,6 +80,6 @@ function createDepartmentContextLoader({sheetsUrl="",sheetsToken="",fetchImpl=fe
     }
     return {generatedAt,status:"not_available_for_department",note:"この部署用の承認済み読み取りデータアダプターはまだありません。実データを参照していません。"};
   }
-  return {load,configured,sheets:Object.freeze({...SHEETS})};
+  return {load,configured,supports:departmentId=>SUPPORTED_CONTEXT_DEPARTMENTS.has(departmentId),sheets:Object.freeze({...SHEETS})};
 }
-module.exports={SHEETS,MAX_ROWS,japanDate,createDepartmentContextLoader};
+module.exports={SHEETS,MAX_ROWS,SUPPORTED_CONTEXT_DEPARTMENTS,japanDate,createDepartmentContextLoader};
