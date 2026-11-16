@@ -60,6 +60,7 @@ function createPostgresOperationalStores({pool,clock=()=>new Date().toISOString(
    if(!validJobPayload(payload))throw new Error("Job payload must be an object no larger than 16 KB");
    if(idempotencyKey&&(typeof idempotencyKey!=="string"||idempotencyKey.length>128))throw new Error("Invalid idempotency key");
    return tx(async c=>{
+    if(idempotencyKey)await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",["job-idempotency:"+idempotencyKey]);
     if(idempotencyKey){const old=await c.query("SELECT payload FROM jarvis.events WHERE aggregate_type='job' AND payload->>'idempotencyKey'=$1 ORDER BY event_id DESC LIMIT 1",[idempotencyKey]);if(old.rows[0])return{job:clone(old.rows[0].payload),created:false};}
     const count=await c.query("SELECT count(DISTINCT aggregate_id)::int AS n FROM jarvis.events WHERE aggregate_type='job'");
     if(count.rows[0].n>=MAX_JOBS)throw new Error("Job store capacity reached");
@@ -91,6 +92,7 @@ function createPostgresOperationalStores({pool,clock=()=>new Date().toISOString(
    if(!ACTIONS.has(actionClass))throw new Error("Invalid approval action class");
    if(!validText(summary,300,true)||!validText(details,MAX_DETAILS)||!validText(idempotencyKey,128))throw new Error("Invalid approval request fields");
    return tx(async c=>{
+    if(idempotencyKey)await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",["approval-idempotency:"+idempotencyKey]);
     if(idempotencyKey){const old=await c.query("SELECT DISTINCT ON (aggregate_id) payload FROM jarvis.events WHERE aggregate_type='approval' AND payload->>'idempotencyKey'=$1 ORDER BY aggregate_id,aggregate_version DESC LIMIT 1",[idempotencyKey]);if(old.rows[0])return{created:false,approval:clone(old.rows[0].payload)};}
     const count=await c.query("SELECT count(DISTINCT aggregate_id)::int AS n FROM jarvis.events WHERE aggregate_type='approval'");if(count.rows[0].n>=MAX_APPROVALS)throw new Error("Approval store capacity reached");
     const now=clock(),approval={id:crypto.randomUUID(),departmentId,actionClass,summary:summary.trim(),details:details.trim(),status:"pending",idempotencyKey,createdAt:now,updatedAt:now,decisionAt:null,decisionReason:"",executionStatus:"not_started",requestDigest:digest({departmentId,actionClass,summary:summary.trim(),details:details.trim()})};
