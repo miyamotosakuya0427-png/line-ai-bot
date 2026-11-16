@@ -35,7 +35,17 @@ test("command center rejects unknown departments, duplicate IDs, and malformed r
  await assert.rejects(cc.dispatch({request:"test",departmentIds:["tax","tax"]}),/Duplicate/);
  await assert.rejects(cc.dispatch({request:"",departmentIds:["tax"]}),/Task request/);
 });
-test("command center reports disabled dependencies honestly",async()=>{
+
+test("approval-only dispatch works without a job queue",async t=>{
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-cc-approval-only-"));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+ const approvalStore=createApprovalStore({filePath:path.join(dir,"approvals.jsonl")});
+ const cc=createCommandCenter({approvalStore});
+ const result=await cc.dispatch({request:"行政申請の提出",departmentIds:["office"],actionClass:"external_submit"});
+ assert.equal(result.results[0].status,"awaiting_owner_approval");
+ assert.equal((await approvalStore.list({status:"pending"})).length,1);
+ await assert.rejects(cc.dispatch({request:"社内分析",departmentIds:["management"],actionClass:"analyze"}),error=>error.statusCode===503);
+});
+\ntest("command center reports disabled dependencies honestly",async()=>{
  const cc=createCommandCenter();
  const view=await cc.snapshot();
  assert.equal(view.execution.queueConfigured,false);assert.equal(view.execution.workerConfigured,false);
