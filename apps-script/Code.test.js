@@ -228,6 +228,21 @@ test("administrator approval rejects a pending row whose employee identity no lo
   assert.equal(ss.sheets["13 LINE連携"].rows[2][7], "確認待ち");
 });
 
+test("administrator can reject an invalid pending identity without approving it", () => {
+  const app = loadAppsScript();
+  const ss = makeSpreadsheet([
+    headers,
+    ["ADMIN-1", adminId, "管理者", "EMP003", "宮本朔也", "", "管理者", "有効"],
+    ["PENDING-2", applicantId, "申請者", "EMP001", "別人", "", "一般", "確認待ち"]
+  ]);
+  const response = JSON.parse(app.reviewLineLink(ss, {
+    adminLineUserId: adminId, linkId: "PENDING-2", decision: "reject"
+  }).content);
+  assert.equal(response.ok, true);
+  assert.equal(response.status, "却下");
+  assert.equal(ss.sheets["13 LINE連携"].rows[2][7], "却下");
+});
+
 test("daily report write revalidates active LINE identity and employee register", () => {
   const app = loadAppsScript();
   const ss = makeSpreadsheet([
