@@ -46,6 +46,7 @@ function isAuthorized(req, token = TOKEN) {
   const supplied = Buffer.from(match[1],"utf8"), expected = Buffer.from(token,"utf8");
   return supplied.length === expected.length && crypto.timingSafeEqual(supplied,expected);
 }
+function isOwnerAuthorized(req, ownerToken) { return isAuthorized(req, ownerToken); }
 async function readJson(req) {
   const chunks=[]; let size=0;
   for await (const chunk of req) {
@@ -82,23 +83,24 @@ async function verifyLineIdToken(idToken, channelId, fetchImpl=fetch) {
 
 function lineLinkPage(liffId) {
   const safeLiffId=JSON.stringify(liffId||"");
-  return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>株式会社One LINE連携</title><style>body{font-family:system-ui,sans-serif;background:#f5f6f8;color:#17202a;margin:0;padding:24px}main{max-width:440px;margin:8vh auto;background:#fff;padding:24px;border-radius:16px;box-shadow:0 4px 24px #0001}h1{font-size:22px}p{line-height:1.7}.muted{color:#667085;font-size:14px}select,button{width:100%;padding:14px;margin-top:12px;border-radius:9px;border:1px solid #ccd2da;font-size:16px}button{background:#182b49;color:white;border:0}button:disabled{opacity:.45}#msg{white-space:pre-wrap;margin-top:16px}</style><script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script></head><body><main><h1>株式会社One LINE連携</h1><p>自分の氏名を選んで連携申請してください。申請後、管理者が本人確認して有効化します。</p><label for="employee">従業員名</label><select id="employee" disabled><option>読み込み中…</option></select><button id="send" disabled>連携を申請</button><button id="bootstrap-admin" disabled style="background:#344054">EMP003 初回管理者登録</button><p class="muted">初回管理者登録はEMP003本人のみ実行できます。LINE公式のIDトークンをサーバーで検証します。</p><section style="margin-top:24px;border-top:1px solid #e4e7ec;padding-top:16px"><h2 style="font-size:18px">日報入力</h2><p class="muted">連携済みの本人情報を使って記録します。</p><form id="daily-report-form"><label>作業日</label><input name="workDate" type="date" required><label>現場名</label><input name="siteName" maxlength="100" required placeholder="例：岡山市○○現場"><label>作業内容</label><textarea name="workDetails" maxlength="2000" required placeholder="今日行った作業"></textarea><label>開始時刻</label><input name="startTime" type="time" required><label>終了時刻</label><input name="endTime" type="time" required><label>休憩（分）</label><input name="breakMinutes" type="number" min="0" max="600" value="60" required><label>作業人数</label><input name="workerCount" type="number" min="1" max="100" value="1" required><label>使用機械・車両</label><input name="equipment" maxlength="300" placeholder="例：バックホウ、ダンプ"><label>使用材料</label><input name="materials" maxlength="500" placeholder="例：RC30、生コン"><label>連絡事項</label><textarea name="notes" maxlength="1000"></textarea><button id="daily-report-submit" type="submit">日報を保存</button></form><p id="daily-report-message" role="status"></p></section>
+  return `<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>株式会社One LINE連携</title><style>body{font-family:system-ui,sans-serif;background:#f5f6f8;color:#17202a;margin:0;padding:24px}main{max-width:440px;margin:8vh auto;background:#fff;padding:24px;border-radius:16px;box-shadow:0 4px 24px #0001}h1{font-size:22px}p{line-height:1.7}.muted{color:#667085;font-size:14px}input,button{width:100%;padding:14px;margin-top:12px;border-radius:9px;border:1px solid #ccd2da;font-size:16px}button{background:#182b49;color:white;border:0}button:disabled{opacity:.45}#msg{white-space:pre-wrap;margin-top:16px}</style><script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script></head><body><main><h1>株式会社One LINE連携</h1><p>会社から通知された従業員IDを入力して連携申請してください。従業員一覧は表示しません。申請後、管理者が本人確認して有効化します。</p><label for="employee-id">従業員ID</label><input id="employee-id" type="text" maxlength="9" pattern="[A-Z]{2,3}[0-9]{3,6}" placeholder="例：EMP001" autocomplete="off" disabled><button id="send" disabled>連携を申請</button><button id="bootstrap-admin" disabled style="background:#344054">EMP003 初回管理者登録</button><p class="muted">初回管理者登録はEMP003本人のみ実行できます。LINE公式のIDトークンをサーバーで検証します。</p><section style="margin-top:24px;border-top:1px solid #e4e7ec;padding-top:16px"><h2 style="font-size:18px">日報入力</h2><p class="muted">連携済みの本人情報を使って記録します。</p><form id="daily-report-form"><label>作業日</label><input name="workDate" type="date" required><label>現場名</label><input name="siteName" maxlength="100" required placeholder="例：岡山市○○現場"><label>作業内容</label><textarea name="workDetails" maxlength="2000" required placeholder="今日行った作業"></textarea><label>開始時刻</label><input name="startTime" type="time" required><label>終了時刻</label><input name="endTime" type="time" required><label>休憩（分）</label><input name="breakMinutes" type="number" min="0" max="600" value="60" required><label>作業人数</label><input name="workerCount" type="number" min="1" max="100" value="1" required><label>使用機械・車両</label><input name="equipment" maxlength="300" placeholder="例：バックホウ、ダンプ"><label>使用材料</label><input name="materials" maxlength="500" placeholder="例：RC30、生コン"><label>連絡事項</label><textarea name="notes" maxlength="1000"></textarea><button id="daily-report-submit" type="submit">日報を保存</button></form><p id="daily-report-message" role="status"></p></section>
 <section style="margin-top:24px;border-top:1px solid #e4e7ec;padding-top:16px"><h2 style="font-size:18px">管理者メニュー</h2><button id="refresh-pending" disabled>連携申請を確認</button><div id="pending-list" aria-live="polite"></div></section><p class="muted">LINEアカウント情報はLINE公式のIDトークンをサーバーで検証して取得します。</p><div id="msg" role="status"></div></main><script>
 const LIFF_ID=${safeLiffId};
-const msg=document.getElementById("msg"),select=document.getElementById("employee"),button=document.getElementById("send");
+const msg=document.getElementById("msg"),employeeInput=document.getElementById("employee-id"),button=document.getElementById("send");
 const adminButton=document.getElementById("bootstrap-admin");
 const refreshPendingButton=document.getElementById("refresh-pending"),pendingList=document.getElementById("pending-list");
 let idToken="";
 async function api(path,body){const r=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)throw new Error(d.error||"通信に失敗しました");return d;}
-(async()=>{try{if(!LIFF_ID){msg.textContent="LIFF_IDがまだ設定されていません。";return;}await liff.init({liffId:LIFF_ID});if(!liff.isLoggedIn()){liff.login();return;}idToken=liff.getIDToken();if(!idToken)throw new Error("LINEの本人確認情報を取得できません。LIFFのopenid設定を確認してください。");const d=await api("/v1/line/employees",{idToken});select.innerHTML='<option value="">氏名を選択してください</option>';for(const e of d.employees){const o=document.createElement("option");o.value=e.employeeId;o.textContent=e.name;select.appendChild(o);}select.disabled=false;button.disabled=false;adminButton.disabled=false;refreshPendingButton.disabled=false;}catch(e){msg.textContent=e.message;}})();
-select.addEventListener("change",()=>{adminButton.disabled=!idToken||select.value!=="EMP003";});
-button.addEventListener("click",async()=>{button.disabled=true;try{await api("/v1/line/link",{idToken,employeeId:select.value});msg.textContent="連携申請を受け付けました。管理者の本人確認後に利用できます。";}catch(e){msg.textContent=e.message;button.disabled=false;}});
-adminButton.addEventListener("click",async()=>{if(select.value!=="EMP003"){msg.textContent="EMP003を選択してください。";return;}if(!window.confirm("LINEで本人確認を行い、EMP003を株式会社Oneの初回管理者として登録します。続行しますか？"))return;adminButton.disabled=true;try{const result=await api("/v1/line/admin/bootstrap",{idToken});msg.textContent="管理者登録が完了しました。権限："+result.role+"／状態："+result.status;}catch(e){msg.textContent=e.message;adminButton.disabled=false;}});
+(async()=>{try{if(!LIFF_ID){msg.textContent="LIFF_IDがまだ設定されていません。";return;}await liff.init({liffId:LIFF_ID});if(!liff.isLoggedIn()){liff.login();return;}idToken=liff.getIDToken();if(!idToken)throw new Error("LINEの本人確認情報を取得できません。LIFFのopenid設定を確認してください。");employeeInput.disabled=false;button.disabled=false;adminButton.disabled=true;refreshPendingButton.disabled=false;}catch(e){msg.textContent=e.message;}})();
+employeeInput.addEventListener("input",()=>{employeeInput.value=employeeInput.value.trim().toUpperCase();adminButton.disabled=!idToken||employeeInput.value!=="EMP003";});
+button.addEventListener("click",async()=>{button.disabled=true;try{if(!employeeInput.reportValidity())throw new Error("従業員IDを正しく入力してください。");await api("/v1/line/link",{idToken,employeeId:employeeInput.value.trim().toUpperCase()});msg.textContent="連携申請を受け付けました。管理者の本人確認後に利用できます。";}catch(e){msg.textContent=e.message;button.disabled=false;}});
+adminButton.addEventListener("click",async()=>{if(employeeInput.value.trim().toUpperCase()!=="EMP003"){msg.textContent="初回管理者登録はEMP003本人のみです。";return;}if(!window.confirm("LINEで本人確認を行い、EMP003を株式会社Oneの初回管理者として登録します。続行しますか？"))return;adminButton.disabled=true;try{const result=await api("/v1/line/admin/bootstrap",{idToken});msg.textContent="管理者登録が完了しました。権限："+result.role+"／状態："+result.status;}catch(e){msg.textContent=e.message;adminButton.disabled=false;}});
 async function loadPending(){refreshPendingButton.disabled=true;pendingList.textContent="申請を確認しています…";try{const result=await api("/v1/line/admin/pending",{idToken});pendingList.replaceChildren();if(!result.requests.length){pendingList.textContent="承認待ちの申請はありません。";return;}for(const item of result.requests){const card=document.createElement("div");card.style.cssText="border:1px solid #d0d5dd;border-radius:10px;padding:12px;margin-top:10px";const info=document.createElement("p");info.textContent=(item.employeeName||item.employeeId)+"（"+item.employeeId+"）／LINE表示名："+(item.displayName||"未設定")+"／申請："+(item.createdAt||"日時不明");card.appendChild(info);for(const decision of ["approve","reject"]){const action=document.createElement("button");action.textContent=decision==="approve"?"承認する":"却下する";action.style.background=decision==="approve"?"#175cd3":"#b42318";action.addEventListener("click",async()=>{const label=decision==="approve"?"承認":"却下";if(!window.confirm((item.employeeName||item.employeeId)+"さんのLINE連携申請を"+label+"しますか？"))return;action.disabled=true;try{const outcome=await api("/v1/line/admin/review",{idToken,linkId:item.linkId,decision});msg.textContent="申請を"+(outcome.status==="有効"?"承認":"却下")+"しました。";await loadPending();}catch(e){msg.textContent=e.message;action.disabled=false;}});card.appendChild(action);}pendingList.appendChild(card);}}catch(e){pendingList.textContent=e.message;}finally{refreshPendingButton.disabled=false;}}
 refreshPendingButton.addEventListener("click",loadPending);
 const dailyForm=document.getElementById("daily-report-form"),dailySubmit=document.getElementById("daily-report-submit"),dailyMessage=document.getElementById("daily-report-message");
+let pendingDailyReportId="";
 dailyForm.querySelector('[name="workDate"]').value=new Date().toLocaleDateString("sv-SE");
-dailyForm.addEventListener("submit",async(event)=>{event.preventDefault();if(!idToken){dailyMessage.textContent="LINEの本人確認ができていません。画面を再読み込みしてください。";return;}dailySubmit.disabled=true;dailyMessage.textContent="保存しています…";const values=Object.fromEntries(new FormData(dailyForm).entries());try{const result=await api("/v1/daily-report",{idToken,...values});dailyMessage.textContent="日報を保存しました。"+result.employeeName+"さん／"+result.workDate;dailyForm.reset();dailyForm.querySelector('[name="workDate"]').value=new Date().toLocaleDateString("sv-SE");dailyForm.querySelector('[name="breakMinutes"]').value="60";dailyForm.querySelector('[name="workerCount"]').value="1";}catch(e){dailyMessage.textContent=e.message;}finally{dailySubmit.disabled=false;}});
+dailyForm.addEventListener("submit",async(event)=>{event.preventDefault();if(!idToken){dailyMessage.textContent="LINEの本人確認ができていません。画面を再読み込みしてください。";return;}dailySubmit.disabled=true;dailyMessage.textContent="保存しています…";const values=Object.fromEntries(new FormData(dailyForm).entries());try{if(!pendingDailyReportId)pendingDailyReportId="DR-"+crypto.randomUUID();const result=await api("/v1/daily-report",{idToken,reportId:pendingDailyReportId,...values});dailyMessage.textContent="日報を保存しました。"+result.employeeName+"さん／"+result.workDate;pendingDailyReportId="";dailyForm.reset();dailyForm.querySelector('[name="workDate"]').value=new Date().toLocaleDateString("sv-SE");dailyForm.querySelector('[name="breakMinutes"]').value="60";dailyForm.querySelector('[name="workerCount"]').value="1";}catch(e){dailyMessage.textContent=e.message;}finally{dailySubmit.disabled=false;}});
 </script></body></html>`;
 }
 
@@ -112,7 +114,7 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
     const response=await fetchImpl(sheetsUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:sheetsToken,action,...fields}),signal:AbortSignal.timeout(12000)});
     if (!response.ok) { const e=new Error("Google Sheets service request failed"); e.statusCode=502; throw e; }
     const result=await response.json();
-    if (!result || result.ok!==true) { const e=new Error("Google Sheets service rejected the request"); e.statusCode=result?.error==="Unauthorized"?502:400; throw e; }
+    if (!result || result.ok!==true) { const e=new Error("Google Sheets service rejected the request"); e.statusCode=result?.error==="Unauthorized" || result?.error==="Internal error"?502:result?.error==="Spreadsheet is not configured"?503:400; throw e; }
     return result;
   }
 
@@ -126,7 +128,7 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
       }
       if (req.method==="GET" && url.pathname==="/health") return json(res,200,{ok:true,service:"ONE JARVIS",status:"running"});
       if (req.method==="GET" && url.pathname==="/health/sheets/metadata") {
-        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        if (!isOwnerAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authorization required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
         const now=Date.now();
         if (now-lastPublicSheetsCheck<30000) return json(res,429,{ok:false,error:"check rate limited"});
         lastPublicSheetsCheck=now;
@@ -163,7 +165,7 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         }
       }
       if (req.method==="GET" && url.pathname==="/health/sheets/record-counts") {
-        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        if (!isOwnerAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authorization required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
         const now=Date.now();
         if (now-lastPublicSheetsCheck<30000) return json(res,429,{ok:false,error:"check rate limited"});
         lastPublicSheetsCheck=now;
@@ -191,7 +193,7 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         }
       }
       if (req.method==="GET" && url.pathname==="/health/sheets/link-status") {
-        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        if (!isOwnerAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authorization required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
         const now=Date.now();
         if (now-lastPublicSheetsCheck<30000) return json(res,429,{ok:false,error:"check rate limited"});
         lastPublicSheetsCheck=now;
@@ -211,7 +213,7 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         }
       }
       if (req.method==="GET" && url.pathname==="/health/sheets") {
-        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        if (!isOwnerAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authorization required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
         const now=Date.now();
         if (now-lastPublicSheetsCheck<30000) return json(res,429,{ok:false,googleSheets:"check rate limited"});
         lastPublicSheetsCheck=now;
@@ -237,13 +239,7 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         const d=await readJson(req);
         const identity=await verifyLineIdToken(d.idToken,lineLoginChannelId,fetchImpl);
         if (url.pathname==="/v1/line/employees") {
-          const listed=await callSheets("listSheets");
-          if (!Array.isArray(listed.sheets)||!listed.sheets.includes("01 従業員")) return json(res,503,{ok:false,error:"Employee sheet is unavailable"});
-          const result=await callSheets("readRows",{sheetName:"01 従業員",startRow:1,numRows:100});
-          const employees=(Array.isArray(result.rows)?result.rows.slice(1):[])
-            .filter(row=>Array.isArray(row)&&String(row[0]||"").trim()&&String(row[1]||"").trim()&&String(row[9]||"有効").trim()!=="無効")
-            .map(row=>({employeeId:String(row[0]).trim(),name:String(row[1]).trim()}));
-          return json(res,200,{ok:true,employees});
+          return json(res,410,{ok:false,error:"従業員一覧の取得は停止しました。会社から通知された従業員IDを入力してください。"});
         }
         const employeeId=typeof d.employeeId==="string"?d.employeeId.trim():"";
         if (!employeeId || employeeId.length>20) return json(res,400,{ok:false,error:"Invalid employee ID"});
@@ -302,9 +298,10 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         if (!ownLink) return json(res,403,{ok:false,error:"有効な従業員LINE連携が必要です。管理者に確認してください。"});
         const employeeId=String(ownLink[employeeCol]||"").trim(),employeeName=String(ownLink[nameCol]||"").trim();
         if (!employeeId||!employeeName) return json(res,403,{ok:false,error:"従業員情報を確認できません。管理者に確認してください。"});
-        const reportId="DR-"+crypto.randomUUID();
+        const reportId=typeof d.reportId==="string"?d.reportId.trim():"DR-"+crypto.randomUUID();
+        if (!/^DR-[0-9a-f-]{36}$/i.test(reportId)) return json(res,400,{ok:false,error:"Invalid daily report ID"});
         const saved=await callSheets("appendDailyReport",{report:{
-          reportId,recordedAt:new Date().toISOString(),workDate,employeeId,employeeName,siteName,workDetails,
+          reportId,recordedAt:new Date().toISOString(),workDate,lineUserId:identity.lineUserId,employeeId,employeeName,siteName,workDetails,
           startTime,endTime,breakMinutes,workerCount,equipment,materials,notes
         }});
         return json(res,201,{ok:true,reportId,employeeName,workDate,saved:saved.saved===true});
@@ -346,8 +343,13 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         return json(res,200,{ok:true,linkId:result.linkId,status:result.status});
       }
       const ownerApprovalRoute=url.pathname==="/v1/approvals" || /^\/v1\/approvals\/[0-9a-f-]{36}\/decision$/.test(url.pathname);
-      if (!ownerApprovalRoute && !isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+      const ownerContentApprovalRoute =
+        (req.method==="GET" && url.pathname==="/v1/content/approvals") ||
+        (req.method==="POST" && url.pathname.startsWith("/v1/content/videos/") && (url.pathname.endsWith("/review") || url.pathname.endsWith("/action-approval")));
+      const ownerDataRoute=url.pathname==="/health/sheets/metadata" || url.pathname==="/health/sheets/record-counts" || url.pathname==="/health/sheets/link-status" || url.pathname==="/health/sheets" || url.pathname==="/v1/sheets/list" || url.pathname==="/v1/sheets/read" || url.pathname==="/v1/sheets/append" || url.pathname==="/v1/company/ask" || url.pathname==="/v1/company/overview" || url.pathname==="/v1/company/daily-reports" || url.pathname==="/v1/company/employees" || url.pathname==="/v1/company/analytics" || url.pathname==="/v1/company/financials";
+      if (!ownerApprovalRoute && !ownerContentApprovalRoute && !ownerDataRoute && !isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
       if (req.method==="POST" && url.pathname==="/v1/company/ask") {
+        if (!isOwnerAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authorization required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
         if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
         if (!jobStore) return json(res,503,{ok:false,error:"Persistent job storage is not configured"});
         const d=await readJson(req);
@@ -380,6 +382,7 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         return json(res,created.created?201:200,{ok:true,created:created.created,job:created.job});
       }
       if (url.pathname==="/v1/company/overview" || url.pathname==="/v1/company/daily-reports" || url.pathname==="/v1/company/employees" || url.pathname==="/v1/company/analytics" || url.pathname==="/v1/company/financials") {
+        if (!isOwnerAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authorization required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
         if (req.method!=="GET") return json(res,405,{ok:false,error:"Method Not Allowed"},{Allow:"GET"});
         if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         try {
@@ -660,7 +663,8 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         return json(res,200,{ok:true,videoId:video.id,scriptMetrics:createScriptMetrics(video.script||"")});
       }
       if (url.pathname.startsWith("/v1/content/batches") || url.pathname.startsWith("/v1/content/approvals") || url.pathname.startsWith("/v1/content/videos/")) {
-        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        if (ownerContentApprovalRoute && !isOwnerAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authentication required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
+        if (!ownerContentApprovalRoute && !isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         if (!videoBatchStore) return json(res,503,{ok:false,error:"Persistent video batch storage is not configured"});
         if (req.method==="GET" && url.pathname==="/v1/content/batches") {
           const limit=Number(url.searchParams.get("limit")||200),channelId=url.searchParams.get("channelId")||undefined,status=url.searchParams.get("status")||undefined;
@@ -738,17 +742,17 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         return json(res,200,{ok:true,system:"ONE JARVIS",version:"1.3.0",mode:"read-only",googleSheetsConfigured:Boolean(sheetsUrl&&sheetsToken),jobQueueConfigured:Boolean(jobStore),workerEnabled:Boolean(worker),contentAutoplanEnabled:Boolean(worker&&process.env.JARVIS_CONTENT_AUTOPLAN_ENABLED==="true"),subsidyAutomonitorEnabled:Boolean(worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"),approvalsConfigured:Boolean(approvalStore)});
       }
       if (req.method==="GET" && url.pathname==="/v1/sheets/list") {
-        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        if (!isOwnerAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authorization required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
         const r=await callSheets("listSheets"); return json(res,200,{ok:true,sheets:r.sheets});
       }
       if (req.method==="GET" && url.pathname==="/v1/sheets/read") {
-        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        if (!isOwnerAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authorization required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
         const sheetName=url.searchParams.get("sheetName")||"", startRow=Number(url.searchParams.get("startRow")||1), numRows=Number(url.searchParams.get("numRows")||20);
         if (!validSheetName(sheetName) || !Number.isInteger(startRow) || startRow<1 || !Number.isInteger(numRows) || numRows<1 || numRows>100) return json(res,400,{ok:false,error:"Invalid read parameters"});
         const r=await callSheets("readRows",{sheetName,startRow,numRows}); return json(res,200,{ok:true,rows:r.rows});
       }
       if (req.method==="POST" && url.pathname==="/v1/sheets/append") {
-        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        if (!isOwnerAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authorization required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
         if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
         const d=await readJson(req);
         if (!validSheetName(d.sheetName)||!Array.isArray(d.rows)||d.rows.length<1||d.rows.length>50||!d.rows.every(row=>Array.isArray(row)&&row.length>=1&&row.length<=20&&row.every(v=>["string","number","boolean"].includes(typeof v)||v===null))) return json(res,400,{ok:false,error:"Invalid append payload"});

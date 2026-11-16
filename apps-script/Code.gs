@@ -120,6 +120,13 @@ function bootstrapAdmin(ss, data, props) {
 
     const rowNumber = matches[0];
     const linkId = String(sheet.getRange(rowNumber, idCol + 1).getValue() || "");
+    const employeeNameCol = headers.indexOf("氏名");
+    if (employeeNameCol < 0) return output({ ok: false, error: "Invalid LINE sheet headers" });
+    const pendingEmployeeName = String(sheet.getRange(rowNumber, employeeNameCol + 1).getValue() || "").trim();
+    const employee = findEmployeeRecord(ss, employeeId);
+    if (!employee || employee.name !== pendingEmployeeName) {
+      return output({ ok: false, error: "Initial administrator identity does not match the employee register" });
+    }
     appendAuditEvent(ss, [new Date(), lineUserId, "初回管理者登録", linkId, employeeId, "確認待ち", "管理者/有効", "開始"]);
     sheet.getRange(rowNumber, roleCol + 1).setValue("管理者");
     sheet.getRange(rowNumber, statusCol + 1).setValue("有効");
@@ -183,6 +190,19 @@ function reviewLineLink(ss, data) {
     const currentStatus = String(sheet.getRange(rowNumber, statusCol + 1).getValue()).trim();
     if (currentStatus !== "確認待ち") return output({ ok: false, error: "Request is not pending" });
     const employeeId = String(sheet.getRange(rowNumber, employeeCol + 1).getValue() || "").trim();
+    const employeeNameCol = headers.indexOf("氏名");
+    if (employeeNameCol < 0) return output({ ok: false, error: "Invalid LINE sheet headers" });
+    const employeeName = String(sheet.getRange(rowNumber, employeeNameCol + 1).getValue() || "").trim();
+    if (decision === "approve") {
+      const employee = findEmployeeRecord(ss, employeeId);
+      if (!employee || employee.name !== employeeName) return output({ ok: false, error: "Employee identity does not match the employee register" });
+      const targetLineId = String(sheet.getRange(rowNumber, lineCol + 1).getValue() || "").trim();
+      const duplicateActive = values.slice(1).some((row, index) => index + 2 !== rowNumber &&
+        String(row[statusCol] || "").trim() === "有効" &&
+        (String(row[lineCol] || "").trim() === targetLineId ||
+         String(row[employeeCol] || "").trim() === employeeId));
+      if (duplicateActive) return output({ ok: false, error: "An active LINE link already exists for this user or employee" });
+    }
     const newStatus = decision === "approve" ? "有効" : "却下";
     const action = decision === "approve" ? "LINE連携承認" : "LINE連携却下";
 
@@ -229,15 +249,53 @@ const DAILY_REPORT_HEADERS = [
   "開始時刻", "終了時刻", "休憩（分）", "作業人数", "使用機械・車両", "使用材料", "連絡事項"
 ];
 
+function findActiveLineLink(ss, lineUserId, employeeId, employeeName) {
+  const sheet = ss.getSheetByName(LINE_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return false;
+  const lastColumn = sheet.getLastColumn();
+  const headers = sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0].map(v => String(v).trim());
+  const lineCol = headers.indexOf("LINEユーザーID");
+  const employeeCol = headers.indexOf("従業員ID");
+  const nameCol = headers.indexOf("氏名");
+  const statusCol = headers.indexOf("状態");
+  if ([lineCol, employeeCol, nameCol, statusCol].some(index => index < 0)) return false;
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, lastColumn).getDisplayValues();
+  const matches = rows.filter(row => String(row[lineCol] || "").trim() === lineUserId &&
+    String(row[employeeCol] || "").trim() === employeeId &&
+    String(row[nameCol] || "").trim() === employeeName &&
+    String(row[statusCol] || "").trim() === "有効");
+  return matches.length === 1;
+}
+
 function appendDailyReport(ss, data) {
   const report = data.report || {};
-  const required = ["reportId","recordedAt","workDate","employeeId","employeeName","siteName","workDetails","startTime","endTime"];
-  if (required.some(key => !String(report[key] || "").trim())) {
+  const required = ["reportId","recordedAt","workDate","lineUserId","employeeId","employeeName","siteName","workDetails","startTime","endTime"];
+  if (required.some(key => !String(report[key] || "").trim()) ||
+      !/^DR-[0-9a-f-]{36}$/i.test(String(report.reportId || "")) ||
+      !/^U[0-9a-f]{32}$/i.test(String(report.lineUserId || "")) ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(String(report.workDate || "")) ||
+      !Number.isFinite(Date.parse(String(report.workDate || "") + "T00:00:00Z")) ||
+      new Date(String(report.workDate || "") + "T00:00:00Z").toISOString().slice(0, 10) !== String(report.workDate || "") ||
+      !Number.isFinite(Date.parse(String(report.recordedAt || ""))) ||
+      !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(report.startTime || "")) ||
+      !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(report.endTime || "")) ||
+      !Number.isInteger(Number(report.breakMinutes)) || Number(report.breakMinutes) < 0 || Number(report.breakMinutes) > 600 ||
+      !Number.isInteger(Number(report.workerCount)) || Number(report.workerCount) < 1 || Number(report.workerCount) > 100 ||
+      String(report.siteName || "").length > 100 || String(report.workDetails || "").length > 2000 ||
+      String(report.equipment || "").length > 300 || String(report.materials || "").length > 500 ||
+      String(report.notes || "").length > 1000) {
     return output({ ok: false, error: "Invalid daily report" });
   }
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    const employee = findEmployeeRecord(ss, String(report.employeeId).trim());
+    if (!employee || employee.name !== String(report.employeeName).trim()) {
+      return output({ ok: false, error: "Daily report employee does not match the employee register" });
+    }
+    if (!findActiveLineLink(ss, String(report.lineUserId).trim(), String(report.employeeId).trim(), employee.name)) {
+      return output({ ok: false, error: "An active LINE link for this employee is required" });
+    }
     let sheet = ss.getSheetByName(DAILY_REPORT_SHEET);
     if (!sheet) {
       sheet = ss.insertSheet(DAILY_REPORT_SHEET);
@@ -266,6 +324,29 @@ function appendDailyReport(ss, data) {
 }
 
 /**
+ * 従業員台帳を唯一の正とし、IDと氏名の組み合わせを検証する。
+ */
+function findEmployeeRecord(ss, employeeId) {
+  if (!/^[A-Z]{2,3}[0-9]{3,6}$/.test(String(employeeId || ""))) return null;
+  const sheet = ss.getSheetByName(EMPLOYEE_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return null;
+  const lastColumn = sheet.getLastColumn();
+  if (lastColumn < 2) return null;
+  const headers = sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0].map(v => String(v).trim());
+  const idCol = headers.indexOf("従業員ID");
+  const nameCol = headers.indexOf("氏名");
+  const statusCol = headers.indexOf("状態");
+  if (idCol < 0 || nameCol < 0 || statusCol < 0) return null;
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, lastColumn).getDisplayValues();
+  const matches = rows.filter(row => String(row[idCol] || "").trim() === employeeId);
+  if (matches.length !== 1) return null;
+  const row = matches[0];
+  if (String(row[statusCol] || "").trim() !== "有効") return null;
+  const name = String(row[nameCol] || "").trim();
+  return name ? { employeeId, name } : null;
+}
+
+/**
  * LINE連携申請専用の追記処理。権限・状態は呼び出し側から受け取らず固定する。
  */
 function appendLineLink(ss, data) {
@@ -288,6 +369,10 @@ function appendLineLink(ss, data) {
     const required = ["連携ID", "LINEユーザーID", "LINE表示名", "従業員ID", "氏名", "権限", "状態"];
     const columns = Object.fromEntries(required.map(name => [name, headers.indexOf(name)]));
     if (required.some(name => columns[name] < 0)) return output({ ok: false, error: "Invalid LINE sheet headers" });
+    const employee = findEmployeeRecord(ss, employeeId);
+    if (!employee || employee.name !== employeeName) {
+      return output({ ok: false, error: "Employee ID and name must match the employee register" });
+    }
     const lastRow = sheet.getLastRow();
     if (lastRow >= 2) {
       const rows = sheet.getRange(2, 1, lastRow - 1, lastColumn).getDisplayValues();
@@ -305,7 +390,7 @@ function appendLineLink(ss, data) {
     row[columns["状態"]] = "確認待ち";
     const timestampColumn = headers.indexOf("申請日時");
     if (timestampColumn >= 0) row[timestampColumn] = new Date();
-    sheet.getRange(lastRow + 1, 1, 1, lastColumn).setValues([row]);
+    sheet.getRange(lastRow + 1, 1, 1, lastColumn).setValues([row.map(value => typeof value === "string" && /^\s*=/.test(value) ? "'" + value : value)]);
     return output({ ok: true, appended: 1, status: "確認待ち" });
   } finally { lock.releaseLock(); }
 }

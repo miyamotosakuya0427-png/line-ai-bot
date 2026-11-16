@@ -14,6 +14,7 @@ function makeSheet(initialRows) {
       return { getValues: () => rows.map(row => row.slice()) };
     },
     getLastRow() { return rows.length; },
+    getLastColumn() { return Math.max(0, ...rows.map(row => row.length)); },
     getRange(row, column, numRows = 1, numColumns = 1) {
       return {
         getValue() { return rows[row - 1]?.[column - 1] ?? ""; },
@@ -44,7 +45,16 @@ function makeSheet(initialRows) {
 }
 
 function makeSpreadsheet(lineRows) {
-  const sheets = { "13 LINE連携": makeSheet(lineRows) };
+  const employeeHeaders = ["従業員ID", "氏名", "LINE表示名", "職種", "役職", "単価", "電話番号", "入社日", "登録日", "状態", "備考"];
+  const sheets = {
+    "13 LINE連携": makeSheet(lineRows),
+    "01 従業員": makeSheet([
+      employeeHeaders,
+      ["EMP001", "従業員A", "", "", "", "", "", "", "", "有効", ""],
+      ["EMP002", "退職済み", "", "", "", "", "", "", "", "無効", ""],
+      ["EMP003", "宮本朔也", "", "", "", "", "", "", "", "有効", ""]
+    ])
+  };
   return {
     sheets,
     getSheetByName(name) { return sheets[name] || null; },
@@ -63,6 +73,7 @@ function loadAppsScript() {
     LockService: {
       getScriptLock: () => ({ waitLock() {}, releaseLock() {} })
     },
+    Utilities: { getUuid: () => "test-generated-uuid" },
     ContentService: {
       MimeType: { JSON: "application/json" },
       createTextOutput(content) {
@@ -74,7 +85,7 @@ function loadAppsScript() {
   return context;
 }
 
-const headers = ["連携ID", "LINEユーザーID", "LINE表示名", "従業員ID", "従業員名", "グループID", "権限", "状態"];
+const headers = ["連携ID", "LINEユーザーID", "LINE表示名", "従業員ID", "氏名", "グループID", "権限", "状態"];
 const adminId = "U" + "a".repeat(32);
 const applicantId = "U" + "b".repeat(32);
 
@@ -178,3 +189,98 @@ test("initial admin bootstrap rejects a LINE identity that differs from the allo
   assert.equal(response.error, "Initial administrator is not authorized");
   assert.equal(ss.sheets["13 LINE連携"].rows[1][7], "確認待ち");
 });
+
+test("LINE link application requires a matching active employee and stores fixed general/pending state", () => {
+  const app = loadAppsScript();
+  const ss = makeSpreadsheet([headers]);
+  const good = JSON.parse(app.appendLineLink(ss, {
+    lineUserId: applicantId, displayName: "=1+1", employeeId: "EMP001", employeeName: "従業員A"
+  }).content);
+  assert.equal(good.ok, true);
+  const row = ss.sheets["13 LINE連携"].rows[1];
+  assert.equal(row[2], "'=1+1");
+  assert.equal(row[6], "一般");
+  assert.equal(row[7], "確認待ち");
+  const mismatch = JSON.parse(app.appendLineLink(ss, {
+    lineUserId: adminId, displayName: "別申請者", employeeId: "EMP001", employeeName: "別人"
+  }).content);
+  assert.equal(mismatch.ok, false);
+  assert.match(mismatch.error, /employee register/);
+  const duplicate = JSON.parse(app.appendLineLink(ss, {
+    lineUserId: adminId, displayName: "別LINE", employeeId: "EMP001", employeeName: "従業員A"
+  }).content);
+  assert.equal(duplicate.ok, false);
+  assert.match(duplicate.error, /already has a link request/);
+  const inactive = JSON.parse(app.appendLineLink(ss, {
+    lineUserId: adminId, displayName: "退職者", employeeId: "EMP002", employeeName: "退職済み"
+  }).content);
+  assert.equal(inactive.ok, false);
+  assert.match(inactive.error, /employee register/);
+});
+
+test("administrator approval rejects a pending row whose employee identity no longer matches", () => {
+  const app = loadAppsScript();
+  const ss = makeSpreadsheet([
+    headers,
+    ["ADMIN-1", adminId, "管理者", "EMP003", "宮本朔也", "", "管理者", "有効"],
+    ["PENDING-1", applicantId, "申請者", "EMP001", "別人", "", "一般", "確認待ち"]
+  ]);
+  const response = JSON.parse(app.reviewLineLink(ss, {
+    adminLineUserId: adminId, linkId: "PENDING-1", decision: "approve"
+  }).content);
+  assert.equal(response.ok, false);
+  assert.match(response.error, /does not match/);
+  assert.equal(ss.sheets["13 LINE連携"].rows[2][7], "確認待ち");
+});
+
+test("administrator can reject an invalid pending identity without approving it", () => {
+  const app = loadAppsScript();
+  const ss = makeSpreadsheet([
+    headers,
+    ["ADMIN-1", adminId, "管理者", "EMP003", "宮本朔也", "", "管理者", "有効"],
+    ["PENDING-2", applicantId, "申請者", "EMP001", "別人", "", "一般", "確認待ち"]
+  ]);
+  const response = JSON.parse(app.reviewLineLink(ss, {
+    adminLineUserId: adminId, linkId: "PENDING-2", decision: "reject"
+  }).content);
+  assert.equal(response.ok, true);
+  assert.equal(response.status, "却下");
+  assert.equal(ss.sheets["13 LINE連携"].rows[2][7], "却下");
+});
+
+test("daily report write revalidates active LINE identity and employee register", () => {
+  const app = loadAppsScript();
+  const ss = makeSpreadsheet([
+    headers,
+    ["LINK-1", applicantId, "申請者", "EMP001", "従業員A", "", "一般", "有効"]
+  ]);
+  const report = {
+    reportId: "DR-123e4567-e89b-12d3-a456-426614174000",
+    recordedAt: "2026-11-17T10:00:00.000Z",
+    workDate: "2026-11-17",
+    lineUserId: applicantId,
+    employeeId: "EMP001",
+    employeeName: "従業員A",
+    siteName: "岡山現場",
+    workDetails: "掘削作業",
+    startTime: "08:00",
+    endTime: "17:00",
+    breakMinutes: 60,
+    workerCount: 3,
+    equipment: "バックホウ",
+    materials: "RC30",
+    notes: ""
+  };
+  const saved = JSON.parse(app.appendDailyReport(ss, { report }).content);
+  assert.equal(saved.ok, true);
+  assert.equal(saved.saved, true);
+  const duplicate = JSON.parse(app.appendDailyReport(ss, { report }).content);
+  assert.equal(duplicate.duplicate, true);
+  const invalidDate = JSON.parse(app.appendDailyReport(ss, { report: { ...report, reportId: "DR-223e4567-e89b-12d3-a456-426614174000", workDate: "2026-02-31" } }).content);
+  assert.equal(invalidDate.ok, false);
+  assert.match(invalidDate.error, /Invalid daily report/);
+  const forged = JSON.parse(app.appendDailyReport(ss, { report: { ...report, lineUserId: adminId } }).content);
+  assert.equal(forged.ok, false);
+  assert.match(forged.error, /active LINE link/);
+});
+

@@ -31,7 +31,7 @@ let server;
 let base;
 
 test.before(async () => {
-  server = createServer({ token });
+  server = createServer({ ownerToken: token, token });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -124,13 +124,16 @@ test("unknown routes are not found", async () => {
 
 
 test("LIFF page is served without exposing server credentials", async () => {
-  const app=createServer({token, liffId:"1234567890-AbCdEfGh"});
+  const app=createServer({ ownerToken: token,token, liffId:"1234567890-AbCdEfGh"});
   await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
   try {
     const response=await fetch(`http://127.0.0.1:${app.address().port}/line-link`);
     const html=await response.text();
     assert.equal(response.status,200);
     assert.match(html,/株式会社One LINE連携/);
+    assert.match(html,/employee-id/);
+    assert.match(html,/pendingDailyReportId/);
+    assert.doesNotMatch(html,/\/v1\/line\/employees/);
     assert.match(html,/1234567890-AbCdEfGh/);
     assert.doesNotMatch(html,/JARVIS_API_TOKEN|JARVIS_SHEETS_TOKEN/);
   } finally { await new Promise(resolve=>app.close(resolve)); }
@@ -138,7 +141,7 @@ test("LIFF page is served without exposing server credentials", async () => {
 
 test("LINE linking verifies ID token and stores only a pending approval", async () => {
   const sent=[];
-  const app=createServer({
+  const app=createServer({ ownerToken: token,
     token,
     lineLoginChannelId:"1234567890",
     sheetsUrl:"https://script.google.com/macros/s/test-id/exec",
@@ -179,7 +182,7 @@ test("LINE linking verifies ID token and stores only a pending approval", async 
 
 test("daily report requires an active LINE link and appends a validated report", async () => {
   const sent=[];
-  const app=createServer({
+  const app=createServer({ ownerToken: token,
     token,lineLoginChannelId:"1234567890",
     sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"r".repeat(128),
     fetchImpl:async(url,options)=>{
@@ -197,19 +200,21 @@ test("daily report requires an active LINE link and appends a validated report",
   try {
     const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/daily-report`,{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({idToken:"verified-test-token-123456",workDate:"2026-11-15",siteName:"岡山現場",workDetails:"掘削作業",startTime:"08:00",endTime:"17:00",breakMinutes:"60",workerCount:"3",equipment:"バックホウ",materials:"RC30",notes:""})
+      body:JSON.stringify({idToken:"verified-test-token-123456",reportId:"DR-123e4567-e89b-12d3-a456-426614174000",workDate:"2026-11-15",siteName:"岡山現場",workDetails:"掘削作業",startTime:"08:00",endTime:"17:00",breakMinutes:"60",workerCount:"3",equipment:"バックホウ",materials:"RC30",notes:""})
     });
     const result=await response.json();
     assert.equal(response.status,201);
     assert.equal(result.employeeName,"宮本朔也");
     const write=sent.find(x=>x.action==="appendDailyReport");
     assert.equal(write.report.employeeId,"EMP003");
+    assert.equal(write.report.reportId,"DR-123e4567-e89b-12d3-a456-426614174000");
+    assert.equal(write.report.lineUserId,"U"+"a".repeat(32));
     assert.equal(write.report.workDetails,"掘削作業");
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
 
 test("LINE linking rejects an unverified ID token", async () => {
-  const app=createServer({
+  const app=createServer({ ownerToken: token,
     token,lineLoginChannelId:"1234567890",
     fetchImpl:async()=>({ok:false,json:async()=>({})})
   });
@@ -223,19 +228,40 @@ test("LINE linking rejects an unverified ID token", async () => {
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
 
-test("LINE employee list verifies ID token without the JARVIS bearer token", async () => {
+test("LINE ID token verification rejects wrong issuer, audience, and expired claims", async () => {
+  let claims={iss:"https://access.line.me",aud:"1234567890",sub:"U"+"c".repeat(32),exp:Math.floor(Date.now()/1000)+300};
   const app=createServer({
     token,
     lineLoginChannelId:"1234567890",
+    fetchImpl:async()=>({ok:true,json:async()=>({...claims})})
+  });
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  try {
+    for (const patch of [
+      {iss:"https://attacker.example"},
+      {aud:"9999999999"},
+      {exp:Math.floor(Date.now()/1000)-1}
+    ]) {
+      claims={iss:"https://access.line.me",aud:"1234567890",sub:"U"+"c".repeat(32),exp:Math.floor(Date.now()/1000)+300,...patch};
+      const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/line/link`,{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({idToken:"untrusted-test-id-token",employeeId:"EMP001"})
+      });
+      assert.equal(response.status,401);
+    }
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
+
+test("LINE employee directory endpoint is disabled to prevent employee enumeration", async () => {
+  let sheetsCalls=0;
+  const app=createServer({ ownerToken: token, token,
+    lineLoginChannelId:"1234567890",
     sheetsUrl:"https://script.google.com/macros/s/test-id/exec",
     sheetsToken:"h".repeat(128),
-    fetchImpl:async(url,options)=>{
-      if(url==="https://api.line.me/oauth2/v2.1/verify") {
-        return {ok:true,json:async()=>({iss:"https://access.line.me",aud:"1234567890",sub:"U"+"b".repeat(32),exp:Math.floor(Date.now()/1000)+300})};
-      }
-      const body=JSON.parse(options.body);
-      if(body.action==="listSheets") return {ok:true,json:async()=>({ok:true,sheets:["01 従業員"]})};
-      return {ok:true,json:async()=>({ok:true,rows:[["従業員ID","氏名","","","","","","","","状態"],["EMP001","テスト従業員","","","","","","","","有効"],["EMP002","無効従業員","","","","","","","","無効"]]})};
+    fetchImpl:async(url)=> {
+      if(url==="https://api.line.me/oauth2/v2.1/verify") return {ok:true,json:async()=>({iss:"https://access.line.me",aud:"1234567890",sub:"U"+"b".repeat(32),exp:Math.floor(Date.now()/1000)+300})};
+      sheetsCalls+=1;
+      return {ok:true,json:async()=>({ok:true,rows:[]})};
     }
   });
   await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
@@ -244,14 +270,14 @@ test("LINE employee list verifies ID token without the JARVIS bearer token", asy
       method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({idToken:"verified-test-token-1"})
     });
-    assert.equal(response.status,200);
-    assert.deepEqual((await response.json()).employees,[{employeeId:"EMP001",name:"テスト従業員"}]);
+    assert.equal(response.status,410);
+    assert.equal(sheetsCalls,0);
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
 
 test("admin bootstrap and review routes pass only LINE-verified identities to Apps Script", async () => {
   const sent=[];
-  const app=createServer({
+  const app=createServer({ ownerToken: token,
     token,
     lineLoginChannelId:"1234567890",
     sheetsUrl:"https://script.google.com/macros/s/test-id/exec",
@@ -300,7 +326,7 @@ test("admin bootstrap and review routes pass only LINE-verified identities to Ap
 });
 
 test("admin bootstrap rejects an unverified LINE identity", async () => {
-  const app=createServer({
+  const app=createServer({ ownerToken: token,
     token,lineLoginChannelId:"1234567890",
     fetchImpl:async()=>({ok:false,json:async()=>({})})
   });
@@ -317,7 +343,7 @@ test("admin bootstrap rejects an unverified LINE identity", async () => {
 test("Google Sheets list route forwards authenticated request to Apps Script", async () => {
   let sent;
   const sheetsUrl = "https://script.google.com/macros/s/test-id/exec";
-  const app = createServer({
+  const app = createServer({ ownerToken: token,
     token,
     sheetsUrl,
     sheetsToken: "a".repeat(128),
@@ -341,8 +367,74 @@ test("Google Sheets list route forwards authenticated request to Apps Script", a
   }
 });
 
+test("raw Google Sheets reads require the separate owner token", async () => {
+  let calls = 0;
+  const separateOwnerToken = "o".repeat(64);
+  const app = createServer({
+    token,
+    ownerToken: separateOwnerToken,
+    sheetsUrl: "https://script.google.com/macros/s/test-id/exec",
+    sheetsToken: "a".repeat(128),
+    fetchImpl: async () => { calls += 1; return { ok:true, json:async()=>({ok:true,rows:[["private"]]}) }; }
+  });
+  await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
+  try {
+    const url = `http://127.0.0.1:${app.address().port}/v1/sheets/read?sheetName=01%20%E5%BE%93%E6%A5%AD%E5%93%A1`;
+    const denied = await fetch(url, { headers:{Authorization:`Bearer ${token}`} });
+    assert.equal(denied.status, 401);
+    assert.equal(calls, 0);
+    const allowed = await fetch(url, { headers:{Authorization:"Bearer " + separateOwnerToken} });
+    assert.equal(allowed.status, 200);
+    assert.equal(calls, 1);
+  } finally { await new Promise(resolve => app.close(resolve)); }
+});
+
+test("Sheets diagnostics accept the owner token without requiring the general API token", async () => {
+  let calls = 0;
+  const app = createServer({
+    token: "g".repeat(64),
+    ownerToken: "o".repeat(64),
+    sheetsUrl: "https://script.google.com/macros/s/test-id/exec",
+    sheetsToken: "s".repeat(128),
+    fetchImpl: async (_url, options) => {
+      calls += 1;
+      const request = JSON.parse(options.body);
+      if (request.action === "listSheets") return { ok:true, json:async()=>({ok:true,sheets:["03 日報","01 従業員","13 LINE連携"]}) };
+      assert.equal(request.action, "readRows");
+      return { ok:true, json:async()=>({ok:true,rows:[["見出し"]]}) };
+    }
+  });
+  await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${app.address().port}/health/sheets/metadata`, {
+      headers:{Authorization:"Bearer " + "o".repeat(64)}
+    });
+    assert.equal(response.status, 200);
+    assert.equal(calls, 4);
+  } finally { await new Promise(resolve => app.close(resolve)); }
+});
+
+test("company financial and employee records require owner authorization", async () => {
+  let calls = 0;
+  const app = createServer({ ownerToken: token,
+    token,
+    ownerToken: "o".repeat(64),
+    sheetsUrl: "https://script.google.com/macros/s/test-id/exec",
+    sheetsToken: "b".repeat(128),
+    fetchImpl: async () => { calls += 1; return { ok:true, json:async()=>({ok:true,sheets:[]}) }; }
+  });
+  await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
+  try {
+    for (const route of ["/v1/company/employees", "/v1/company/financials"]) {
+      const denied = await fetch(`http://127.0.0.1:${app.address().port}${route}`, { headers:{Authorization:`Bearer ${token}`} });
+      assert.equal(denied.status, 401);
+    }
+    assert.equal(calls, 0);
+  } finally { await new Promise(resolve => app.close(resolve)); }
+});
+
 test("Google Sheets routes reject invalid sheet names", async () => {
-  const app = createServer({ token, sheetsUrl: "https://script.google.com/macros/s/test-id/exec", sheetsToken: "b".repeat(128) });
+  const app = createServer({ ownerToken: token, token, sheetsUrl: "https://script.google.com/macros/s/test-id/exec", sheetsToken: "b".repeat(128) });
   await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
   try {
     const response = await fetch(`http://127.0.0.1:${app.address().port}/v1/sheets/read?sheetName=`, {
@@ -357,7 +449,7 @@ test("Google Sheets routes reject invalid sheet names", async () => {
 
 test("protected Sheets health check verifies Apps Script without exposing secrets", async () => {
   const sent = [];
-  const app = createServer({
+  const app = createServer({ ownerToken: token,
     token,
     sheetsUrl: "https://script.google.com/macros/s/test-id/exec",
     sheetsToken: "c".repeat(128),
@@ -386,7 +478,7 @@ test("protected Sheets health check verifies Apps Script without exposing secret
 
 test("public metadata check includes employee sheet headers without exposing row data", async () => {
   const sent = [];
-  const app = createServer({
+  const app = createServer({ ownerToken: token,
     token,
     sheetsUrl: "https://script.google.com/macros/s/test-id/exec",
     sheetsToken: "d".repeat(128),
@@ -421,7 +513,7 @@ test("public metadata check includes employee sheet headers without exposing row
 
 test("metadata check includes LINE link sheet headers only", async () => {
   const sent = [];
-  const app = createServer({
+  const app = createServer({ ownerToken: token,
     token,
     sheetsUrl: "https://script.google.com/macros/s/test-id/exec",
     sheetsToken: "e".repeat(128),
@@ -451,7 +543,7 @@ test("metadata check includes LINE link sheet headers only", async () => {
 });
 
 test("public LINE link status reports counts without exposing row values", async () => {
-  const app = createServer({
+  const app = createServer({ ownerToken: token,
     token,
     sheetsUrl: "https://script.google.com/macros/s/test-id/exec",
     sheetsToken: "f".repeat(128),
@@ -480,7 +572,7 @@ test("public LINE link status reports counts without exposing row values", async
 
 
 test("public record counts report employee and daily report totals without exposing values", async () => {
-  const app = createServer({
+  const app = createServer({ ownerToken: token,
     token,
     sheetsUrl: "https://script.google.com/macros/s/test-id/exec",
     sheetsToken: "g".repeat(128),
@@ -520,7 +612,7 @@ test("public record counts report employee and daily report totals without expos
 test("LINE admin pending endpoint only exposes pending requests to an active verified admin", async () => {
   const adminId="U"+"a".repeat(32);
   const pendingId="U"+"b".repeat(32);
-  const app=createServer({
+  const app=createServer({ ownerToken: token,
     token,
     lineLoginChannelId:"1234567890",
     sheetsUrl:"https://script.google.com/macros/s/test-id/exec",
@@ -559,7 +651,7 @@ test("job API requires configured persistent storage and supports authenticated 
   const { createJobStore }=require("./core/job-store");
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-api-jobs-"));
   const store=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
-  const app=createServer({token,jobStore:store});
+  const app=createServer({ ownerToken: token,token,jobStore:store});
   await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
   const root=`http://127.0.0.1:${app.address().port}`;
   const headers={Authorization:`Bearer ${token}`,"Content-Type":"application/json"};
@@ -583,7 +675,7 @@ test("job API requires configured persistent storage and supports authenticated 
 });
 
 test("job API stays unavailable when persistent storage is not configured", async () => {
-  const app=createServer({token});
+  const app=createServer({ ownerToken: token,token});
   await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
   try {
     const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/jobs`,{headers:{Authorization:`Bearer ${token}`}});
@@ -599,7 +691,7 @@ test("end-to-end job API queues, executes, and returns a persisted assistant ans
   const store=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
   const worker=createWorker({store,handlers:{"assistant.request":async payload=>({answer:"確認結果："+payload.request})}});
   await worker.start();
-  const app=createServer({token,jobStore:store,worker});
+  const app=createServer({ ownerToken: token,token,jobStore:store,worker});
   await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
   const root=`http://127.0.0.1:${app.address().port}`;
   const headers={Authorization:`Bearer ${token}`,"Content-Type":"application/json"};
@@ -626,7 +718,7 @@ test("end-to-end job API queues, executes, and returns a persisted assistant ans
 });
 
 test("JARVIS dashboard is served with restrictive security headers and no server token", async () => {
-  const app=createServer({token});
+  const app=createServer({ ownerToken: token,token});
   await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
   try {
     const response=await fetch(`http://127.0.0.1:${app.address().port}/`);
@@ -653,7 +745,7 @@ test("video batch plan endpoint queues an idempotent ONE CONTENT draft task with
   const contentHandler=async payload=>({draft:true,videoId:payload.videoId,request:payload.request,answer:"台本初稿："+payload.request});
   const worker=createWorker({store:jobStore,handlers:{"department.content":createVideoBatchContentHandler({contentHandler,videoBatchStore})}});
   await worker.start();
-  const app=createServer({token,jobStore,videoBatchStore,worker});
+  const app=createServer({ ownerToken: token,token,jobStore,videoBatchStore,worker});
   await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
   const root="http://127.0.0.1:"+app.address().port;
   const headers={Authorization:"Bearer "+token,"Content-Type":"application/json"};
@@ -719,7 +811,9 @@ test("video batch APIs require auth, persist 100-item queues, and expose owner r
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-video-api-"));
   t.after(()=>fs.rm(dir,{recursive:true,force:true}));
   const videoBatchStore=createVideoBatchStore({filePath:path.join(dir,"videos.jsonl")});
-  const app=createServer({token,videoBatchStore});
+  const ownerToken="o".repeat(64);
+  const ownerHeaders={Authorization:"Bearer "+ownerToken,"Content-Type":"application/json"};
+  const app=createServer({token,ownerToken,videoBatchStore});
   await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
   const root="http://127.0.0.1:"+app.address().port;
   try {
@@ -737,19 +831,40 @@ test("video batch APIs require auth, persist 100-item queues, and expose owner r
     const listed=await fetch(root+"/v1/content/batches?limit=200",{headers:{Authorization:"Bearer "+token}});
     assert.equal((await listed.json()).summary.total,100);
     await advanceToOwnerReview(videoBatchStore,"V01",{fromSourceQa:true});
-    const inbox=await fetch(root+"/v1/content/approvals",{headers:{Authorization:"Bearer "+token}});
+    const regularInbox=await fetch(root+"/v1/content/approvals",{headers:{Authorization:"Bearer "+token}});
+    assert.equal(regularInbox.status,401);
+    const inbox=await fetch(root+"/v1/content/approvals",{headers:{Authorization:"Bearer "+ownerToken}});
     assert.equal((await inbox.json()).pending.length,1);
     await advanceToOwnerReview(videoBatchStore,"V02");
     await videoBatchStore.decideReview("V02",{decision:"hold",note:"確認待ち",actor:"owner"});
-    const heldInbox=await fetch(root+"/v1/content/approvals",{headers:{Authorization:"Bearer "+token}});
+    const heldInbox=await fetch(root+"/v1/content/approvals",{headers:{Authorization:"Bearer "+ownerToken}});
     assert.equal((await heldInbox.json()).pending.some(v=>v.id==="V02"),true);
-    const review=await fetch(root+"/v1/content/videos/V01/review",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({decision:"approve",note:"確認済"})});
+    const regularReview=await fetch(root+"/v1/content/videos/V01/review",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({decision:"approve",note:"通常トークンでは不可"})});
+    assert.equal(regularReview.status,401);
+    const review=await fetch(root+"/v1/content/videos/V01/review",{method:"POST",headers:ownerHeaders,body:JSON.stringify({decision:"approve",note:"確認済"})});
     assert.equal(review.status,200);
-    const approved=await fetch(root+"/v1/content/videos/V01/action-approval",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({action:"publish",provider:"youtube",costEstimate:0,destination:"history-channel"})});
+    const regularAction=await fetch(root+"/v1/content/videos/V01/action-approval",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({action:"publish",provider:"youtube",costEstimate:0,destination:"history-channel"})});
+    assert.equal(regularAction.status,401);
+    const approved=await fetch(root+"/v1/content/videos/V01/action-approval",{method:"POST",headers:ownerHeaders,body:JSON.stringify({action:"publish",provider:"youtube",costEstimate:0,destination:"history-channel"})});
     assert.equal(approved.status,201);
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
 
+
+test("video approval inbox fails closed when the separate owner token is missing", async t => {
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-video-owner-token-missing-"));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const videoBatchStore=createVideoBatchStore({filePath:path.join(dir,"videos.jsonl")});
+  const app=createServer({token,ownerToken:"",videoBatchStore});
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  try {
+    const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/content/approvals`,{
+      headers:{Authorization:"Bearer "+token}
+    });
+    assert.equal(response.status,503);
+    assert.equal((await response.json()).error,"Owner authentication is not configured");
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
 
 test("command center API exposes authenticated department overview and safe dispatch", async t => {
   const {createJobStore}=require("./core/job-store");
@@ -758,7 +873,7 @@ test("command center API exposes authenticated department overview and safe disp
   t.after(()=>fs.rm(dir,{recursive:true,force:true}));
   const jobStore=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
   const approvalStore=createApprovalStore({filePath:path.join(dir,"approvals.jsonl")});
-  const app=createServer({token,jobStore,approvalStore,worker:{},departmentHandlers:{"department.management":async()=>({}),"department.tax":async()=>({})}});
+  const app=createServer({ ownerToken: token,token,jobStore,approvalStore,worker:{},departmentHandlers:{"department.management":async()=>({}),"department.tax":async()=>({})}});
   await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
   const root="http://127.0.0.1:"+app.address().port;
   const headers={Authorization:"Bearer "+token,"Content-Type":"application/json"};
@@ -798,7 +913,7 @@ test("command center API stores external actions as owner approvals without queu
   t.after(()=>fs.rm(dir,{recursive:true,force:true}));
   const jobStore=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
   const approvalStore=createApprovalStore({filePath:path.join(dir,"approvals.jsonl")});
-  const app=createServer({token,jobStore,approvalStore});
+  const app=createServer({ ownerToken: token,token,jobStore,approvalStore});
   await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
   const root="http://127.0.0.1:"+app.address().port;
   const headers={Authorization:"Bearer "+token,"Content-Type":"application/json"};
@@ -825,7 +940,7 @@ test("command center AI plan endpoint validates planner output and dispatches sa
   t.after(()=>fs.rm(dir,{recursive:true,force:true}));
   const jobStore=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
   const commandPlanner={plan:async({request})=>({departmentIds:["management","tax"],actionClass:"analyze",rationale:"経営数値と会計の照合",model:"test-model"})};
-  const app=createServer({token,jobStore,worker:{},departmentHandlers:{"department.management":async()=>({}),"department.tax":async()=>({})},commandPlanner});
+  const app=createServer({ ownerToken: token,token,jobStore,worker:{},departmentHandlers:{"department.management":async()=>({}),"department.tax":async()=>({})},commandPlanner});
   await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
   const root="http://127.0.0.1:"+app.address().port;
   try {
@@ -840,7 +955,7 @@ test("command center AI plan endpoint validates planner output and dispatches sa
 });
 
 test("command center AI plan endpoint is unavailable when planner is not configured", async () => {
-  const app=createServer({token});
+  const app=createServer({ ownerToken: token,token});
   await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
   try {
     const response=await fetch("http://127.0.0.1:"+app.address().port+"/v1/command-center/plan",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({request:"分析して"})});
@@ -854,7 +969,7 @@ test("approval decisions and inbox require a separate owner token", async t => {
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-owner-approval-auth-"));
   t.after(()=>fs.rm(dir,{recursive:true,force:true}));
   const approvalStore=createApprovalStore({filePath:path.join(dir,"approvals.jsonl")});
-  const app=createServer({token,ownerToken,approvalStore});
+  const app=createServer({ ownerToken: token,token,ownerToken,approvalStore});
   await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
   const root="http://127.0.0.1:"+app.address().port;
   const regularHeaders={Authorization:"Bearer "+token,"Content-Type":"application/json"};
@@ -884,7 +999,7 @@ test("approval decision fails closed when owner token is not configured", async 
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-owner-approval-unconfigured-"));
   t.after(()=>fs.rm(dir,{recursive:true,force:true}));
   const approvalStore=createApprovalStore({filePath:path.join(dir,"approvals.jsonl")});
-  const app=createServer({token,ownerToken:"",approvalStore});
+  const app=createServer({ ownerToken: token,token,ownerToken:"",approvalStore});
   await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
   const root="http://127.0.0.1:"+app.address().port;
   try {
@@ -896,6 +1011,28 @@ test("approval decision fails closed when owner token is not configured", async 
     const response=await fetch(root+"/v1/approvals/"+item.id+"/decision",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({decision:"approved"})});
     assert.equal(response.status,503);
     assert.equal((await approvalStore.get(item.id)).status,"pending");
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
+
+
+test("Apps Script JSON internal errors map to an upstream failure instead of client input errors", async () => {
+  const app=createServer({
+    token,
+    lineLoginChannelId:"1234567890",
+    sheetsUrl:"https://script.google.com/macros/s/test-id/exec",
+    sheetsToken:"k".repeat(128),
+    fetchImpl:async(url,options)=>{
+      if(url==="https://api.line.me/oauth2/v2.1/verify") return {ok:true,json:async()=>({iss:"https://access.line.me",aud:"1234567890",sub:"U"+"a".repeat(32),exp:Math.floor(Date.now()/1000)+300})};
+      return {ok:true,json:async()=>({ok:false,error:"Internal error"})};
+    }
+  });
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  try {
+    const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/line/link`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({idToken:"verified-test-token-123456",employeeId:"EMP001"})
+    });
+    assert.equal(response.status,502);
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
 

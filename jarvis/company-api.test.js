@@ -8,7 +8,7 @@ const dailyHeaders=["日報ID","記録日時","作業日","従業員ID","氏名"
 
 function fixture({jobStore=null,approvalStore=null}={}) {
   const calls=[];
-  const app=createServer({
+  const app=createServer({ ownerToken: token,
     token,
     ownerToken:token,
     jobStore,
@@ -98,7 +98,7 @@ test("company ask queues an AI question with aggregate context and no personal d
   const {calls}=fixture();
   let created;
   const jobStore={create:async value=>{created=value;return {created:true,job:{id:"00000000-0000-4000-8000-000000000001",status:"queued"}};}};
-  const app=createServer({token,sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"s".repeat(128),fetchImpl:async(url,options)=>{
+  const app=createServer({ ownerToken: token,token,sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"s".repeat(128),fetchImpl:async(url,options)=>{
     const body=JSON.parse(options.body);calls.push(body);
     if(body.action==="listSheets") return {ok:true,json:async()=>({ok:true,sheets:["03 日報"]})};
     return {ok:true,json:async()=>({ok:true,rows:[dailyHeaders,["DR-1","2026-11-15T09:00:00.000Z","2026-11-15","EMP003","宮本朔也","岡山現場","掘削作業","08:00","17:00",60,3,"バックホウ","RC30",""]]})};
@@ -120,7 +120,7 @@ test("company ask queues an AI question with aggregate context and no personal d
 test("financials API reads only approved sales and expense sheets and returns tax-exclusive aggregates",async()=>{
  const {SALES_HEADERS,EXPENSE_HEADERS}=require("./core/financial-sheet-reader");
  const calls=[];
- const app=createServer({token,sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"s".repeat(128),fetchImpl:async(url,options)=>{
+ const app=createServer({ ownerToken: token,token,sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"s".repeat(128),fetchImpl:async(url,options)=>{
   const body=JSON.parse(options.body);calls.push(body);
   if(body.action==="listSheets")return{ok:true,json:async()=>({ok:true,sheets:["04 売上","05 経費","01 従業員"]})};
   if(body.sheetName==="04 売上")return{ok:true,json:async()=>({ok:true,rows:[SALES_HEADERS,["S-1","2026/11/01","P1","岡山現場","顧客","工事","850,000","85,000","935,000","I-1","",""] ]})};
@@ -138,7 +138,7 @@ test("financials API reads only approved sales and expense sheets and returns ta
 });
 
 test("financial API fails closed if either financial sheet is absent",async()=>{
- const app=createServer({token,sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"s".repeat(128),fetchImpl:async()=>({ok:true,json:async()=>({ok:true,sheets:["04 売上"]})})});
+ const app=createServer({ ownerToken: token,token,sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"s".repeat(128),fetchImpl:async()=>({ok:true,json:async()=>({ok:true,sheets:["04 売上"]})})});
  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
  try{
   const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/company/financials`,{headers:{Authorization:`Bearer ${token}`}});
@@ -150,7 +150,7 @@ test("financial API fails closed if either financial sheet is absent",async()=>{
 test("company AI question receives bounded financial aggregates but no customer or payee details",async()=>{
  const {SALES_HEADERS,EXPENSE_HEADERS}=require("./core/financial-sheet-reader");
  let created;
- const app=createServer({token,sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"s".repeat(128),jobStore:{create:async value=>{created=value;return{created:true,job:{id:"00000000-0000-4000-8000-000000000002",status:"queued"}};}},fetchImpl:async(url,options)=>{
+ const app=createServer({ ownerToken: token,token,sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"s".repeat(128),jobStore:{create:async value=>{created=value;return{created:true,job:{id:"00000000-0000-4000-8000-000000000002",status:"queued"}};}},fetchImpl:async(url,options)=>{
   const body=JSON.parse(options.body);
   if(body.action==="listSheets")return{ok:true,json:async()=>({ok:true,sheets:["03 日報","04 売上","05 経費"]})};
   if(body.sheetName==="03 日報")return{ok:true,json:async()=>({ok:true,rows:[dailyHeaders,["DR-1","2026-11-15T09:00:00.000Z","2026-11-15","EMP003","氏名非公開","岡山現場","作業","08:00","17:00",60,2,"","",""]]})};
@@ -174,7 +174,7 @@ test("company AI question receives bounded financial aggregates but no customer 
 
 test("financials API includes receivables, collections and overdue amounts when both approved tabs exist",async()=>{
  const {SALES_HEADERS,EXPENSE_HEADERS,INVOICE_HEADERS,PAYMENT_HEADERS}=require("./core/financial-sheet-reader");
- const app=createServer({token,sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"s".repeat(128),now:()=>new Date("2026-11-16T00:00:00Z"),fetchImpl:async(url,options)=>{
+ const app=createServer({ ownerToken: token,token,sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"s".repeat(128),now:()=>new Date("2026-11-16T00:00:00Z"),fetchImpl:async(url,options)=>{
   const body=JSON.parse(options.body);
   if(body.action==="listSheets")return{ok:true,json:async()=>({ok:true,sheets:["04 売上","05 経費","09 請求","10 入金"]})};
   if(body.sheetName==="04 売上")return{ok:true,json:async()=>({ok:true,rows:[SALES_HEADERS]})};
@@ -240,7 +240,7 @@ test("tax agent receives validated financial aggregates without customer or paye
  const expenseHeaders=["経費ID","日付","現場ID","現場名","区分","項目","支払先","税抜金額","消費税","税込金額","支払方法","領収書URL","備考","登録日時"];
  let queued;
  const jobStore={create:async value=>{queued=value;return {created:true,job:{id:"22222222-2222-4222-8222-222222222222",status:"queued"}};}};
- const app=createServer({token,jobStore,sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"s".repeat(128),fetchImpl:async(url,options)=>{
+ const app=createServer({ ownerToken: token,token,jobStore,sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"s".repeat(128),fetchImpl:async(url,options)=>{
   const body=JSON.parse(options.body);
   if(body.action==="listSheets")return {ok:true,json:async()=>({ok:true,sheets:["04 売上","05 経費"]})};
   if(body.action==="readRows"&&body.sheetName==="04 売上")return {ok:true,json:async()=>({ok:true,rows:[salesHeaders,["S1","2026/11/15","P1","岡山現場","顧客A","工事","100000","10000","110000","I1","",""]]})};
