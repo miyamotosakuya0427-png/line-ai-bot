@@ -309,7 +309,7 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         const linked=await callSheets("readRows",{sheetName:"13 LINE連携",startRow:1,numRows:100});
         const rows=Array.isArray(linked.rows)?linked.rows:[];
         const header=rows[0]||[];
-        const lineCol=header.indexOf("LINEユーザーID"),employeeCol=header.indexOf("従業員ID"),nameCol=4,statusCol=header.indexOf("状態");
+        const lineCol=header.indexOf("LINEユーザーID"),employeeCol=header.indexOf("従業員ID"),nameCol=header.indexOf("氏名"),statusCol=header.indexOf("状態");
         if ([lineCol,employeeCol,nameCol,statusCol].some(i=>i<0)) return json(res,503,{ok:false,error:"LINE連携シートの見出しを確認してください"});
         const ownLink=rows.slice(1).find(row=>Array.isArray(row)&&String(row[lineCol]||"").trim()===identity.lineUserId&&String(row[statusCol]||"").trim()==="有効");
         if (!ownLink) return json(res,403,{ok:false,error:"有効な従業員LINE連携が必要です。管理者に確認してください。"});
