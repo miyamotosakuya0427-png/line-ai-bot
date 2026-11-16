@@ -57,7 +57,7 @@ This document is an operational truth register, not a claim that every item is d
 - Employee names, phone numbers, pay rates, notes, customer/payee names, receipt URLs, bank accounts, and payment methods are excluded from the finance/AI aggregate context.
 
 ### Remaining hardening
-- Live tab names and headers have not been verified against the deployed Apps Script endpoint. Keep fail-closed behavior until a read-only schema audit succeeds.
+- The new context loader assumes the approved tab names `01 従業員`, `03 日報`, `04 売上`, `05 経費`, `09 請求`, and `10 入金`; these names and headers still require a live read-only audit against the deployed Apps Script endpoint. Finance and receivables context stays unavailable unless exact schemas validate.
 - Current readers sample at most 99 rows. Replace with cursor-based bounded pagination and an explicit historical completeness watermark before using totals for decisions.
 - Add reconciliation for duplicate IDs, missing dates, tax rounding, invoice/collection mismatches, deleted rows, late entries, and corrected records.
 - Keep revenue, expenses, accounting profit, cash flow, receivables, and statutory tax figures separate; never label a partial sample as a full-period total.
