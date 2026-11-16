@@ -155,6 +155,13 @@ function createPostgresOperationalStores({pool,clock=()=>new Date().toISOString(
    if(resourceId!==current.resourceId||digest(operationPayload)!==digest(current.operationPayload)||approvalRequestDigest({...current,resourceId,operationPayload})!==current.requestDigest)throw new Error("Approval request integrity check failed");
    return{ok:true,approval:current,requestDigest:current.requestDigest};
   },
+  async validateExecutionClaim(id,{claimId,resourceId,operationPayload,actor}={}){
+   await init();const current=await approvals.get(id);if(!current)return null;
+   if(current.status!=="approved"||current.executionStatus!=="claimed"||!current.executionClaim)throw new Error("Approval execution claim is not active");
+   if(!current.expiresAt||Date.parse(current.expiresAt)<=Date.parse(clock()))throw new Error("Approval has expired");
+   if(current.executionClaim.id!==claimId||current.executionClaim.actor!==actor||resourceId!==current.resourceId||digest(operationPayload)!==digest(current.operationPayload)||current.executionClaim.requestDigest!==current.requestDigest||approvalRequestDigest({...current,resourceId,operationPayload})!==current.requestDigest)throw new Error("Approval execution claim integrity check failed");
+   return {ok:true,approval:current,requestDigest:current.requestDigest};
+  },
   async claimExecution(id,{resourceId,operationPayload,actor}={}){
    await init();
    if(typeof authorizeActor!=="function"||!validText(actor,128,true)||!(await authorizeActor(actor)))throw new Error("Execution authorization is not configured or actor is not authorized");
