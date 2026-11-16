@@ -150,3 +150,16 @@ This document is an operational truth register, not a claim that every item is d
 - Fixed realized daily P/L calculation to exclude open trades.
 - Added byte-cap enforcement before paper journal state mutation.
 - Hardened GitHub Actions permissions, action pins, Node runtime, timeout, and concurrency.
+
+
+## 11. JARVIS command-center integration (draft foundation)
+
+- Added a provider-independent command-center core and authenticated `GET /v1/command-center` overview.
+- Added authenticated `POST /v1/command-center/dispatch` to fan a bounded internal task out to explicitly selected department agents.
+- Dispatch uses the existing department allowlist, durable job queue, idempotency keys, and worker registry.
+- Safe internal classes (`read`, `analyze`, `draft`, `notify`, `internal_task`) are queued for department workers.
+- Sensitive classes (external submission, financial action, contract, publication, deletion, permission change) are written to the owner approval ledger and are never queued for execution.
+- Unknown departments fail closed. The endpoint reports queue/worker readiness, department-level recent activity, and a bounded recent-job sample.
+- API tests cover authentication, department fan-out, idempotency, approval routing, and no-execution behavior for sensitive actions.
+- This is a dispatch and visibility layer, not yet a self-directing autonomous CEO agent: no planner currently decomposes free-form company goals into department work, no department-specific recurring schedules are activated, and no cross-agent result synthesis loop is running.
+- Runtime activation still requires the paid Render plan decision, persistent disk, worker enablement, scoped credentials, owner identity hardening, notification integration, and exact-head CI/release approval.
