@@ -388,8 +388,14 @@ function appendLineLink(ss, data) {
     const lastRow = sheet.getLastRow();
     if (lastRow >= 2) {
       const rows = sheet.getRange(2, 1, lastRow - 1, lastColumn).getDisplayValues();
-      if (rows.some(row => String(row[columns["LINEユーザーID"]] || "").trim() === lineUserId || String(row[columns["従業員ID"]] || "").trim() === employeeId)) {
-        return output({ ok: false, error: "LINE user or employee already has a link request" });
+      if (rows.some(row => {
+        const status = String(row[columns["状態"]] || "").trim();
+        const blocksNewRequest = status === "確認待ち" || status === "有効";
+        return blocksNewRequest &&
+          (String(row[columns["LINEユーザーID"]] || "").trim() === lineUserId ||
+           String(row[columns["従業員ID"]] || "").trim() === employeeId);
+      })) {
+        return output({ ok: false, error: "LINE user or employee already has a pending or active link" });
       }
     }
     const row = Array(lastColumn).fill("");
