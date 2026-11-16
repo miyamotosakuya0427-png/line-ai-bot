@@ -72,6 +72,7 @@ function loadAppsScript() {
     LockService: {
       getScriptLock: () => ({ waitLock() {}, releaseLock() {} })
     },
+    Utilities: { getUuid: () => "test-generated-uuid" },
     ContentService: {
       MimeType: { JSON: "application/json" },
       createTextOutput(content) {
