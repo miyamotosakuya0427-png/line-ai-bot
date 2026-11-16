@@ -14,6 +14,7 @@ function makeSheet(initialRows) {
       return { getValues: () => rows.map(row => row.slice()) };
     },
     getLastRow() { return rows.length; },
+    getLastColumn() { return Math.max(0, ...rows.map(row => row.length)); },
     getRange(row, column, numRows = 1, numColumns = 1) {
       return {
         getValue() { return rows[row - 1]?.[column - 1] ?? ""; },
@@ -44,7 +45,15 @@ function makeSheet(initialRows) {
 }
 
 function makeSpreadsheet(lineRows) {
-  const sheets = { "13 LINE連携": makeSheet(lineRows) };
+  const employeeHeaders = ["従業員ID", "氏名", "LINE表示名", "職種", "役職", "単価", "電話番号", "入社日", "登録日", "状態", "備考"];
+  const sheets = {
+    "13 LINE連携": makeSheet(lineRows),
+    "01 従業員": makeSheet([
+      employeeHeaders,
+      ["EMP001", "従業員A", "", "", "", "", "", "", "", "有効", ""],
+      ["EMP003", "宮本朔也", "", "", "", "", "", "", "", "有効", ""]
+    ])
+  };
   return {
     sheets,
     getSheetByName(name) { return sheets[name] || null; },
@@ -177,4 +186,36 @@ test("initial admin bootstrap rejects a LINE identity that differs from the allo
   assert.equal(response.ok, false);
   assert.equal(response.error, "Initial administrator is not authorized");
   assert.equal(ss.sheets["13 LINE連携"].rows[1][7], "確認待ち");
+});
+
+test("LINE link application requires a matching active employee and stores fixed general/pending state", () => {
+  const app = loadAppsScript();
+  const ss = makeSpreadsheet([headers]);
+  const good = JSON.parse(app.appendLineLink(ss, {
+    lineUserId: applicantId, displayName: "申請者", employeeId: "EMP001", employeeName: "従業員A"
+  }).content);
+  assert.equal(good.ok, true);
+  const row = ss.sheets["13 LINE連携"].rows[1];
+  assert.equal(row[6], "一般");
+  assert.equal(row[7], "確認待ち");
+  const mismatch = JSON.parse(app.appendLineLink(ss, {
+    lineUserId: adminId, displayName: "別申請者", employeeId: "EMP001", employeeName: "別人"
+  }).content);
+  assert.equal(mismatch.ok, false);
+  assert.match(mismatch.error, /employee register/);
+});
+
+test("administrator approval rejects a pending row whose employee identity no longer matches", () => {
+  const app = loadAppsScript();
+  const ss = makeSpreadsheet([
+    headers,
+    ["ADMIN-1", adminId, "管理者", "EMP003", "宮本朔也", "", "管理者", "有効"],
+    ["PENDING-1", applicantId, "申請者", "EMP001", "別人", "", "一般", "確認待ち"]
+  ]);
+  const response = JSON.parse(app.reviewLineLink(ss, {
+    adminLineUserId: adminId, linkId: "PENDING-1", decision: "approve"
+  }).content);
+  assert.equal(response.ok, false);
+  assert.match(response.error, /does not match/);
+  assert.equal(ss.sheets["13 LINE連携"].rows[2][7], "確認待ち");
 });
