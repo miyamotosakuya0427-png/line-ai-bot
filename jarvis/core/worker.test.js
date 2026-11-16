@@ -101,7 +101,8 @@ test("worker retries transient errors and succeeds on a later attempt", async ()
   try {
     const { job } = await f.store.create({ type: "task.transient", payload: {} });
     let calls = 0;
-    const worker = createWorker({ store: f.store, handlers: { "task.transient": async () => {
+    let now = "2026-11-16T00:00:00.000Z";
+    const worker = createWorker({ store: f.store, clock: () => now, retryBaseMs: 1000, handlers: { "task.transient": async () => {
       calls += 1;
       if (calls === 1) { const error = new Error("rate limited"); error.retryable = true; throw error; }
       return { answer: "recovered" };
@@ -110,6 +111,13 @@ test("worker retries transient errors and succeeds on a later attempt", async ()
     const first = await worker.runNext();
     assert.equal(first.retryScheduled, true);
     assert.equal(first.job.status, "queued");
+    assert.equal(first.retryDelayMs, 1000);
+    assert.equal(first.job.retryAt, first.retryAt);
+    assert.equal(first.job.lastError, "rate limited");
+    const waiting = await worker.runNext();
+    assert.equal(waiting.processed, false);
+    assert.equal(waiting.waiting, true);
+    now = new Date(Date.parse(now) + 1000).toISOString();
     const second = await worker.runNext();
     assert.equal(second.job.id, job.id);
     assert.equal(second.job.status, "succeeded");
