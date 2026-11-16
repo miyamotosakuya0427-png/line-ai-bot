@@ -7,6 +7,7 @@ const STATES=new Set(["pending","approved","rejected"]);
 const ACTIONS=new Set(["external_submit","financial","contract","publish","delete","permission_change","unknown"]);
 const MAX_APPROVALS=5000;
 const MAX_DETAILS=8000;
+const MAX_APPROVAL_PAYLOAD=16*1024;
 function clone(value){return JSON.parse(JSON.stringify(value));}
 function bytes(value){try{return Buffer.byteLength(JSON.stringify(value),"utf8");}catch{return Infinity;}}
 function validText(value,max,required=false){return typeof value==="string"&&value.length<=max&&(!required||Boolean(value.trim()));}
@@ -39,7 +40,7 @@ function createApprovalStore({filePath,pool,clock=()=>new Date().toISOString(),a
    await ready();return serialize(async()=>{
     if(!validText(departmentId,64,true)||!/^[a-z][a-z0-9_-]*$/.test(departmentId))throw new Error("Invalid department id");
     if(!ACTIONS.has(actionClass))throw new Error("Invalid approval action class");
-    if(!validText(summary,300,true)||!validText(details,MAX_DETAILS)||!validText(idempotencyKey,128)||!validText(resourceId,256)||!(operationPayload===null||(operationPayload&&typeof operationPayload==="object"&&!Array.isArray(operationPayload)&&bytes(operationPayload)<=MAX_JOB_PAYLOAD))||!(expiresAt===null||(typeof expiresAt==="string"&&Number.isFinite(Date.parse(expiresAt))&&Date.parse(expiresAt)>Date.parse(clock()))))throw new Error("Invalid approval request fields");
+    if(!validText(summary,300,true)||!validText(details,MAX_DETAILS)||!validText(idempotencyKey,128)||!validText(resourceId,256)||!(operationPayload===null||(operationPayload&&typeof operationPayload==="object"&&!Array.isArray(operationPayload)&&bytes(operationPayload)<=MAX_APPROVAL_PAYLOAD))||!(expiresAt===null||(typeof expiresAt==="string"&&Number.isFinite(Date.parse(expiresAt))&&Date.parse(expiresAt)>Date.parse(clock()))))throw new Error("Invalid approval request fields");
     if(idempotencyKey){const existing=[...items.values()].find(x=>x.idempotencyKey===idempotencyKey);if(existing)return{created:false,approval:publicApproval(existing)};}
     if(items.size>=MAX_APPROVALS)throw new Error("Approval store capacity reached");
     const now=clock(),approval={id:crypto.randomUUID(),departmentId,actionClass,summary:summary.trim(),details:details.trim(),resourceId:resourceId||null,operationPayload:operationPayload===null?null:clone(operationPayload),expiresAt:expiresAt||null,status:"pending",idempotencyKey,createdAt:now,updatedAt:now,decisionAt:null,decisionReason:"",executionStatus:"not_started",digestVersion:2};approval.requestDigest=approvalRequestDigest(approval);
