@@ -20,14 +20,24 @@ const INSTRUCTIONS=Object.freeze({
  trader:"あなたはONE TRADERトレード研究部の独立AIエージェントです。相場分析、バックテスト、ペーパートレードとリスク監視を行い、実資金注文・レバレッジ変更はしません。"
 });
 function createDepartmentHandlers(options={}) {
- const {researchFetchImpl=fetch,store=null,...openAIOptions}=options;
+ const {researchFetchImpl=fetch,store=null,contextLoader=null,...openAIOptions}=options;
  const handlers={};
  for(const department of DEPARTMENTS) {
   const instructions=INSTRUCTIONS[department.id];
   if(!instructions) throw new Error("Missing department agent instructions: "+department.id);
-  handlers["department."+department.id]=createOpenAIHandler({...openAIOptions,instructions});
+  const baseHandler=createOpenAIHandler({...openAIOptions,instructions});
+  handlers["department."+department.id]=async(payload,meta)=>{
+   const companyContext=contextLoader&&typeof contextLoader.load==="function"
+    ?await contextLoader.load(department.id)
+    :{status:"not_configured",note:"会社データの読み取りアダプターが未設定です。実データを参照していません。"};
+   return baseHandler({...payload,companyContext},meta);
+  };
  }
- handlers["department.office"]=createSubsidyResearchHandler({...openAIOptions,researchFetchImpl,store});
+ const officeHandler=createSubsidyResearchHandler({...openAIOptions,researchFetchImpl,store});
+ handlers["department.office"]=async(payload,meta)=>{
+  const companyContext=contextLoader&&typeof contextLoader.load==="function"?await contextLoader.load("office"):{status:"not_available_for_department",note:"会社データは参照していません。"};
+  return officeHandler({...payload,companyContext},meta);
+ };
  return handlers;
 }
 module.exports={INSTRUCTIONS,createDepartmentHandlers};
