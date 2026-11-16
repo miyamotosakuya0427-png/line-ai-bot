@@ -90,6 +90,8 @@ test("Apps Script rejects missing or invalid shared token", () => {
 test("Apps Script read allowlist denies settings and generic writes", () => {
   const h = createGasHarness();
   h.addSheet("15 設定", [["設定項目"], ["秘密"]]);
+  assert.deepEqual(h.request({ action: "readRows", sheetName: "15 設定" }), { ok: false, error: "Sheet is not allowlisted for reading" });
+  h.addSheet("03 日報", [["見出し"]]);
   assert.deepEqual(h.request({ action: "appendRows", sheetName: "03 日報", rows: [["x"]] }), {
     ok: false, error: "Generic writes are disabled; use a dedicated validated action"
   });
