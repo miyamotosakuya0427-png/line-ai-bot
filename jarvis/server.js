@@ -262,8 +262,11 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         }
         const byEmployee=linkRows.slice(1).find(row=>Array.isArray(row)&&String(row[3]||"").trim()===employeeId);
         if (byEmployee) return json(res,409,{ok:false,error:"この従業員はすでに別のLINEアカウントで申請または登録されています。管理者に確認してください"});
-        const row=["PENDING-"+crypto.randomUUID(),identity.lineUserId,identity.displayName,employeeId,String(employee[1]||"").trim(),"","一般","確認待ち",new Date().toISOString(),new Date().toISOString()];
-        const appended=await callSheets("appendRows",{sheetName:"13 LINE連携",rows:[row]});
+        const appended=await callSheets("appendLineLink",{
+          lineUserId:identity.lineUserId,displayName:identity.displayName,
+          employeeId,employeeName:String(employee[1]||"").trim()
+        });
+        if (!appended.ok) return json(res,409,{ok:false,error:appended.error||"LINE link request was not saved"});
         return json(res,201,{ok:true,submitted:true,alreadySubmitted:false,status:"確認待ち",appended:appended.appended||1});
       }
       // 日報保存: LINE本人確認に加え、13 LINE連携で有効な本人の従業員IDを照合する。
