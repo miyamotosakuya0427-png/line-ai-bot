@@ -8,7 +8,7 @@ on:
       - "apps-script/**"
       - ".github/workflows/jarvis-ci.yml"
   pull_request:
-    branches: [one-jarvis-foundation, jarvis-paper-trading-learning]
+    branches: [one-jarvis-foundation, jarvis-paper-trading-learning, security/jarvis-line-identity-audit]
     paths:
       - "jarvis/**"
       - "apps-script/**"
