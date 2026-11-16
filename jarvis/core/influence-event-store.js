@@ -11,7 +11,17 @@ const VERIFICATION=new Set(["official_api","official_web","licensed_feed","unver
 
 function clone(value){return JSON.parse(JSON.stringify(value));}
 function validTimestamp(value){
-  return typeof value==="string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value));
+  if(typeof value!=="string")return false;
+  const match=/^(\d{4})-(\d{2})-(\d{2})T([01]\d|2[0-3]):([0-5]\d):([0-5]\d)(?:\.\d{1,9})?(Z|([+-])(\d{2}):(\d{2}))$/.exec(value);
+  if(!match)return false;
+  const year=Number(match[1]),month=Number(match[2]),day=Number(match[3]);
+  const date=new Date(Date.UTC(year,month-1,day));
+  if(year<1||date.getUTCFullYear()!==year||date.getUTCMonth()!==month-1||date.getUTCDate()!==day)return false;
+  if(match[8]){
+    const hours=Number(match[9]),minutes=Number(match[10]);
+    if(hours>14||minutes>59||(hours===14&&minutes!==0))return false;
+  }
+  return Number.isFinite(Date.parse(value));
 }
 function normalizeInfluenceEvent(input, observedAt=new Date().toISOString()){
   if(!input||typeof input!=="object"||Array.isArray(input))throw new Error("Invalid influence event");
@@ -46,15 +56,15 @@ function createInfluenceEventStore({filePath,clock=()=>new Date().toISOString(),
     await fs.mkdir(path.dirname(filePath),{recursive:true,mode:0o700});
     let raw="";try{raw=await fs.readFile(filePath,"utf8");}catch(e){if(e.code!=="ENOENT")throw e;}
     if(Buffer.byteLength(raw)>maxJournalBytes)throw new Error("Influence journal exceeds size limit");
-    const recovered=[];
+    const recovered=[],recoveredIds=new Set();
     for(const [i,line] of raw.split("\n").entries()){
       if(!line)continue;let event;try{event=JSON.parse(line);}catch{throw new Error("Influence journal is corrupt at line "+(i+1));}
-      const normalized=normalizeInfluenceEvent(event, event.observedAt);
-      if(normalized.id!==event.id||ids.has(event.id))throw new Error("Influence journal has invalid or duplicate event at line "+(i+1));
-      ids.add(event.id);recovered.push(normalized);
+      const normalized=normalizeInfluenceEvent(event,event.observedAt);
+      if(normalized.id!==event.id||recoveredIds.has(event.id))throw new Error("Influence journal has invalid or duplicate event at line "+(i+1));
+      recoveredIds.add(event.id);recovered.push(normalized);
       if(recovered.length>maxEvents)throw new Error("Influence journal exceeds event limit");
     }
-    events=recovered;initialized=true;return {ok:true,eventCount:events.length};
+    events=recovered;ids=recoveredIds;initialized=true;return {ok:true,eventCount:events.length};
   });}
   async function add(input){if(poisoned)throw new Error("Influence journal requires restart and recovery");if(!initialized)await init();return serialize(async()=>{
     if(poisoned)throw new Error("Influence journal requires restart and recovery");
@@ -75,4 +85,4 @@ function createInfluenceEventStore({filePath,clock=()=>new Date().toISOString(),
   });}
   return {init,add,list,async count(){if(!initialized)await init();return events.length;}};
 }
-module.exports={PLATFORMS,VERIFICATION,normalizeInfluenceEvent,createInfluenceEventStore};
+module.exports={PLATFORMS,VERIFICATION,validTimestamp,normalizeInfluenceEvent,createInfluenceEventStore};
