@@ -258,7 +258,7 @@ test("LINE employee directory endpoint is disabled to prevent employee enumerati
     lineLoginChannelId:"1234567890",
     sheetsUrl:"https://script.google.com/macros/s/test-id/exec",
     sheetsToken:"h".repeat(128),
-    fetchImpl:async(url)=> {
+    fetchImpl:async(url,options)=> {
       if(url==="https://api.line.me/oauth2/v2.1/verify") return {ok:true,json:async()=>({iss:"https://access.line.me",aud:"1234567890",sub:"U"+"b".repeat(32),exp:Math.floor(Date.now()/1000)+300})};
       sheetsCalls+=1;
       return {ok:true,json:async()=>({ok:true,rows:[]})};
@@ -1045,7 +1045,7 @@ test("LINE link requests use uniform acknowledgements for unknown and already-li
     sheetsToken:"s".repeat(128),
     fetchImpl:async(url)=> {
       if(url==="https://api.line.me/oauth2/v2.1/verify") return {ok:true,json:async()=>({iss:"https://access.line.me",aud:"1234567890",sub:lineUserId,exp:Math.floor(Date.now()/1000)+300})};
-      const body=JSON.parse(arguments[1]?.body||"{}");
+      const body=JSON.parse(options.body);
       if(body.action==="listSheets") return {ok:true,json:async()=>({ok:true,sheets:["01 従業員","13 LINE連携"]})};
       if(body.action==="readRows" && body.sheetName==="01 従業員") return {ok:true,json:async()=>({ok:true,rows:[["従業員ID","氏名","状態"],["EMP001","社員A","有効"]]})};
       if(body.action==="readRows" && body.sheetName==="13 LINE連携") return {ok:true,json:async()=>({ok:true,rows:[["連携ID","LINEユーザーID","LINE表示名","従業員ID","氏名","権限","状態"],["L1",lineUserId,"LINE","EMP001","社員A","一般","有効"]]})};
