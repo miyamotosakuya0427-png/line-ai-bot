@@ -26,6 +26,20 @@ test("job journal persists and recovers job state", async t => {
   assert.equal(recovered.result, null);
 });
 
+test("retry schedule and last error persist across store restart", async t => {
+  const filePath = await fixture(t);
+  const first = createJobStore({ filePath });
+  const job = (await first.create({ type: "report.generate", payload: {} })).job;
+  await first.transition(job.id, "running");
+  const retryAt = "2026-11-16T00:00:05.000Z";
+  await first.transition(job.id, "queued", { retryAt, lastError: "rate limited" });
+  const second = createJobStore({ filePath });
+  const recovered = await second.get(job.id);
+  assert.equal(recovered.status, "queued");
+  assert.equal(recovered.retryAt, retryAt);
+  assert.equal(recovered.lastError, "rate limited");
+});
+
 test("idempotency key prevents duplicate jobs", async t => {
   const filePath = await fixture(t);
   const store = createJobStore({ filePath });
