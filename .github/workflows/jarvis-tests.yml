@@ -2,7 +2,7 @@ name: ONE JARVIS tests
 
 on:
   push:
-    branches: [one-jarvis-foundation]
+    branches: [one-jarvis-foundation, jarvis-paper-trading-learning]
     paths:
       - "jarvis/**"
       - ".github/workflows/jarvis-tests.yml"
