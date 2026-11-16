@@ -1,8 +1,8 @@
 "use strict";
 const { summarizeFinancialRecords } = require("./financial-analytics");
 
-const SALES_SHEET = "売上";
-const EXPENSE_SHEET = "経費";
+const SALES_SHEET = "04 売上";
+const EXPENSE_SHEET = "05 経費";
 const INVOICE_SHEET = "09 請求";
 const PAYMENT_SHEET = "10 入金";
 const SALES_HEADERS = ["売上ID","日付","現場ID","現場名","得意先","内容","税抜売上","消費税","税込売上","請求ID","備考","登録日時"];
