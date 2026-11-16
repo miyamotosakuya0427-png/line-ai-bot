@@ -163,3 +163,8 @@ This document is an operational truth register, not a claim that every item is d
 - API tests cover authentication, department fan-out, idempotency, approval routing, and no-execution behavior for sensitive actions.
 - This is a dispatch and visibility layer, not yet a self-directing autonomous CEO agent: no planner currently decomposes free-form company goals into department work, no department-specific recurring schedules are activated, and no cross-agent result synthesis loop is running.
 - Runtime activation still requires the paid Render plan decision, persistent disk, worker enablement, scoped credentials, owner identity hardening, notification integration, and exact-head CI/release approval.
+
+- Added an AI department planner that asks the configured OpenAI Responses API to choose from the fixed department allowlist and a fixed action-class enum. The response must parse as JSON and pass validation; malformed or unknown departments fail closed.
+- Added authenticated `POST /v1/command-center/plan`: the planner proposes a small department fan-out, then the command center queues only internal work or records an owner approval. The model cannot directly invoke tools or external actions.
+- Planner use is runtime-conditional on server-side `OPENAI_API_KEY`; no key is embedded in source. API use may incur normal model charges and must be covered by the owner's existing budget policy.
+- Planner tests use a mocked provider response; they do not establish live OpenAI connectivity or autonomous production operation.
