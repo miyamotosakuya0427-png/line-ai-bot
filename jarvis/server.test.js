@@ -169,8 +169,8 @@ test("LINE linking verifies ID token and stores only a pending approval", async 
       body:JSON.stringify({idToken:"verified-test-token-1",employeeId:"EMP001"})
     });
     const result=await response.json();
-    assert.equal(response.status,201);
-    assert.equal(result.status,"確認待ち");
+    assert.equal(response.status,202);
+    assert.match(result.message,/申請内容を受け付けました/);
     const write=sent.find(x=>x.action==="appendLineLink");
     assert.equal(write.lineUserId,"U"+"a".repeat(32));
     assert.equal(write.employeeId,"EMP001");
@@ -1043,7 +1043,7 @@ test("LINE link requests use uniform acknowledgements for unknown and already-li
     lineLoginChannelId:"1234567890",
     sheetsUrl:"https://script.google.com/macros/s/test-id/exec",
     sheetsToken:"s".repeat(128),
-    fetchImpl:async(url)=> {
+    fetchImpl:async(url,options)=> {
       if(url==="https://api.line.me/oauth2/v2.1/verify") return {ok:true,json:async()=>({iss:"https://access.line.me",aud:"1234567890",sub:lineUserId,exp:Math.floor(Date.now()/1000)+300})};
       const body=JSON.parse(options.body);
       if(body.action==="listSheets") return {ok:true,json:async()=>({ok:true,sheets:["01 従業員","13 LINE連携"]})};
