@@ -100,7 +100,7 @@ dailyForm.addEventListener("submit",async(event)=>{event.preventDefault();if(!id
 </script></body></html>`;
 }
 
-function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,approvalStore=null,videoBatchStore=null,paperTradingStore=null,influenceEventStore=null,worker=null,departmentHandlers=null,departmentContextLoader=null,commandPlanner=null,now=()=>new Date()}={}) {
+function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||"",sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,approvalStore=null,videoBatchStore=null,paperTradingStore=null,influenceEventStore=null,worker=null,departmentHandlers=null,departmentContextLoader=null,commandPlanner=null,now=()=>new Date()}={}) {
   async function callSheets(action, fields={}) {
     if (!sheetsUrl || !sheetsToken) { const e=new Error("Google Sheets integration is not configured"); e.statusCode=503; throw e; }
     const u=new URL(sheetsUrl);
@@ -209,6 +209,7 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         }
       }
       if (req.method==="GET" && url.pathname==="/health/sheets") {
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         const now=Date.now();
         if (now-lastPublicSheetsCheck<30000) return json(res,429,{ok:false,googleSheets:"check rate limited"});
         lastPublicSheetsCheck=now;
@@ -339,7 +340,8 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         const result=await callSheets("reviewLineLink",{adminLineUserId:identity.lineUserId,linkId,decision});
         return json(res,200,{ok:true,linkId:result.linkId,status:result.status});
       }
-      if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+      const ownerApprovalRoute=url.pathname==="/v1/approvals" || /^\/v1\/approvals\/[0-9a-f-]{36}\/decision$/.test(url.pathname);
+      if (!ownerApprovalRoute && !isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
       if (req.method==="POST" && url.pathname==="/v1/company/ask") {
         if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
         if (!jobStore) return json(res,503,{ok:false,error:"Persistent job storage is not configured"});
@@ -473,9 +475,9 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         return json(res,result.created?201:200,{ok:true,created:result.created,departmentId,job:result.job});
       }
       if (url.pathname==="/v1/approvals" || new RegExp("^/v1/approvals/[0-9a-f-]{36}/decision$").test(url.pathname)) {
-        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         if (!approvalStore) return json(res,503,{ok:false,error:"Persistent approval storage is not configured"});
         if (req.method==="GET" && url.pathname==="/v1/approvals") {
+          if (!isAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authentication required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
           const status=url.searchParams.get("status")||undefined;
           const limit=Number(url.searchParams.get("limit")||50);
           if ((status&& !["pending","approved","rejected"].includes(status))||!Number.isInteger(limit)||limit<1||limit>200) return json(res,400,{ok:false,error:"Invalid approval list parameters"});
@@ -483,6 +485,7 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
           return json(res,200,{ok:true,approvals,executionEnabled:false});
         }
         if (req.method==="POST" && url.pathname==="/v1/approvals") {
+          if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
           if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
           const d=await readJson(req);
           if (typeof d.departmentId!=="string"||!DEPARTMENTS.some(item=>item.id===d.departmentId)||typeof d.actionClass!=="string"||
@@ -495,6 +498,7 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         }
         const match=new RegExp("^/v1/approvals/([0-9a-f-]{36})/decision$").exec(url.pathname);
         if (req.method==="POST"&&match) {
+          if (!isAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authentication required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
           if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
           const d=await readJson(req);
           if (!["approved","rejected"].includes(d.decision)||(d.reason!==undefined&&(typeof d.reason!=="string"||d.reason.length>1000))) return json(res,400,{ok:false,error:"Invalid approval decision"});
@@ -724,22 +728,29 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         }
         return json(res,405,{ok:false,error:"Method Not Allowed"},{Allow:"GET, POST"});
       }
-      if (req.method==="GET" && url.pathname==="/v1/status") return json(res,200,{ok:true,system:"ONE JARVIS",version:"1.3.0",mode:"read-only",googleSheetsConfigured:Boolean(sheetsUrl&&sheetsToken),jobQueueConfigured:Boolean(jobStore),workerEnabled:Boolean(worker),contentAutoplanEnabled:Boolean(worker&&process.env.JARVIS_CONTENT_AUTOPLAN_ENABLED==="true"),subsidyAutomonitorEnabled:Boolean(worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"),approvalsConfigured:Boolean(approvalStore)});
+      if (req.method==="GET" && url.pathname==="/v1/status") {
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        return json(res,200,{ok:true,system:"ONE JARVIS",version:"1.3.0",mode:"read-only",googleSheetsConfigured:Boolean(sheetsUrl&&sheetsToken),jobQueueConfigured:Boolean(jobStore),workerEnabled:Boolean(worker),contentAutoplanEnabled:Boolean(worker&&process.env.JARVIS_CONTENT_AUTOPLAN_ENABLED==="true"),subsidyAutomonitorEnabled:Boolean(worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"),approvalsConfigured:Boolean(approvalStore)});
+      }
       if (req.method==="GET" && url.pathname==="/v1/sheets/list") {
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         const r=await callSheets("listSheets"); return json(res,200,{ok:true,sheets:r.sheets});
       }
       if (req.method==="GET" && url.pathname==="/v1/sheets/read") {
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         const sheetName=url.searchParams.get("sheetName")||"", startRow=Number(url.searchParams.get("startRow")||1), numRows=Number(url.searchParams.get("numRows")||20);
         if (!validSheetName(sheetName) || !Number.isInteger(startRow) || startRow<1 || !Number.isInteger(numRows) || numRows<1 || numRows>100) return json(res,400,{ok:false,error:"Invalid read parameters"});
         const r=await callSheets("readRows",{sheetName,startRow,numRows}); return json(res,200,{ok:true,rows:r.rows});
       }
       if (req.method==="POST" && url.pathname==="/v1/sheets/append") {
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
         const d=await readJson(req);
         if (!validSheetName(d.sheetName)||!Array.isArray(d.rows)||d.rows.length<1||d.rows.length>50||!d.rows.every(row=>Array.isArray(row)&&row.length>=1&&row.length<=20&&row.every(v=>["string","number","boolean"].includes(typeof v)||v===null))) return json(res,400,{ok:false,error:"Invalid append payload"});
         const r=await callSheets("appendRows",{sheetName:d.sheetName,rows:d.rows}); return json(res,200,{ok:true,appended:r.appended});
       }
       if (req.method==="POST" && url.pathname==="/v1/command") {
+        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
         const d=await readJson(req), command=typeof d.command==="string"?d.command.trim().toLowerCase():"";
         if (command==="help") return json(res,200,{ok:true,message:"利用できるコマンド: help, status"});

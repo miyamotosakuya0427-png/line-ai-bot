@@ -61,6 +61,26 @@ test("protected status accepts valid token", async () => {
   assert.equal((await response.json()).mode, "read-only");
 });
 
+
+test("private Sheets and status endpoints reject unauthenticated requests", async () => {
+  const cases = [
+    ["GET", "/v1/status"],
+    ["GET", "/v1/sheets/list"],
+    ["GET", "/v1/sheets/read?sheetName=01%20%E5%BE%93%E6%A5%AD%E5%93%A1"],
+    ["POST", "/v1/sheets/append"],
+    ["GET", "/health/sheets"],
+    ["POST", "/v1/command"]
+  ];
+  for (const [method, path] of cases) {
+    const response = await fetch(`${base}${path}`, {
+      method,
+      headers: method === "POST" ? { "Content-Type": "application/json" } : {},
+      body: method === "POST" ? JSON.stringify({ command: "status", sheetName: "01 従業員", rows: [["x"]] }) : undefined
+    });
+    assert.equal(response.status, 401, `${method} ${path} must require bearer auth`);
+  }
+});
+
 test("command endpoint requires JSON", async () => {
   const response = await fetch(`${base}/v1/command`, {
     method: "POST",
@@ -332,7 +352,7 @@ test("Google Sheets routes reject invalid sheet names", async () => {
 });
 
 
-test("public Sheets health check verifies Apps Script without exposing secrets", async () => {
+test("protected Sheets health check verifies Apps Script without exposing secrets", async () => {
   const sent = [];
   const app = createServer({
     token,
@@ -348,7 +368,7 @@ test("public Sheets health check verifies Apps Script without exposing secrets",
   });
   await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
   try {
-    const response = await fetch(`http://127.0.0.1:${app.address().port}/health/sheets`);
+    const response = await fetch(`http://127.0.0.1:${app.address().port}/health/sheets`, { headers: { Authorization: `Bearer ${token}` } });
     const result = await response.json();
     assert.equal(response.status, 200);
     assert.deepEqual(result, { ok: true, googleSheets: "connected", sheetCount: 2, readTest: "success", rowsRead: 1, columnsRead: 1 });
@@ -824,3 +844,55 @@ test("command center AI plan endpoint is unavailable when planner is not configu
     assert.equal(response.status,503);
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
+
+test("approval decisions and inbox require a separate owner token", async t => {
+  const ownerToken="o".repeat(64);
+  const {createApprovalStore}=require("./core/approval-store");
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-owner-approval-auth-"));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const approvalStore=createApprovalStore({filePath:path.join(dir,"approvals.jsonl")});
+  const app=createServer({token,ownerToken,approvalStore});
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  const root="http://127.0.0.1:"+app.address().port;
+  const regularHeaders={Authorization:"Bearer "+token,"Content-Type":"application/json"};
+  const ownerHeaders={Authorization:"Bearer "+ownerToken,"Content-Type":"application/json"};
+  try {
+    const created=await fetch(root+"/v1/approvals",{method:"POST",headers:regularHeaders,body:JSON.stringify({
+      departmentId:"office",actionClass:"external_submit",summary:"補助金申請の提出承認"
+    })});
+    assert.equal(created.status,201);
+    const item=(await created.json()).approval;
+    const regularList=await fetch(root+"/v1/approvals",{headers:{Authorization:"Bearer "+token}});
+    assert.equal(regularList.status,401);
+    const regularDecision=await fetch(root+"/v1/approvals/"+item.id+"/decision",{method:"POST",headers:regularHeaders,body:JSON.stringify({decision:"approved"})});
+    assert.equal(regularDecision.status,401);
+    const ownerDecision=await fetch(root+"/v1/approvals/"+item.id+"/decision",{method:"POST",headers:ownerHeaders,body:JSON.stringify({decision:"approved",reason:"代表者確認"})});
+    const ownerDecisionResult=await ownerDecision.json();
+    assert.equal(ownerDecision.status,200,JSON.stringify(ownerDecisionResult));
+    assert.equal(ownerDecisionResult.approval.status,"approved");
+    const ownerList=await fetch(root+"/v1/approvals?status=approved",{headers:{Authorization:"Bearer "+ownerToken}});
+    assert.equal(ownerList.status,200);
+    assert.equal((await ownerList.json()).approvals.length,1);
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
+
+test("approval decision fails closed when owner token is not configured", async t => {
+  const {createApprovalStore}=require("./core/approval-store");
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-owner-approval-unconfigured-"));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const approvalStore=createApprovalStore({filePath:path.join(dir,"approvals.jsonl")});
+  const app=createServer({token,ownerToken:"",approvalStore});
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  const root="http://127.0.0.1:"+app.address().port;
+  try {
+    const created=await fetch(root+"/v1/approvals",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({
+      departmentId:"office",actionClass:"external_submit",summary:"owner-token-not-configured"
+    })});
+    assert.equal(created.status,201);
+    const item=(await created.json()).approval;
+    const response=await fetch(root+"/v1/approvals/"+item.id+"/decision",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({decision:"approved"})});
+    assert.equal(response.status,503);
+    assert.equal((await approvalStore.get(item.id)).status,"pending");
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
+

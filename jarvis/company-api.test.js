@@ -10,6 +10,7 @@ function fixture({jobStore=null,approvalStore=null}={}) {
   const calls=[];
   const app=createServer({
     token,
+    ownerToken:token,
     jobStore,
     approvalStore,
     sheetsUrl:"https://script.google.com/macros/s/test-id/exec",
@@ -121,9 +122,9 @@ test("financials API reads only approved sales and expense sheets and returns ta
  const calls=[];
  const app=createServer({token,sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"s".repeat(128),fetchImpl:async(url,options)=>{
   const body=JSON.parse(options.body);calls.push(body);
-  if(body.action==="listSheets")return{ok:true,json:async()=>({ok:true,sheets:["売上","経費","01 従業員"]})};
-  if(body.sheetName==="売上")return{ok:true,json:async()=>({ok:true,rows:[SALES_HEADERS,["S-1","2026/11/01","P1","岡山現場","顧客","工事","850,000","85,000","935,000","I-1","",""] ]})};
-  if(body.sheetName==="経費")return{ok:true,json:async()=>({ok:true,rows:[EXPENSE_HEADERS,["E-1","2026/11/02","P1","岡山現場","工事原価","外注費","業者","400,000","40,000","440,000","振込","","",""] ]})};
+  if(body.action==="listSheets")return{ok:true,json:async()=>({ok:true,sheets:["04 売上","05 経費","01 従業員"]})};
+  if(body.sheetName==="04 売上")return{ok:true,json:async()=>({ok:true,rows:[SALES_HEADERS,["S-1","2026/11/01","P1","岡山現場","顧客","工事","850,000","85,000","935,000","I-1","",""] ]})};
+  if(body.sheetName==="05 経費")return{ok:true,json:async()=>({ok:true,rows:[EXPENSE_HEADERS,["E-1","2026/11/02","P1","岡山現場","工事原価","外注費","業者","400,000","40,000","440,000","振込","","",""] ]})};
   throw new Error("Unexpected sheet");
  }});
  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
@@ -132,12 +133,12 @@ test("financials API reads only approved sales and expense sheets and returns ta
   const result=await response.json();
   assert.equal(response.status,200);assert.equal(result.financials.revenueYen,850000);assert.equal(result.financials.expenseYen,400000);assert.equal(result.financials.profitYen,450000);
   assert.equal(JSON.stringify(result).includes("顧客"),false);assert.equal(JSON.stringify(result).includes("業者"),false);
-  assert.deepEqual(calls.map(x=>x.action+":"+(x.sheetName||"")),["listSheets:","readRows:売上","readRows:経費"]);
+  assert.deepEqual(calls.map(x=>x.action+":"+(x.sheetName||"")),["listSheets:","readRows:04 売上","readRows:05 経費"]);
  }finally{await new Promise(resolve=>app.close(resolve));}
 });
 
 test("financial API fails closed if either financial sheet is absent",async()=>{
- const app=createServer({token,sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"s".repeat(128),fetchImpl:async()=>({ok:true,json:async()=>({ok:true,sheets:["売上"]})})});
+ const app=createServer({token,sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"s".repeat(128),fetchImpl:async()=>({ok:true,json:async()=>({ok:true,sheets:["04 売上"]})})});
  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
  try{
   const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/company/financials`,{headers:{Authorization:`Bearer ${token}`}});
@@ -151,10 +152,10 @@ test("company AI question receives bounded financial aggregates but no customer 
  let created;
  const app=createServer({token,sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"s".repeat(128),jobStore:{create:async value=>{created=value;return{created:true,job:{id:"00000000-0000-4000-8000-000000000002",status:"queued"}};}},fetchImpl:async(url,options)=>{
   const body=JSON.parse(options.body);
-  if(body.action==="listSheets")return{ok:true,json:async()=>({ok:true,sheets:["03 日報","売上","経費"]})};
+  if(body.action==="listSheets")return{ok:true,json:async()=>({ok:true,sheets:["03 日報","04 売上","05 経費"]})};
   if(body.sheetName==="03 日報")return{ok:true,json:async()=>({ok:true,rows:[dailyHeaders,["DR-1","2026-11-15T09:00:00.000Z","2026-11-15","EMP003","氏名非公開","岡山現場","作業","08:00","17:00",60,2,"","",""]]})};
-  if(body.sheetName==="売上")return{ok:true,json:async()=>({ok:true,rows:[SALES_HEADERS,["S-1","2026/11/01","P1","岡山現場","顧客秘密","工事","500000","50000","550000","I-1","",""]]})};
-  if(body.sheetName==="経費")return{ok:true,json:async()=>({ok:true,rows:[EXPENSE_HEADERS,["E-1","2026/11/02","P1","岡山現場","工事原価","外注費","業者秘密","200000","20000","220000","振込","url","備考秘密",""]]})};
+  if(body.sheetName==="04 売上")return{ok:true,json:async()=>({ok:true,rows:[SALES_HEADERS,["S-1","2026/11/01","P1","岡山現場","顧客秘密","工事","500000","50000","550000","I-1","",""]]})};
+  if(body.sheetName==="05 経費")return{ok:true,json:async()=>({ok:true,rows:[EXPENSE_HEADERS,["E-1","2026/11/02","P1","岡山現場","工事原価","外注費","業者秘密","200000","20000","220000","振込","url","備考秘密",""]]})};
   throw new Error("Unexpected sheet");
  }});
  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
@@ -175,9 +176,9 @@ test("financials API includes receivables, collections and overdue amounts when 
  const {SALES_HEADERS,EXPENSE_HEADERS,INVOICE_HEADERS,PAYMENT_HEADERS}=require("./core/financial-sheet-reader");
  const app=createServer({token,sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"s".repeat(128),now:()=>new Date("2026-11-16T00:00:00Z"),fetchImpl:async(url,options)=>{
   const body=JSON.parse(options.body);
-  if(body.action==="listSheets")return{ok:true,json:async()=>({ok:true,sheets:["売上","経費","09 請求","10 入金"]})};
-  if(body.sheetName==="売上")return{ok:true,json:async()=>({ok:true,rows:[SALES_HEADERS]})};
-  if(body.sheetName==="経費")return{ok:true,json:async()=>({ok:true,rows:[EXPENSE_HEADERS]})};
+  if(body.action==="listSheets")return{ok:true,json:async()=>({ok:true,sheets:["04 売上","05 経費","09 請求","10 入金"]})};
+  if(body.sheetName==="04 売上")return{ok:true,json:async()=>({ok:true,rows:[SALES_HEADERS]})};
+  if(body.sheetName==="05 経費")return{ok:true,json:async()=>({ok:true,rows:[EXPENSE_HEADERS]})};
   if(body.sheetName==="09 請求")return{ok:true,json:async()=>({ok:true,rows:[INVOICE_HEADERS,["I-1","INV-1","2026/10/01","2026/10/31","P1","岡山現場","顧客秘密","500000","50000","550000","200000","350000","一部入金",""]]})};
   if(body.sheetName==="10 入金")return{ok:true,json:async()=>({ok:true,rows:[PAYMENT_HEADERS,["P-1","2026/11/05","I-1","P1","岡山現場","顧客秘密","200000","振込","口座秘密",""]]})};
   throw new Error("Unexpected sheet");
@@ -241,9 +242,9 @@ test("tax agent receives validated financial aggregates without customer or paye
  const jobStore={create:async value=>{queued=value;return {created:true,job:{id:"22222222-2222-4222-8222-222222222222",status:"queued"}};}};
  const app=createServer({token,jobStore,sheetsUrl:"https://script.google.com/macros/s/test-id/exec",sheetsToken:"s".repeat(128),fetchImpl:async(url,options)=>{
   const body=JSON.parse(options.body);
-  if(body.action==="listSheets")return {ok:true,json:async()=>({ok:true,sheets:["売上","経費"]})};
-  if(body.action==="readRows"&&body.sheetName==="売上")return {ok:true,json:async()=>({ok:true,rows:[salesHeaders,["S1","2026/11/15","P1","岡山現場","顧客A","工事","100000","10000","110000","I1","",""]]})};
-  if(body.action==="readRows"&&body.sheetName==="経費")return {ok:true,json:async()=>({ok:true,rows:[expenseHeaders,["E1","2026/11/15","P1","岡山現場","材料費","砕石","仕入先A","30000","3000","33000","振込","","",""]]})};
+  if(body.action==="listSheets")return {ok:true,json:async()=>({ok:true,sheets:["04 売上","05 経費"]})};
+  if(body.action==="readRows"&&body.sheetName==="04 売上")return {ok:true,json:async()=>({ok:true,rows:[salesHeaders,["S1","2026/11/15","P1","岡山現場","顧客A","工事","100000","10000","110000","I1","",""]]})};
+  if(body.action==="readRows"&&body.sheetName==="05 経費")return {ok:true,json:async()=>({ok:true,rows:[expenseHeaders,["E1","2026/11/15","P1","岡山現場","材料費","砕石","仕入先A","30000","3000","33000","振込","","",""]]})};
   throw new Error("Unexpected Sheets action");
  }});
  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
