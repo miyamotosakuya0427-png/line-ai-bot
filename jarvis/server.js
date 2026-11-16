@@ -341,7 +341,7 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         return json(res,200,{ok:true,linkId:result.linkId,status:result.status});
       }
       const ownerApprovalRoute=url.pathname==="/v1/approvals" || /^\/v1\/approvals\/[0-9a-f-]{36}\/decision$/.test(url.pathname);
-      const ownerDataRoute=url.pathname==="/v1/sheets/list" || url.pathname==="/v1/sheets/read" || url.pathname==="/v1/sheets/append" || url.pathname==="/v1/company/ask" || url.pathname==="/v1/company/overview" || url.pathname==="/v1/company/daily-reports" || url.pathname==="/v1/company/employees" || url.pathname==="/v1/company/analytics" || url.pathname==="/v1/company/financials";
+      const ownerDataRoute=url.pathname==="/health/sheets/metadata" || url.pathname==="/health/sheets/record-counts" || url.pathname==="/health/sheets/link-status" || url.pathname==="/health/sheets" || url.pathname==="/v1/sheets/list" || url.pathname==="/v1/sheets/read" || url.pathname==="/v1/sheets/append" || url.pathname==="/v1/company/ask" || url.pathname==="/v1/company/overview" || url.pathname==="/v1/company/daily-reports" || url.pathname==="/v1/company/employees" || url.pathname==="/v1/company/analytics" || url.pathname==="/v1/company/financials";
       if (!ownerApprovalRoute && !ownerDataRoute && !isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
       if (req.method==="POST" && url.pathname==="/v1/company/ask") {
         if (!isOwnerAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authorization required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
