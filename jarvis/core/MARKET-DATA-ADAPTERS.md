@@ -68,3 +68,13 @@ Official references:
 ## Plugin research
 
 The current ChatGPT plugin directory search did not surface a supported direct brokerage or exchange execution connector for Alpaca, Interactive Brokers, or JPX J-Quants. MotherDuck was suggested as an optional analytics/data-warehouse connection for large historical datasets; it is not a broker, market-data vendor, or trading executor. It must be explicitly connected by the owner before it can be used. A ChatGPT connector connection would not automatically install credentials into the Render-hosted JARVIS service.
+
+
+## Implemented provider-neutral contract
+
+The repository now includes `market-data-contract.js` and focused tests. The contract:
+- Requires a server-configured source allowlist with provider and license reference; request payloads cannot create their own allowlist.
+- Normalizes instrument, venue, currency, interval, OHLCV, event/received timestamps, adjustment state, and provider record ID.
+- Rejects inconsistent OHLC ranges, invalid calendar timestamps, stale/future receipt times, unsupported intervals, and unauthorized venue/currency combinations.
+- Always labels normalized records `verified=false` / `unverified`. An allowlist entry is not proof of source accuracy, licensing scope, or completeness.
+- Does not connect to J-Quants or any other provider and does not store credentials. A separately reviewed adapter must fetch data under the owner's actual plan and map its official response into this contract.
