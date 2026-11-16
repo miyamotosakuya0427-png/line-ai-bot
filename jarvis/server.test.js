@@ -867,7 +867,8 @@ test("approval decisions and inbox require a separate owner token", async t => {
     const regularDecision=await fetch(root+"/v1/approvals/"+item.id+"/decision",{method:"POST",headers:regularHeaders,body:JSON.stringify({decision:"approved"})});
     assert.equal(regularDecision.status,401);
     const ownerDecision=await fetch(root+"/v1/approvals/"+item.id+"/decision",{method:"POST",headers:ownerHeaders,body:JSON.stringify({decision:"approved",reason:"代表者確認"})});
-    assert.equal(ownerDecision.status,200);
+    const ownerDecisionBody=await ownerDecision.text();
+    assert.equal(ownerDecision.status,200,ownerDecisionBody);
     assert.equal((await ownerDecision.json()).approval.status,"approved");
     const ownerList=await fetch(root+"/v1/approvals?status=approved",{headers:{Authorization:"Bearer "+ownerToken}});
     assert.equal(ownerList.status,200);
