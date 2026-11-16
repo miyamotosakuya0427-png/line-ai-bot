@@ -132,7 +132,7 @@ test("financials API reads only approved sales and expense sheets and returns ta
   const result=await response.json();
   assert.equal(response.status,200);assert.equal(result.financials.revenueYen,850000);assert.equal(result.financials.expenseYen,400000);assert.equal(result.financials.profitYen,450000);
   assert.equal(JSON.stringify(result).includes("顧客"),false);assert.equal(JSON.stringify(result).includes("業者"),false);
-  assert.deepEqual(calls.map(x=>x.action+":"+(x.sheetName||"")),["listSheets:","readRows:売上","readRows:経費"]);
+  assert.deepEqual(calls.map(x=>x.action+":"+(x.sheetName||"")),["listSheets:","readRows:04 売上","readRows:05 経費"]);
  }finally{await new Promise(resolve=>app.close(resolve));}
 });
 
