@@ -40,7 +40,7 @@ function createWorker({ store, handlers = {}, maxAttempts = 3, clock = () => new
       if (!Number.isFinite(now)) throw new Error("Worker clock returned an invalid timestamp");
       const queued = await store.list({ status: "queued", limit: 200 });
       const eligible = queued.filter(job => !job.retryAt || Date.parse(job.retryAt) <= now);
-      if (!eligible.length) return { processed: false, job: null, waiting: queued.length > 0 };
+      if (!eligible.length) return queued.length ? { processed: false, job: null, waiting: true } : { processed: false, job: null };
       const candidate = eligible.sort((a,b) => a.createdAt.localeCompare(b.createdAt))[0];
       const handler = registry.get(candidate.type);
       const running = await store.transition(candidate.id, "running");
