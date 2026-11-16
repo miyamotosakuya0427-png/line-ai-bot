@@ -9,7 +9,7 @@ const fs=require("node:fs/promises"),os=require("node:os"),path=require("node:pa
 test("command center fans safe work out to selected departments idempotently",async t=>{
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-cc-"));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
  const jobStore=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
- const cc=createCommandCenter({jobStore,worker:{},clock:()=>"2026-11-16T03:00:00Z"});
+ const cc=createCommandCenter({jobStore,worker:{},departmentHandlers:{"department.management":async()=>({}),"department.tax":async()=>({})},clock:()=>"2026-11-16T03:00:00Z"});
  const first=await cc.dispatch({request:"今月の売上と経費を確認",departmentIds:["management","tax"],actionClass:"analyze",idempotencyKey:"month-close-01"});
  assert.equal(first.results.length,2);assert.equal(first.results[0].status,"queued");assert.equal(first.results[1].status,"queued");
  const duplicate=await cc.dispatch({request:"今月の売上と経費を確認",departmentIds:["management","tax"],actionClass:"analyze",idempotencyKey:"month-close-01"});
@@ -30,7 +30,7 @@ test("command center routes sensitive actions to approval and never queues them"
 test("command center rejects unknown departments, duplicate IDs, and malformed requests",async t=>{
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-cc-invalid-"));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
  const jobStore=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
- const cc=createCommandCenter({jobStore});
+ const cc=createCommandCenter({jobStore,worker:{},departmentHandlers:{"department.tax":async()=>({})}});
  const unknown=await cc.dispatch({request:"test",departmentIds:["unknown"]});assert.equal(unknown.results[0].status,"blocked");assert.equal(unknown.results[0].reason,"UNKNOWN_DEPARTMENT");
  await assert.rejects(cc.dispatch({request:"test",departmentIds:["tax","tax"]}),/Duplicate/);
  await assert.rejects(cc.dispatch({request:"",departmentIds:["tax"]}),/Task request/);
@@ -53,6 +53,14 @@ test("department readiness reflects actual registered handlers",async t=>{
  const view=await cc.snapshot();
  assert.equal(view.departments.find(x=>x.id==="tax").runtimeConfigured,true);
  assert.equal(view.departments.find(x=>x.id==="management").runtimeConfigured,false);
+});
+\n
+test("safe dispatch fails closed when a selected department handler is missing",async t=>{
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-cc-missing-handler-"));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+ const jobStore=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
+ const cc=createCommandCenter({jobStore,worker:{},departmentHandlers:{"department.tax":async()=>({})}});
+ await assert.rejects(cc.dispatch({request:"分析",departmentIds:["management","tax"],actionClass:"analyze"}),error=>error.statusCode===503);
+ assert.equal((await jobStore.list({limit:20})).length,0);
 });
 \ntest("command center reports disabled dependencies honestly",async()=>{
  const cc=createCommandCenter();
