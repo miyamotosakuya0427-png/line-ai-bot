@@ -343,7 +343,10 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         return json(res,200,{ok:true,linkId:result.linkId,status:result.status});
       }
       const ownerApprovalRoute=url.pathname==="/v1/approvals" || /^\/v1\/approvals\/[0-9a-f-]{36}\/decision$/.test(url.pathname);
-      if (!ownerApprovalRoute && !isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+      const ownerContentApprovalRoute =
+        (req.method==="GET" && url.pathname==="/v1/content/approvals") ||
+        (req.method==="POST" && url.pathname.startsWith("/v1/content/videos/") && (url.pathname.endsWith("/review") || url.pathname.endsWith("/action-approval")));
+      if (!ownerApprovalRoute && !ownerContentApprovalRoute && !isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
       if (req.method==="POST" && url.pathname==="/v1/company/ask") {
         if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
         if (!jobStore) return json(res,503,{ok:false,error:"Persistent job storage is not configured"});
@@ -656,9 +659,6 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         if(!video)return json(res,404,{ok:false,error:"Video not found"});
         return json(res,200,{ok:true,videoId:video.id,scriptMetrics:createScriptMetrics(video.script||"")});
       }
-      const ownerContentApprovalRoute =
-        (req.method==="GET" && url.pathname==="/v1/content/approvals") ||
-        (req.method==="POST" && url.pathname.startsWith("/v1/content/videos/") && (url.pathname.endsWith("/review") || url.pathname.endsWith("/action-approval")));
       if (url.pathname.startsWith("/v1/content/batches") || url.pathname.startsWith("/v1/content/approvals") || url.pathname.startsWith("/v1/content/videos/")) {
         if (!ownerContentApprovalRoute && !isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         if (ownerContentApprovalRoute && !isAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authentication required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
