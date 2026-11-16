@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS jarvis_approvals (
   decision_reason VARCHAR(1000),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   reviewed_at TIMESTAMPTZ,
-  CHECK ((status = 'pending' AND reviewed_at IS NULL) OR (status <> 'pending' AND reviewed_at IS NOT NULL))
+  CHECK ((status = 'pending' AND reviewed_at IS NULL) OR (status IN ('approved','rejected','expired') AND reviewed_at IS NOT NULL))
 );
 CREATE INDEX IF NOT EXISTS jarvis_approvals_pending_idx ON jarvis_approvals(status, created_at);
 
