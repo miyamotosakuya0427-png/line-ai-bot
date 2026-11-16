@@ -786,7 +786,9 @@ test("video batch APIs require auth, persist 100-item queues, and expose owner r
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-video-api-"));
   t.after(()=>fs.rm(dir,{recursive:true,force:true}));
   const videoBatchStore=createVideoBatchStore({filePath:path.join(dir,"videos.jsonl")});
-  const app=createServer({ ownerToken: token,token,videoBatchStore});
+  const ownerToken="o".repeat(64);
+  const ownerHeaders={Authorization:"Bearer "+ownerToken,"Content-Type":"application/json"};
+  const app=createServer({token,ownerToken,videoBatchStore});
   await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
   const root="http://127.0.0.1:"+app.address().port;
   try {
@@ -804,15 +806,21 @@ test("video batch APIs require auth, persist 100-item queues, and expose owner r
     const listed=await fetch(root+"/v1/content/batches?limit=200",{headers:{Authorization:"Bearer "+token}});
     assert.equal((await listed.json()).summary.total,100);
     await advanceToOwnerReview(videoBatchStore,"V01",{fromSourceQa:true});
-    const inbox=await fetch(root+"/v1/content/approvals",{headers:{Authorization:"Bearer "+token}});
+    const regularInbox=await fetch(root+"/v1/content/approvals",{headers:{Authorization:"Bearer "+token}});
+    assert.equal(regularInbox.status,401);
+    const inbox=await fetch(root+"/v1/content/approvals",{headers:{Authorization:"Bearer "+ownerToken}});
     assert.equal((await inbox.json()).pending.length,1);
     await advanceToOwnerReview(videoBatchStore,"V02");
     await videoBatchStore.decideReview("V02",{decision:"hold",note:"確認待ち",actor:"owner"});
-    const heldInbox=await fetch(root+"/v1/content/approvals",{headers:{Authorization:"Bearer "+token}});
+    const heldInbox=await fetch(root+"/v1/content/approvals",{headers:{Authorization:"Bearer "+ownerToken}});
     assert.equal((await heldInbox.json()).pending.some(v=>v.id==="V02"),true);
-    const review=await fetch(root+"/v1/content/videos/V01/review",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({decision:"approve",note:"確認済"})});
+    const regularReview=await fetch(root+"/v1/content/videos/V01/review",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({decision:"approve",note:"通常トークンでは不可"})});
+    assert.equal(regularReview.status,401);
+    const review=await fetch(root+"/v1/content/videos/V01/review",{method:"POST",headers:ownerHeaders,body:JSON.stringify({decision:"approve",note:"確認済"})});
     assert.equal(review.status,200);
-    const approved=await fetch(root+"/v1/content/videos/V01/action-approval",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({action:"publish",provider:"youtube",costEstimate:0,destination:"history-channel"})});
+    const regularAction=await fetch(root+"/v1/content/videos/V01/action-approval",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({action:"publish",provider:"youtube",costEstimate:0,destination:"history-channel"})});
+    assert.equal(regularAction.status,401);
+    const approved=await fetch(root+"/v1/content/videos/V01/action-approval",{method:"POST",headers:ownerHeaders,body:JSON.stringify({action:"publish",provider:"youtube",costEstimate:0,destination:"history-channel"})});
     assert.equal(approved.status,201);
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
