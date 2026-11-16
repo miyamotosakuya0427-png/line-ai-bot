@@ -735,7 +735,7 @@ test("command center API exposes authenticated department overview and safe disp
   t.after(()=>fs.rm(dir,{recursive:true,force:true}));
   const jobStore=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
   const approvalStore=createApprovalStore({filePath:path.join(dir,"approvals.jsonl")});
-  const app=createServer({token,jobStore,approvalStore});
+  const app=createServer({token,jobStore,approvalStore,worker:{},departmentHandlers:{"department.management":async()=>({}),"department.tax":async()=>({})}});
   await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
   const root="http://127.0.0.1:"+app.address().port;
   const headers={Authorization:"Bearer "+token,"Content-Type":"application/json"};
@@ -802,7 +802,7 @@ test("command center AI plan endpoint validates planner output and dispatches sa
   t.after(()=>fs.rm(dir,{recursive:true,force:true}));
   const jobStore=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
   const commandPlanner={plan:async({request})=>({departmentIds:["management","tax"],actionClass:"analyze",rationale:"経営数値と会計の照合",model:"test-model"})};
-  const app=createServer({token,jobStore,worker:{},commandPlanner});
+  const app=createServer({token,jobStore,worker:{},departmentHandlers:{"department.management":async()=>({}),"department.tax":async()=>({})},commandPlanner});
   await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
   const root="http://127.0.0.1:"+app.address().port;
   try {
