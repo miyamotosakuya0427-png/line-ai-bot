@@ -193,10 +193,11 @@ test("LINE link application requires a matching active employee and stores fixed
   const app = loadAppsScript();
   const ss = makeSpreadsheet([headers]);
   const good = JSON.parse(app.appendLineLink(ss, {
-    lineUserId: applicantId, displayName: "申請者", employeeId: "EMP001", employeeName: "従業員A"
+    lineUserId: applicantId, displayName: "=1+1", employeeId: "EMP001", employeeName: "従業員A"
   }).content);
   assert.equal(good.ok, true);
   const row = ss.sheets["13 LINE連携"].rows[1];
+  assert.equal(row[2], "'=1+1");
   assert.equal(row[6], "一般");
   assert.equal(row[7], "確認待ち");
   const mismatch = JSON.parse(app.appendLineLink(ss, {
