@@ -45,6 +45,15 @@ test("approval-only dispatch works without a job queue",async t=>{
  assert.equal((await approvalStore.list({status:"pending"})).length,1);
  await assert.rejects(cc.dispatch({request:"社内分析",departmentIds:["management"],actionClass:"analyze"}),error=>error.statusCode===503);
 });
+\n
+test("department readiness reflects actual registered handlers",async t=>{
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-cc-readiness-"));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+ const jobStore=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
+ const cc=createCommandCenter({jobStore,worker:{},departmentHandlers:{"department.tax":async()=>({ok:true})}});
+ const view=await cc.snapshot();
+ assert.equal(view.departments.find(x=>x.id==="tax").runtimeConfigured,true);
+ assert.equal(view.departments.find(x=>x.id==="management").runtimeConfigured,false);
+});
 \ntest("command center reports disabled dependencies honestly",async()=>{
  const cc=createCommandCenter();
  const view=await cc.snapshot();
