@@ -100,7 +100,7 @@ dailyForm.addEventListener("submit",async(event)=>{event.preventDefault();if(!id
 </script></body></html>`;
 }
 
-function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,approvalStore=null,videoBatchStore=null,paperTradingStore=null,influenceEventStore=null,worker=null,departmentHandlers=null,departmentContextLoader=null,commandPlanner=null,now=()=>new Date()}={}) {
+function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||"",sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,approvalStore=null,videoBatchStore=null,paperTradingStore=null,influenceEventStore=null,worker=null,departmentHandlers=null,departmentContextLoader=null,commandPlanner=null,now=()=>new Date()}={}) {
   async function callSheets(action, fields={}) {
     if (!sheetsUrl || !sheetsToken) { const e=new Error("Google Sheets integration is not configured"); e.statusCode=503; throw e; }
     const u=new URL(sheetsUrl);
@@ -474,9 +474,9 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         return json(res,result.created?201:200,{ok:true,created:result.created,departmentId,job:result.job});
       }
       if (url.pathname==="/v1/approvals" || new RegExp("^/v1/approvals/[0-9a-f-]{36}/decision$").test(url.pathname)) {
-        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         if (!approvalStore) return json(res,503,{ok:false,error:"Persistent approval storage is not configured"});
         if (req.method==="GET" && url.pathname==="/v1/approvals") {
+          if (!isAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authentication required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
           const status=url.searchParams.get("status")||undefined;
           const limit=Number(url.searchParams.get("limit")||50);
           if ((status&& !["pending","approved","rejected"].includes(status))||!Number.isInteger(limit)||limit<1||limit>200) return json(res,400,{ok:false,error:"Invalid approval list parameters"});
@@ -484,6 +484,7 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
           return json(res,200,{ok:true,approvals,executionEnabled:false});
         }
         if (req.method==="POST" && url.pathname==="/v1/approvals") {
+          if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
           if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
           const d=await readJson(req);
           if (typeof d.departmentId!=="string"||!DEPARTMENTS.some(item=>item.id===d.departmentId)||typeof d.actionClass!=="string"||
@@ -496,6 +497,7 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
         }
         const match=new RegExp("^/v1/approvals/([0-9a-f-]{36})/decision$").exec(url.pathname);
         if (req.method==="POST"&&match) {
+          if (!isAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authentication required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
           if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
           const d=await readJson(req);
           if (!["approved","rejected"].includes(d.decision)||(d.reason!==undefined&&(typeof d.reason!=="string"||d.reason.length>1000))) return json(res,400,{ok:false,error:"Invalid approval decision"});
