@@ -128,7 +128,6 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
       if (req.method==="GET" && url.pathname==="/health") return json(res,200,{ok:true,service:"ONE JARVIS",status:"running"});
       if (req.method==="GET" && url.pathname==="/health/sheets/metadata") {
         if (!isOwnerAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authorization required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
-        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         const now=Date.now();
         if (now-lastPublicSheetsCheck<30000) return json(res,429,{ok:false,error:"check rate limited"});
         lastPublicSheetsCheck=now;
@@ -166,7 +165,6 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
       }
       if (req.method==="GET" && url.pathname==="/health/sheets/record-counts") {
         if (!isOwnerAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authorization required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
-        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         const now=Date.now();
         if (now-lastPublicSheetsCheck<30000) return json(res,429,{ok:false,error:"check rate limited"});
         lastPublicSheetsCheck=now;
@@ -195,7 +193,6 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
       }
       if (req.method==="GET" && url.pathname==="/health/sheets/link-status") {
         if (!isOwnerAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authorization required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
-        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         const now=Date.now();
         if (now-lastPublicSheetsCheck<30000) return json(res,429,{ok:false,error:"check rate limited"});
         lastPublicSheetsCheck=now;
@@ -216,7 +213,6 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
       }
       if (req.method==="GET" && url.pathname==="/health/sheets") {
         if (!isOwnerAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authorization required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
-        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         const now=Date.now();
         if (now-lastPublicSheetsCheck<30000) return json(res,429,{ok:false,googleSheets:"check rate limited"});
         lastPublicSheetsCheck=now;
@@ -351,7 +347,8 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         return json(res,200,{ok:true,linkId:result.linkId,status:result.status});
       }
       const ownerApprovalRoute=url.pathname==="/v1/approvals" || /^\/v1\/approvals\/[0-9a-f-]{36}\/decision$/.test(url.pathname);
-      if (!ownerApprovalRoute && !isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+      const ownerDataRoute=url.pathname==="/v1/company/ask" || url.pathname==="/v1/company/overview" || url.pathname==="/v1/company/daily-reports" || url.pathname==="/v1/company/employees" || url.pathname==="/v1/company/analytics" || url.pathname==="/v1/company/financials";
+      if (!ownerApprovalRoute && !ownerDataRoute && !isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
       if (req.method==="POST" && url.pathname==="/v1/company/ask") {
         if (!isOwnerAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authorization required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
         if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
@@ -746,19 +743,16 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
       }
       if (req.method==="GET" && url.pathname==="/v1/sheets/list") {
         if (!isOwnerAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authorization required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
-        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         const r=await callSheets("listSheets"); return json(res,200,{ok:true,sheets:r.sheets});
       }
       if (req.method==="GET" && url.pathname==="/v1/sheets/read") {
         if (!isOwnerAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authorization required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
-        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         const sheetName=url.searchParams.get("sheetName")||"", startRow=Number(url.searchParams.get("startRow")||1), numRows=Number(url.searchParams.get("numRows")||20);
         if (!validSheetName(sheetName) || !Number.isInteger(startRow) || startRow<1 || !Number.isInteger(numRows) || numRows<1 || numRows>100) return json(res,400,{ok:false,error:"Invalid read parameters"});
         const r=await callSheets("readRows",{sheetName,startRow,numRows}); return json(res,200,{ok:true,rows:r.rows});
       }
       if (req.method==="POST" && url.pathname==="/v1/sheets/append") {
         if (!isOwnerAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Owner authorization required":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
-        if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
         const d=await readJson(req);
         if (!validSheetName(d.sheetName)||!Array.isArray(d.rows)||d.rows.length<1||d.rows.length>50||!d.rows.every(row=>Array.isArray(row)&&row.length>=1&&row.length<=20&&row.every(v=>["string","number","boolean"].includes(typeof v)||v===null))) return json(res,400,{ok:false,error:"Invalid append payload"});
