@@ -36,7 +36,11 @@ function createCommandCenter({jobStore=null,approvalStore=null,worker=null,depar
     if(!Array.isArray(departmentIds)||departmentIds.length<1||departmentIds.length>DEPARTMENTS.length)throw new Error("Select 1 to "+DEPARTMENTS.length+" departments");
     if(new Set(departmentIds).size!==departmentIds.length)throw new Error("Duplicate department IDs are not allowed");
     if(!ACTIONS.has(actionClass))throw new Error("Unsupported action class");
-    if(!jobStore&&SAFE_ACTIONS.has(actionClass)){const error=new Error("Persistent job queue is not configured");error.statusCode=503;throw error;}
+    if(SAFE_ACTIONS.has(actionClass)){
+      if(!jobStore||!worker){const error=new Error("Persistent job queue and worker are not configured");error.statusCode=503;throw error;}
+      const missing=departmentIds.filter(id=>validateAgentTask({departmentId:id,actionClass}).allowed&&(!departmentHandlers||typeof departmentHandlers["department."+id]!=="function"));
+      if(missing.length){const error=new Error("Department handlers are not configured: "+missing.join(", "));error.statusCode=503;throw error;}
+    }
     if(typeof idempotencyKey!=="string"||idempotencyKey.length>100)throw new Error("Invalid idempotency key");
     const results=[];
     for(const departmentId of departmentIds){
