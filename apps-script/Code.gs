@@ -249,11 +249,46 @@ const DAILY_REPORT_HEADERS = [
   "開始時刻", "終了時刻", "休憩（分）", "作業人数", "使用機械・車両", "使用材料", "連絡事項"
 ];
 
+function findActiveLineLink(ss, lineUserId, employeeId, employeeName) {
+  const sheet = ss.getSheetByName(LINE_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return false;
+  const lastColumn = sheet.getLastColumn();
+  const headers = sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0].map(v => String(v).trim());
+  const lineCol = headers.indexOf("LINEユーザーID");
+  const employeeCol = headers.indexOf("従業員ID");
+  const nameCol = headers.indexOf("氏名");
+  const statusCol = headers.indexOf("状態");
+  if ([lineCol, employeeCol, nameCol, statusCol].some(index => index < 0)) return false;
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, lastColumn).getDisplayValues();
+  const matches = rows.filter(row => String(row[lineCol] || "").trim() === lineUserId &&
+    String(row[employeeCol] || "").trim() === employeeId &&
+    String(row[nameCol] || "").trim() === employeeName &&
+    String(row[statusCol] || "").trim() === "有効");
+  return matches.length === 1;
+}
+
 function appendDailyReport(ss, data) {
   const report = data.report || {};
-  const required = ["reportId","recordedAt","workDate","employeeId","employeeName","siteName","workDetails","startTime","endTime"];
-  if (required.some(key => !String(report[key] || "").trim())) {
+  const required = ["reportId","recordedAt","workDate","lineUserId","employeeId","employeeName","siteName","workDetails","startTime","endTime"];
+  if (required.some(key => !String(report[key] || "").trim()) ||
+      !/^DR-[0-9a-f-]{36}$/i.test(String(report.reportId || "")) ||
+      !/^U[0-9a-f]{32}$/i.test(String(report.lineUserId || "")) ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(String(report.workDate || "")) ||
+      !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(report.startTime || "")) ||
+      !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(report.endTime || "")) ||
+      !Number.isInteger(Number(report.breakMinutes)) || Number(report.breakMinutes) < 0 || Number(report.breakMinutes) > 600 ||
+      !Number.isInteger(Number(report.workerCount)) || Number(report.workerCount) < 1 || Number(report.workerCount) > 100 ||
+      String(report.siteName || "").length > 100 || String(report.workDetails || "").length > 2000 ||
+      String(report.equipment || "").length > 300 || String(report.materials || "").length > 500 ||
+      String(report.notes || "").length > 1000) {
     return output({ ok: false, error: "Invalid daily report" });
+  }
+  const employee = findEmployeeRecord(ss, String(report.employeeId).trim());
+  if (!employee || employee.name !== String(report.employeeName).trim()) {
+    return output({ ok: false, error: "Daily report employee does not match the employee register" });
+  }
+  if (!findActiveLineLink(ss, String(report.lineUserId).trim(), String(report.employeeId).trim(), employee.name)) {
+    return output({ ok: false, error: "An active LINE link for this employee is required" });
   }
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
