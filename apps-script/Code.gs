@@ -366,9 +366,8 @@ function appendLineLink(ss, data) {
   const lineUserId = String(data.lineUserId || "").trim();
   const displayName = String(data.displayName || "").trim();
   const employeeId = String(data.employeeId || "").trim();
-  const employeeName = String(data.employeeName || "").trim();
   if (!/^U[0-9a-f]{32}$/i.test(lineUserId) || !displayName || displayName.length > 100 ||
-      !/^[A-Z]{2,3}[0-9]{3,6}$/.test(employeeId) || !employeeName || employeeName.length > 100) {
+      !/^[A-Z]{2,3}[0-9]{3,6}$/.test(employeeId)) {
     return output({ ok: false, error: "Invalid LINE link request" });
   }
   const lock = LockService.getScriptLock();
@@ -383,8 +382,8 @@ function appendLineLink(ss, data) {
     const columns = Object.fromEntries(required.map(name => [name, headers.indexOf(name)]));
     if (required.some(name => columns[name] < 0)) return output({ ok: false, error: "Invalid LINE sheet headers" });
     const employee = findEmployeeRecord(ss, employeeId);
-    if (!employee || employee.name !== employeeName) {
-      return output({ ok: false, error: "Employee ID and name must match the employee register" });
+    if (!employee) {
+      return output({ ok: false, error: "Employee ID is not an active employee" });
     }
     const lastRow = sheet.getLastRow();
     if (lastRow >= 2) {
@@ -398,7 +397,7 @@ function appendLineLink(ss, data) {
     row[columns["LINEユーザーID"]] = lineUserId;
     row[columns["LINE表示名"]] = displayName;
     row[columns["従業員ID"]] = employeeId;
-    row[columns["氏名"]] = employeeName;
+    row[columns["氏名"]] = employee.name;
     row[columns["権限"]] = "一般";
     row[columns["状態"]] = "確認待ち";
     const timestampColumn = headers.indexOf("申請日時");
