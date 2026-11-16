@@ -1,7 +1,7 @@
 "use strict";
 const test=require("node:test");
 const assert=require("node:assert/strict");
-const {createDepartmentContextLoader,SHEETS}=require("./department-context-loader");
+const {createDepartmentContextLoader,SHEETS,japanDate}=require("./department-context-loader");
 
 const employeeHeaders=["従業員ID","氏名","LINE表示名","職種","役職","単価","電話番号","入社日","登録日","状態","備考"];
 const dailyHeaders=["日報ID","記録日時","作業日","従業員ID","氏名","現場名","作業内容","開始時刻","終了時刻","休憩（分）","作業人数","使用機械・車両","使用材料","連絡事項"];
@@ -82,4 +82,8 @@ test("unsupported departments never read arbitrary sheet names",async()=>{
  const result=await loader.load("affiliate");
  assert.equal(result.status,"not_available_for_department");
  assert.equal(sent.length,0);
+});
+
+test("receivables as-of date uses Japan local calendar day",()=>{
+ assert.equal(japanDate(new Date("2026-11-15T16:00:00.000Z")),"2026-11-16");
 });
