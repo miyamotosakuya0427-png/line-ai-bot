@@ -57,6 +57,8 @@ test("approval execution is bound to resource, exact payload, expiry, and one au
  await assert.rejects(store.claimExecution(approved.id,{resourceId:"V104",operationPayload:payload,actor:"untrusted"}),/not authorized/);
  const claimed=await store.claimExecution(approved.id,{resourceId:"V104",operationPayload:payload,actor:"owner-api"});
  assert.equal(claimed.executionStatus,"claimed");
+ assert.equal((await store.validateExecutionClaim(approved.id,{claimId:claimed.executionClaim.id,resourceId:"V104",operationPayload:payload,actor:"owner-api"})).ok,true);
+ await assert.rejects(store.validateExecutionClaim(approved.id,{claimId:claimed.executionClaim.id,resourceId:"V105",operationPayload:payload,actor:"owner-api"}),/integrity/);
  await assert.rejects(store.claimExecution(approved.id,{resourceId:"V104",operationPayload:payload,actor:"owner-api"}),/already been claimed/);
 });
 
