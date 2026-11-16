@@ -73,7 +73,7 @@ function createGasHarness() {
   };
   const source = fs.readFileSync(path.join(__dirname, "../apps-script/Code.gs"), "utf8");
   vm.runInNewContext(source, context, { filename: "Code.gs" });
-  return { context, sheets, properties, ss, request(data, token = "s".repeat(128)) {
+  return { context, sheets, properties, ss, addSheet(name, rows) { const sheet = new Sheet(name, rows); sheets.set(name, sheet); return sheet; }, request(data, token = "s".repeat(128)) {
     const result = context.doPost({ postData: { contents: JSON.stringify({ ...data, token }) } });
     return JSON.parse(result.text);
   } };
@@ -89,7 +89,7 @@ test("Apps Script rejects missing or invalid shared token", () => {
 
 test("Apps Script read allowlist denies settings and generic writes", () => {
   const h = createGasHarness();
-  h.sheets.set("15 設定", new (h.context.Sheet || class {})());
+  h.addSheet("15 設定", [["設定項目"], ["秘密"]]);
   assert.deepEqual(h.request({ action: "appendRows", sheetName: "03 日報", rows: [["x"]] }), {
     ok: false, error: "Generic writes are disabled; use a dedicated validated action"
   });
@@ -97,8 +97,8 @@ test("Apps Script read allowlist denies settings and generic writes", () => {
 
 test("LINE link request requires an exact active employee-register ID/name match", () => {
   const h = createGasHarness();
-  h.sheets.set("01 従業員", new (class { constructor(){this.data=[EMPLOYEE_HEADERS,["EMP001","従業員A","","","","","","","","有効",""]];} getLastRow(){return this.data.length;} getLastColumn(){return 11;} getRange(r,c,n=1,m=1){return {getDisplayValues:()=>this.data.slice(r-1,r-1+n).map(row=>row.slice(c-1,c-1+m).map(v=>String(v??"")))};} })());
-  h.sheets.set("13 LINE連携", new (class { constructor(){this.data=[LINE_HEADERS];} getLastRow(){return this.data.length;} getLastColumn(){return LINE_HEADERS.length;} getRange(r,c,n=1,m=1){return {getDisplayValues:()=>this.data.slice(r-1,r-1+n).map(row=>row.slice(c-1,c-1+m).map(v=>String(v??""))),setValues:values=>{for(let i=0;i<values.length;i++)this.data[r-1+i]=values[i];}};} })());
+  h.addSheet("01 従業員", [EMPLOYEE_HEADERS,["EMP001","従業員A","","","","","","","","有効",""]]);
+  h.addSheet("13 LINE連携", [LINE_HEADERS]);
   const invalid = h.request({ action:"appendLineLink", lineUserId:"U"+"a".repeat(32), displayName:"LINE名", employeeId:"EMP001", employeeName:"別人" });
   assert.equal(invalid.ok, false);
   assert.match(invalid.error, /employee register/);
