@@ -56,7 +56,11 @@ function createJobStore({ filePath, clock = () => new Date().toISOString() } = {
         let event;
         try { event = JSON.parse(line); }
         catch { throw new Error("JARVIS job journal is corrupt at line " + (index + 1)); }
-        if (!event || event.type !== "job" || !event.job || typeof event.job.id !== "string" || !STATES.has(event.job.status)) {
+        if (!event || event.type !== "job" || !event.job || typeof event.job.id !== "string" || !STATES.has(event.job.status) ||
+            (event.job.retryAt !== undefined && event.job.retryAt !== null &&
+              (typeof event.job.retryAt !== "string" || !Number.isFinite(Date.parse(event.job.retryAt)))) ||
+            (event.job.lastError !== undefined && event.job.lastError !== null &&
+              (typeof event.job.lastError !== "string" || event.job.lastError.length > 500))) {
           throw new Error("JARVIS job journal contains an invalid event at line " + (index + 1));
         }
         recovered.set(event.job.id, event.job);
