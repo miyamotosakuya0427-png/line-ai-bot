@@ -155,7 +155,8 @@ test("LINE linking verifies ID token and stores only a pending approval", async 
       if(body.action==="listSheets") return {ok:true,json:async()=>({ok:true,sheets:["01 従業員","13 LINE連携"]})};
       if(body.action==="readRows"&&body.sheetName==="01 従業員") return {ok:true,json:async()=>({ok:true,rows:[["従業員ID","氏名"],["EMP001","信原 晴"]]})};
       if(body.action==="readRows"&&body.sheetName==="13 LINE連携") return {ok:true,json:async()=>({ok:true,rows:[["連携ID","LINEユーザーID","LINE表示名","従業員ID"]]})};
-      return {ok:true,json:async()=>({ok:true,appended:1})};
+      if(body.action==="appendLineLink") return {ok:true,json:async()=>({ok:true,appended:1,status:"確認待ち"})};
+      return {ok:true,json:async()=>({ok:false,error:"unexpected action"})};
     }
   });
   await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
@@ -167,10 +168,12 @@ test("LINE linking verifies ID token and stores only a pending approval", async 
     const result=await response.json();
     assert.equal(response.status,201);
     assert.equal(result.status,"確認待ち");
-    const write=sent.find(x=>x.action==="appendRows");
-    assert.equal(write.rows[0][1],"U"+"a".repeat(32));
-    assert.equal(write.rows[0][3],"EMP001");
-    assert.equal(write.rows[0][7],"確認待ち");
+    const write=sent.find(x=>x.action==="appendLineLink");
+    assert.equal(write.lineUserId,"U"+"a".repeat(32));
+    assert.equal(write.employeeId,"EMP001");
+    assert.equal(write.employeeName,"信原 晴");
+    assert.equal(write.role,undefined);
+    assert.equal(write.status,undefined);
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
 
