@@ -190,32 +190,28 @@ test("initial admin bootstrap rejects a LINE identity that differs from the allo
   assert.equal(ss.sheets["13 LINE連携"].rows[1][7], "確認待ち");
 });
 
-test("LINE link application requires a matching active employee and stores fixed general/pending state", () => {
+test("LINE link application derives employee name from the register and stores fixed general/pending state", () => {
   const app = loadAppsScript();
   const ss = makeSpreadsheet([headers]);
   const good = JSON.parse(app.appendLineLink(ss, {
-    lineUserId: applicantId, displayName: "=1+1", employeeId: "EMP001", employeeName: "従業員A"
+    lineUserId: applicantId, displayName: "=1+1", employeeId: "EMP001", employeeName: "別人"
   }).content);
   assert.equal(good.ok, true);
   const row = ss.sheets["13 LINE連携"].rows[1];
   assert.equal(row[2], "'=1+1");
+  assert.equal(row[4], "従業員A");
   assert.equal(row[6], "一般");
   assert.equal(row[7], "確認待ち");
-  const mismatch = JSON.parse(app.appendLineLink(ss, {
-    lineUserId: adminId, displayName: "別申請者", employeeId: "EMP001", employeeName: "別人"
-  }).content);
-  assert.equal(mismatch.ok, false);
-  assert.match(mismatch.error, /employee register/);
   const duplicate = JSON.parse(app.appendLineLink(ss, {
-    lineUserId: adminId, displayName: "別LINE", employeeId: "EMP001", employeeName: "従業員A"
+    lineUserId: adminId, displayName: "別LINE", employeeId: "EMP001"
   }).content);
   assert.equal(duplicate.ok, false);
   assert.match(duplicate.error, /already has a link request/);
   const inactive = JSON.parse(app.appendLineLink(ss, {
-    lineUserId: adminId, displayName: "退職者", employeeId: "EMP002", employeeName: "退職済み"
+    lineUserId: adminId, displayName: "退職者", employeeId: "EMP002"
   }).content);
   assert.equal(inactive.ok, false);
-  assert.match(inactive.error, /employee register/);
+  assert.match(inactive.error, /active employee/);
 });
 
 test("administrator approval rejects a pending row whose employee identity no longer matches", () => {
