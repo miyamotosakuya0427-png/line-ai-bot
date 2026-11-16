@@ -18,3 +18,19 @@ test("ordinary department.content jobs pass through unchanged",async()=>{
  const context={jobId:"ordinary-1"};
  assert.deepEqual(await handler(payload,context),{answer:"ok"});assert.deepEqual(received,{p:payload,c:context});
 });
+
+test("retrieves provided source pages before drafting and labels retrieval as unverified",async()=>{
+ let received=null,fetchCount=0,video={id:"V02",stage:"research",status:"planned"};
+ const store={get:async()=>video,saveDraft:async(id,{script,jobId})=>{video={...video,stage:"script",status:"in_progress",script,draftJobId:jobId};return{created:true,video};}};
+ const handler=createVideoBatchContentHandler({videoBatchStore:store,allowedSourceHosts:["www.example.jp"],researchFetchImpl:async url=>{fetchCount++;return{status:200,ok:true,headers:{get:()=>"text/html"},text:async()=>"<title>史料ページ</title><p>取得できた史料ページの本文です。史実の真正性や個別の主張は未検証です。</p>"};},contentHandler:async payload=>{received=payload;return{answer:"出典候補を確認した台本案"};}});
+ const result=await handler({taskKind:"video-batch-plan",videoId:"V02",researchSources:["https://www.example.jp/source"]},{jobId:"job-202"});
+ assert.equal(fetchCount,1);assert.equal(received.researchContext.sourceSnapshots[0].fetchStatus,"fetched");assert.match(received.researchContext.important,/does not mean|does not/);assert.equal(result.sourceSnapshots[0].verification,"retrieval-only; factual claims remain unverified");
+});
+test("source URLs outside the configured allowlist are not fetched",async()=>{
+ let fetchCount=0,video={id:"V03",stage:"research",status:"planned"};
+ const store={get:async()=>video,saveDraft:async(id,{script,jobId})=>{video={...video,stage:"script",status:"in_progress",script,draftJobId:jobId};return{created:true,video};}};
+ let received;
+ const handler=createVideoBatchContentHandler({videoBatchStore:store,allowedSourceHosts:["www.example.jp"],researchFetchImpl:async()=>{fetchCount++;throw Error("must not fetch");},contentHandler:async payload=>{received=payload;return{answer:"要確認の台本"};}});
+ await handler({taskKind:"video-batch-plan",videoId:"V03",researchSources:["https://evil.example/source"]},{jobId:"job-303"});
+ assert.equal(fetchCount,0);assert.equal(received.researchContext.sourceSnapshots[0].fetchStatus,"unavailable");
+});
