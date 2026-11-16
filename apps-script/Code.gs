@@ -120,6 +120,13 @@ function bootstrapAdmin(ss, data, props) {
 
     const rowNumber = matches[0];
     const linkId = String(sheet.getRange(rowNumber, idCol + 1).getValue() || "");
+    const employeeNameCol = headers.indexOf("氏名");
+    if (employeeNameCol < 0) return output({ ok: false, error: "Invalid LINE sheet headers" });
+    const pendingEmployeeName = String(sheet.getRange(rowNumber, employeeNameCol + 1).getValue() || "").trim();
+    const employee = findEmployeeRecord(ss, employeeId);
+    if (!employee || employee.name !== pendingEmployeeName) {
+      return output({ ok: false, error: "Initial administrator identity does not match the employee register" });
+    }
     appendAuditEvent(ss, [new Date(), lineUserId, "初回管理者登録", linkId, employeeId, "確認待ち", "管理者/有効", "開始"]);
     sheet.getRange(rowNumber, roleCol + 1).setValue("管理者");
     sheet.getRange(rowNumber, statusCol + 1).setValue("有効");
