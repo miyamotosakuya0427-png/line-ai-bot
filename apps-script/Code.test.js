@@ -83,7 +83,7 @@ function loadAppsScript() {
   return context;
 }
 
-const headers = ["連携ID", "LINEユーザーID", "LINE表示名", "従業員ID", "従業員名", "グループID", "権限", "状態"];
+const headers = ["連携ID", "LINEユーザーID", "LINE表示名", "従業員ID", "氏名", "グループID", "権限", "状態"];
 const adminId = "U" + "a".repeat(32);
 const applicantId = "U" + "b".repeat(32);
 
