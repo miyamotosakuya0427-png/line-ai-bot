@@ -118,6 +118,30 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
     return result;
   }
 
+  // Process-local throttle: defense in depth only; durable/shared limiting is required for multi-instance deployments.
+  const lineLinkRateLimits = new Map();
+  function allowLineLinkAttempt(lineUserId) {
+    const current = now().getTime();
+    const windowMs = 15 * 60 * 1000;
+    const entry = lineLinkRateLimits.get(lineUserId);
+    if (!entry || current - entry.startedAt >= windowMs) {
+      lineLinkRateLimits.set(lineUserId, { startedAt: current, count: 1 });
+    } else if (entry.count >= 5) {
+      return false;
+    } else {
+      entry.count += 1;
+    }
+    if (lineLinkRateLimits.size > 5000) {
+      for (const [key, value] of lineLinkRateLimits) {
+        if (current - value.startedAt >= windowMs) lineLinkRateLimits.delete(key);
+      }
+    }
+    return true;
+  }
+  function genericLineLinkAcknowledgement(res) {
+    return json(res,202,{ok:true,message:"申請内容を受け付けました。確認後、必要な場合は管理者から連絡します。"});
+  }
+
   let lastPublicSheetsCheck = 0;
   return http.createServer(async(req,res)=>{
     try {
@@ -238,6 +262,9 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         if (!lineLoginChannelId) return json(res,503,{ok:false,error:"LINE Login channel is not configured"});
         const d=await readJson(req);
         const identity=await verifyLineIdToken(d.idToken,lineLoginChannelId,fetchImpl);
+        if (url.pathname==="/v1/line/link" && !allowLineLinkAttempt(identity.lineUserId)) {
+          return json(res,429,{ok:false,error:"申請回数の上限に達しました。時間をおいて再度お試しください。"},{"Retry-After":"900"});
+        }
         if (url.pathname==="/v1/line/employees") {
           return json(res,410,{ok:false,error:"従業員一覧の取得は停止しました。会社から通知された従業員IDを入力してください。"});
         }
@@ -248,22 +275,25 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         const employees=await callSheets("readRows",{sheetName:"01 従業員",startRow:1,numRows:100});
         const employeeRows=Array.isArray(employees.rows)?employees.rows:[];
         const employee=employeeRows.slice(1).find(row=>Array.isArray(row)&&String(row[0]||"").trim()===employeeId);
-        if (!employee) return json(res,404,{ok:false,error:"Employee ID not found"});
+        if (!employee) return genericLineLinkAcknowledgement(res);
         const links=await callSheets("readRows",{sheetName:"13 LINE連携",startRow:1,numRows:100});
         const linkRows=Array.isArray(links.rows)?links.rows:[];
         const byLine=linkRows.slice(1).find(row=>Array.isArray(row)&&String(row[1]||"").trim()===identity.lineUserId);
         if (byLine) {
-          if (String(byLine[3]||"").trim()===employeeId) return json(res,200,{ok:true,submitted:true,alreadySubmitted:true,status:String(byLine[7]||"確認待ち")});
-          return json(res,409,{ok:false,error:"このLINEアカウントは別の従業員に登録済みです"});
+          return genericLineLinkAcknowledgement(res);
         }
         const byEmployee=linkRows.slice(1).find(row=>Array.isArray(row)&&String(row[3]||"").trim()===employeeId);
-        if (byEmployee) return json(res,409,{ok:false,error:"この従業員はすでに別のLINEアカウントで申請または登録されています。管理者に確認してください"});
-        const appended=await callSheets("appendLineLink",{
-          lineUserId:identity.lineUserId,displayName:identity.displayName,
-          employeeId,employeeName:String(employee[1]||"").trim()
-        });
-        if (!appended.ok) return json(res,409,{ok:false,error:appended.error||"LINE link request was not saved"});
-        return json(res,201,{ok:true,submitted:true,alreadySubmitted:false,status:"確認待ち",appended:appended.appended||1});
+        if (byEmployee) return genericLineLinkAcknowledgement(res);
+        try {
+          await callSheets("appendLineLink",{
+            lineUserId:identity.lineUserId,displayName:identity.displayName,
+            employeeId,employeeName:String(employee[1]||"").trim()
+          });
+        } catch (error) {
+          if (error.statusCode===400) return genericLineLinkAcknowledgement(res);
+          throw error;
+        }
+        return genericLineLinkAcknowledgement(res);
       }
       // 日報保存: LINE本人確認に加え、13 LINE連携で有効な本人の従業員IDを照合する。
       if (req.method==="POST" && url.pathname==="/v1/daily-report") {
