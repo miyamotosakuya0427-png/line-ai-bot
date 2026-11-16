@@ -97,17 +97,15 @@ test("Apps Script read allowlist denies settings and generic writes", () => {
   });
 });
 
-test("LINE link request requires an exact active employee-register ID/name match", () => {
+test("LINE link request derives the employee name from the authoritative register, ignoring client-supplied names", () => {
   const h = createGasHarness();
   h.addSheet("01 従業員", [EMPLOYEE_HEADERS,["EMP001","従業員A","","","","","","","","有効",""]]);
   h.addSheet("13 LINE連携", [LINE_HEADERS]);
-  const invalid = h.request({ action:"appendLineLink", lineUserId:"U"+"a".repeat(32), displayName:"LINE名", employeeId:"EMP001", employeeName:"別人" });
-  assert.equal(invalid.ok, false);
-  assert.match(invalid.error, /employee register/);
-  const valid = h.request({ action:"appendLineLink", lineUserId:"U"+"a".repeat(32), displayName:"LINE名", employeeId:"EMP001", employeeName:"従業員A" });
+  const valid = h.request({ action:"appendLineLink", lineUserId:"U"+"a".repeat(32), displayName:"LINE名", employeeId:"EMP001", employeeName:"別人" });
   assert.equal(valid.ok, true);
   assert.equal(valid.status, "確認待ち");
-  const duplicate = h.request({ action:"appendLineLink", lineUserId:"U"+"b".repeat(32), displayName:"別LINE", employeeId:"EMP001", employeeName:"従業員A" });
+  assert.equal(h.sheets.get("13 LINE連携").data[1][4], "従業員A");
+  const duplicate = h.request({ action:"appendLineLink", lineUserId:"U"+"b".repeat(32), displayName:"別LINE", employeeId:"EMP001" });
   assert.equal(duplicate.ok, false);
 });
 
