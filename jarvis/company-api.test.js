@@ -10,6 +10,7 @@ function fixture({jobStore=null,approvalStore=null}={}) {
   const calls=[];
   const app=createServer({
     token,
+    ownerToken:token,
     jobStore,
     approvalStore,
     sheetsUrl:"https://script.google.com/macros/s/test-id/exec",
