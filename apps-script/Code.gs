@@ -273,11 +273,16 @@ function findActiveLineLink(ss, lineUserId, employeeId, employeeName) {
   const statusCol = headers.indexOf("状態");
   if ([lineCol, employeeCol, nameCol, statusCol].some(index => index < 0)) return false;
   const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, lastColumn).getDisplayValues();
-  const matches = rows.filter(row => String(row[lineCol] || "").trim() === lineUserId &&
-    String(row[employeeCol] || "").trim() === employeeId &&
-    String(row[nameCol] || "").trim() === employeeName &&
+  const activeForLine = rows.filter(row =>
+    String(row[lineCol] || "").trim() === lineUserId &&
     String(row[statusCol] || "").trim() === "有効");
-  return matches.length === 1;
+  const activeForEmployee = rows.filter(row =>
+    String(row[employeeCol] || "").trim() === employeeId &&
+    String(row[statusCol] || "").trim() === "有効");
+  if (activeForLine.length !== 1 || activeForEmployee.length !== 1) return false;
+  const link = activeForLine[0];
+  return String(link[employeeCol] || "").trim() === employeeId &&
+    String(link[nameCol] || "").trim() === employeeName;
 }
 
 function appendDailyReport(ss, data) {
