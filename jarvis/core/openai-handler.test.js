@@ -59,5 +59,5 @@ test("assistant handler includes bounded research snapshots with retrieval-only 
  let body;
  const handler=createOpenAIHandler({apiKey:"test-key",fetchImpl:async(url,options)=>{body=JSON.parse(options.body);return{ok:true,json:async()=>({output_text:"取得情報を根拠候補として整理しました"})};}});
  await handler({request:"史料を確認して",researchContext:{sourceSnapshots:[{fetchStatus:"fetched",title:"公的史料"}],important:"retrieval only"}});
- assert.match(body.input,/公的史料/);assert.match(body.input,/真正性・一次資料性/);assert.match(body.input,/retrieval only/);
+ assert.match(body.input,/公的史料/);assert.match(body.input,/真正性・一次資料性/);assert.match(body.input,/信頼できない外部データ/);assert.match(body.input,/retrieval only/);
 });
