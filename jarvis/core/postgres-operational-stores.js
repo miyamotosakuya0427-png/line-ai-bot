@@ -58,7 +58,7 @@ function createPostgresOperationalStores({pool,clock=()=>new Date().toISOString(
   if(!validText(workerId,128,true)||!Number.isInteger(leaseMs)||leaseMs<5000||leaseMs>3600000)throw new Error("Invalid job lease");
   return tx(async c=>{
    const now=clock();
-   const selected=await c.query("SELECT e.aggregate_id,e.payload FROM jarvis.events e WHERE e.aggregate_type='job' AND e.aggregate_version=(SELECT MAX(x.aggregate_version) FROM jarvis.events x WHERE x.aggregate_type='job' AND x.aggregate_id=e.aggregate_id) AND (e.payload->>'status'='queued' OR (e.payload->>'status'='running' AND NULLIF(e.payload->'lease'->>'expiresAt','')::timestamptz <= $1::timestamptz)) ORDER BY e.payload->>'createdAt' ASC FOR UPDATE SKIP LOCKED LIMIT 1",[now]);
+   const selected=await c.query("SELECT e.aggregate_id,e.payload FROM jarvis.events e WHERE e.aggregate_type='job' AND e.aggregate_version=(SELECT MAX(x.aggregate_version) FROM jarvis.events x WHERE x.aggregate_type='job' AND x.aggregate_id=e.aggregate_id) AND (e.payload->>'status'='queued' OR (e.payload->>'status'='running' AND NULLIF(e.payload->'lease'->>'expiresAt','')::timestamptz <= $1::timestamptz)) ORDER BY e.payload->>'createdAt' ASC LIMIT 1 FOR UPDATE SKIP LOCKED",[now]);
    if(!selected.rows[0])return null;
    const current=selected.rows[0].payload;
    await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",["job:"+selected.rows[0].aggregate_id]);
