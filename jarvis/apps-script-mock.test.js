@@ -110,3 +110,36 @@ test("LINE link request requires an exact active employee-register ID/name match
   const duplicate = h.request({ action:"appendLineLink", lineUserId:"U"+"b".repeat(32), displayName:"別LINE", employeeId:"EMP001", employeeName:"従業員A" });
   assert.equal(duplicate.ok, false);
 });
+
+test("administrator review refuses a tampered pending employee identity", () => {
+  const h = createGasHarness();
+  h.addSheet("01 従業員", [EMPLOYEE_HEADERS,["EMP001","正規の氏名","","","","","","","","有効",""],["EMP003","代表者","","","","","","","","有効",""]]);
+  h.addSheet("13 LINE連携", [
+    LINE_HEADERS,
+    ["ADMIN-1","U"+"a".repeat(32),"代表者","EMP003","代表者","","管理者","有効",""],
+    ["PENDING-1","U"+"b".repeat(32),"申請者","EMP001","別人","","一般","確認待ち",""]
+  ]);
+  const result = JSON.parse(h.context.reviewLineLink(h.ss, {
+    adminLineUserId:"U"+"a".repeat(32), linkId:"PENDING-1", decision:"approve"
+  }).text);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /does not match/);
+  assert.equal(h.sheets.get("13 LINE連携").data[2][7], "確認待ち");
+});
+
+test("initial administrator bootstrap refuses a mismatched employee name", () => {
+  const h = createGasHarness();
+  const allowedLineId = "U"+"a".repeat(32);
+  h.addSheet("01 従業員", [EMPLOYEE_HEADERS,["EMP003","代表者","","","","","","","","有効",""]]);
+  h.addSheet("13 LINE連携", [
+    LINE_HEADERS,
+    ["PENDING-1",allowedLineId,"代表者","EMP003","別人","","一般","確認待ち",""]
+  ]);
+  const result = JSON.parse(h.context.bootstrapAdmin(h.ss, {
+    lineUserId:allowedLineId, employeeId:"EMP003"
+  }, { getProperty:key => key==="JARVIS_INITIAL_ADMIN_LINE_USER_ID"?allowedLineId:null }).text);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /does not match/);
+  assert.equal(h.sheets.get("13 LINE連携").data[1][6], "一般");
+  assert.equal(h.sheets.get("13 LINE連携").data[1][7], "確認待ち");
+});
