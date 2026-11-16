@@ -107,7 +107,8 @@ function createJobStore({ filePath, clock = () => new Date().toISOString() } = {
       return [...jobs.values()].filter(job => !status || job.status === status)
         .sort((a,b) => b.createdAt.localeCompare(a.createdAt)).slice(0,limit).map(publicJob);
     },
-    async transition(id, nextStatus, { error = null, result = undefined } = {}) {
+    async transition(id, nextStatus, options = {}) {
+      const { error = null, result = undefined } = options;
       await ready();
       return serialize(async () => {
         const current = jobs.get(id);
@@ -115,7 +116,14 @@ function createJobStore({ filePath, clock = () => new Date().toISOString() } = {
         if (!STATES.has(nextStatus) || !NEXT[current.status].has(nextStatus)) throw new Error("Invalid job state transition");
         if (error !== null && (typeof error !== "string" || error.length > 500)) throw new Error("Invalid job error");
         if (result !== undefined && !validPayload(result)) throw new Error("Invalid job result");
+        const retryAt = options.retryAt;
+        const lastError = options.lastError;
+        if (retryAt !== undefined && retryAt !== null &&
+            (typeof retryAt !== "string" || !Number.isFinite(Date.parse(retryAt)))) throw new Error("Invalid retry time");
+        if (lastError !== undefined && (typeof lastError !== "string" || lastError.length > 500)) throw new Error("Invalid last error");
         const next = { ...current, status: nextStatus, updatedAt: clock(), error: nextStatus === "failed" ? (error || "Job failed") : null,
+          lastError: lastError === undefined ? (nextStatus === "queued" ? current.lastError || null : null) : lastError,
+          retryAt: nextStatus === "queued" ? (retryAt || null) : null,
           result: nextStatus === "succeeded" ? (result === undefined ? current.result : clone(result)) : null };
         if (nextStatus === "running") next.attempts += 1;
         await append({ type: "job", job: next });
