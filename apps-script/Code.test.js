@@ -206,6 +206,11 @@ test("LINE link application requires a matching active employee and stores fixed
   }).content);
   assert.equal(mismatch.ok, false);
   assert.match(mismatch.error, /employee register/);
+  const duplicate = JSON.parse(app.appendLineLink(ss, {
+    lineUserId: adminId, displayName: "別LINE", employeeId: "EMP001", employeeName: "従業員A"
+  }).content);
+  assert.equal(duplicate.ok, false);
+  assert.match(duplicate.error, /already has a link request/);
   const inactive = JSON.parse(app.appendLineLink(ss, {
     lineUserId: adminId, displayName: "退職者", employeeId: "EMP002", employeeName: "退職済み"
   }).content);
