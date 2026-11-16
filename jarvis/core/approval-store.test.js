@@ -29,6 +29,7 @@ test("approval requests are idempotent and only pending requests can be decided"
  const input={departmentId:"office",actionClass:"external_submit",summary:"補助金申請の提出",idempotencyKey:"grant-001"};
  const a=await store.create(input),b=await store.create(input);
  assert.equal(a.created,true);assert.equal(b.created,false);assert.equal(a.approval.id,b.approval.id);
+ await assert.rejects(store.create({...input,summary:"別の操作"}),/idempotency key conflict/);
  await store.decide(a.approval.id,"rejected");
  await assert.rejects(()=>store.decide(a.approval.id,"approved"),/already been decided/);
  assert.equal((await store.list({status:"rejected"})).length,1);
