@@ -48,4 +48,15 @@ test("video journal capacity is enforced before writes without partially creatin
  assert.equal((await recovered.list()).length,1);
 });
 
+test("video journal byte limit blocks oversized writes and partial batches",async t=>{
+ const filePath=await fixture(t),s=createVideoBatchStore({filePath,maxJournalBytes:1024});
+ await assert.rejects(s.createBatch({items:[item(1,{sources:["a".repeat(1000),"b".repeat(1000)]})]}),/size limit/);
+ assert.equal((await s.list()).length,0);
+ await s.createBatch({items:[item(1)]});
+ await assert.rejects(s.saveDraft("V01",{script:"x".repeat(12000),jobId:"oversized-draft"}),/size limit/);
+ assert.equal((await s.get("V01")).stage,"research");
+ const recovered=createVideoBatchStore({filePath,maxJournalBytes:1024});
+ assert.equal((await recovered.list()).length,1);
+});
+
 test("corrupt journal fails closed",async t=>{const filePath=await fixture(t);await fs.writeFile(filePath,"{bad}\n");const s=createVideoBatchStore({filePath});await assert.rejects(s.init(),/corrupt/);});
