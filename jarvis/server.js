@@ -270,24 +270,11 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         }
         const employeeId=typeof d.employeeId==="string"?d.employeeId.trim():"";
         if (!employeeId || employeeId.length>20) return json(res,400,{ok:false,error:"Invalid employee ID"});
-        const listed=await callSheets("listSheets");
-        if (!Array.isArray(listed.sheets)||!listed.sheets.includes("01 従業員")||!listed.sheets.includes("13 LINE連携")) return json(res,503,{ok:false,error:"Required sheets are unavailable"});
-        const employees=await callSheets("readRows",{sheetName:"01 従業員",startRow:1,numRows:100});
-        const employeeRows=Array.isArray(employees.rows)?employees.rows:[];
-        const employee=employeeRows.slice(1).find(row=>Array.isArray(row)&&String(row[0]||"").trim()===employeeId);
-        if (!employee) return genericLineLinkAcknowledgement(res);
-        const links=await callSheets("readRows",{sheetName:"13 LINE連携",startRow:1,numRows:100});
-        const linkRows=Array.isArray(links.rows)?links.rows:[];
-        const byLine=linkRows.slice(1).find(row=>Array.isArray(row)&&String(row[1]||"").trim()===identity.lineUserId);
-        if (byLine) {
-          return genericLineLinkAcknowledgement(res);
-        }
-        const byEmployee=linkRows.slice(1).find(row=>Array.isArray(row)&&String(row[3]||"").trim()===employeeId);
-        if (byEmployee) return genericLineLinkAcknowledgement(res);
         try {
+          // Apps Script validates the employee register and duplicate links under ScriptLock.
+          // Avoid loading employee or LINE-link rows into the public-facing server process.
           await callSheets("appendLineLink",{
-            lineUserId:identity.lineUserId,displayName:identity.displayName,
-            employeeId,employeeName:String(employee[1]||"").trim()
+            lineUserId:identity.lineUserId,displayName:identity.displayName,employeeId
           });
         } catch (error) {
           if (error.statusCode===400) return genericLineLinkAcknowledgement(res);
