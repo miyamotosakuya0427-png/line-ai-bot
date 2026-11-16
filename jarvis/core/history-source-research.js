@@ -39,7 +39,7 @@ async function readBoundedText(response,maxBytes=500000){
  return text;
 }
 async function fetchHistorySourceSnapshots({sources=[],allowedHosts=[],fetchImpl=fetch,now=()=>new Date()}={}){
- if(!Array.isArray(sources)||sources.length>20)throw new Error("Invalid history source list");
+ if(!Array.isArray(sources)||sources.length>10)throw new Error("Invalid history source list");
  const allowed=new Set(normalizeAllowedHosts(allowedHosts));
  return Promise.all(sources.map(async(raw,index)=>{
   const fetchedAt=now().toISOString();
