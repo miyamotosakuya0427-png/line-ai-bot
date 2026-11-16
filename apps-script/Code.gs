@@ -283,16 +283,16 @@ function appendDailyReport(ss, data) {
       String(report.notes || "").length > 1000) {
     return output({ ok: false, error: "Invalid daily report" });
   }
-  const employee = findEmployeeRecord(ss, String(report.employeeId).trim());
-  if (!employee || employee.name !== String(report.employeeName).trim()) {
-    return output({ ok: false, error: "Daily report employee does not match the employee register" });
-  }
-  if (!findActiveLineLink(ss, String(report.lineUserId).trim(), String(report.employeeId).trim(), employee.name)) {
-    return output({ ok: false, error: "An active LINE link for this employee is required" });
-  }
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
+    const employee = findEmployeeRecord(ss, String(report.employeeId).trim());
+    if (!employee || employee.name !== String(report.employeeName).trim()) {
+      return output({ ok: false, error: "Daily report employee does not match the employee register" });
+    }
+    if (!findActiveLineLink(ss, String(report.lineUserId).trim(), String(report.employeeId).trim(), employee.name)) {
+      return output({ ok: false, error: "An active LINE link for this employee is required" });
+    }
     let sheet = ss.getSheetByName(DAILY_REPORT_SHEET);
     if (!sheet) {
       sheet = ss.insertSheet(DAILY_REPORT_SHEET);
