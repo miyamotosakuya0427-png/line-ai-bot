@@ -32,11 +32,11 @@ function createCommandCenter({jobStore=null,approvalStore=null,worker=null,clock
   }
 
   async function dispatch({request,departmentIds,actionClass="analyze",idempotencyKey=""}={}){
-    if(!jobStore)throw new Error("Persistent job queue is not configured");
     if(typeof request!=="string"||!request.trim()||request.length>4000)throw new Error("Task request must be 1-4000 characters");
     if(!Array.isArray(departmentIds)||departmentIds.length<1||departmentIds.length>DEPARTMENTS.length)throw new Error("Select 1 to "+DEPARTMENTS.length+" departments");
     if(new Set(departmentIds).size!==departmentIds.length)throw new Error("Duplicate department IDs are not allowed");
     if(!ACTIONS.has(actionClass))throw new Error("Unsupported action class");
+    if(!jobStore&&SAFE_ACTIONS.has(actionClass)){const error=new Error("Persistent job queue is not configured");error.statusCode=503;throw error;}
     if(typeof idempotencyKey!=="string"||idempotencyKey.length>100)throw new Error("Invalid idempotency key");
     const results=[];
     for(const departmentId of departmentIds){
