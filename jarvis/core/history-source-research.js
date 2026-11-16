@@ -17,6 +17,27 @@ function normalizeAllowedHosts(value){
  const entries=Array.isArray(value)?value:String(value||"").split(",");
  return [...new Set(entries.map(x=>String(x).trim().toLowerCase()).filter(x=>/^(?:[a-z0-9-]+\.)*[a-z0-9-]+$/.test(x)))];
 }
+async function readBoundedText(response,maxBytes=500000){
+ const declared=Number(response.headers?.get?.("content-length")||0);
+ if(declared>maxBytes)throw new Error("Source page exceeds 500 KB limit");
+ if(response.body&&typeof response.body.getReader==="function"){
+  const reader=response.body.getReader(),chunks=[];let size=0;
+  try{
+   while(true){
+    const part=await reader.read();if(part.done)break;
+    size+=part.value.byteLength;
+    if(size>maxBytes){await reader.cancel();throw new Error("Source page exceeds 500 KB limit");}
+    chunks.push(part.value);
+   }
+  }finally{reader.releaseLock?.();}
+  const bytes=new Uint8Array(size);let offset=0;
+  for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}
+  return new TextDecoder("utf-8",{fatal:false}).decode(bytes);
+ }
+ const text=await response.text();
+ if(Buffer.byteLength(text,"utf8")>maxBytes)throw new Error("Source page exceeds 500 KB limit");
+ return text;
+}
 async function fetchHistorySourceSnapshots({sources=[],allowedHosts=[],fetchImpl=fetch,now=()=>new Date()}={}){
  if(!Array.isArray(sources)||sources.length>20)throw new Error("Invalid history source list");
  const allowed=new Set(normalizeAllowedHosts(allowedHosts));
@@ -45,4 +66,4 @@ async function fetchHistorySourceSnapshots({sources=[],allowedHosts=[],fetchImpl
   }
  }));
 }
-module.exports={stripHtml,normalizeAllowedHosts,fetchHistorySourceSnapshots};
+module.exports={stripHtml,normalizeAllowedHosts,readBoundedText,fetchHistorySourceSnapshots};
