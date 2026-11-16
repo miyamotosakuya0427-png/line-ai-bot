@@ -1,6 +1,5 @@
 "use strict";
 
-const SPREADSHEET_ID = "1L4ChnqizuusFoPZKwsJL3bcMnYHc96QjC4EFYK_3COg";
 const EMPLOYEE_SHEET = "01 従業員";
 const LINE_SHEET = "13 LINE連携";
 const AUDIT_SHEET = "14 管理者操作履歴";
@@ -11,11 +10,17 @@ const AUDIT_HEADERS = [
   "対象従業員ID", "変更前状態", "変更後状態", "処理結果"
 ];
 
+function getConfiguredSpreadsheetId(props = PropertiesService.getScriptProperties()) {
+  const spreadsheetId = String(props.getProperty("SPREADSHEET_ID") || "").trim();
+  if (!spreadsheetId) throw new Error("SPREADSHEET_ID Script Property must point to a disposable test spreadsheet or an explicitly approved spreadsheet.");
+  return spreadsheetId;
+}
+
 function setupOneJarvis() {
   const props = PropertiesService.getScriptProperties();
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const spreadsheetId = getConfiguredSpreadsheetId(props);
+  const ss = SpreadsheetApp.openById(spreadsheetId);
   if (!ss.getSheets().length) throw new Error("スプレッドシートにシートがありません。");
-  props.setProperty("SPREADSHEET_ID", SPREADSHEET_ID);
   if (!props.getProperty("JARVIS_SHEETS_TOKEN")) {
     const token = Array.from({ length: 4 }, () => Utilities.getUuid().replace(/-/g, "")).join("");
     props.setProperty("JARVIS_SHEETS_TOKEN", token);
@@ -109,6 +114,14 @@ function bootstrapAdmin(ss, data, props) {
     if (values.slice(1).some(row => String(row[roleCol] || "").trim() === "管理者")) {
       return output({ ok: false, error: "Admin already exists" });
     }
+    const employeeNameColForCheck = headers.indexOf("氏名");
+    if (employeeNameColForCheck < 0) return output({ ok: false, error: "Invalid LINE sheet headers" });
+    const duplicateActiveLink = values.slice(1).some(row =>
+      String(row[statusCol] || "").trim() === "有効" &&
+      (String(row[lineCol] || "").trim() === lineUserId ||
+       String(row[employeeCol] || "").trim() === employeeId)
+    );
+    if (duplicateActiveLink) return output({ ok: false, error: "An active LINE link already exists for this user or employee" });
     const matches = [];
     for (let i = 1; i < values.length; i++) {
       const row = values[i];
@@ -260,11 +273,16 @@ function findActiveLineLink(ss, lineUserId, employeeId, employeeName) {
   const statusCol = headers.indexOf("状態");
   if ([lineCol, employeeCol, nameCol, statusCol].some(index => index < 0)) return false;
   const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, lastColumn).getDisplayValues();
-  const matches = rows.filter(row => String(row[lineCol] || "").trim() === lineUserId &&
-    String(row[employeeCol] || "").trim() === employeeId &&
-    String(row[nameCol] || "").trim() === employeeName &&
+  const activeForLine = rows.filter(row =>
+    String(row[lineCol] || "").trim() === lineUserId &&
     String(row[statusCol] || "").trim() === "有効");
-  return matches.length === 1;
+  const activeForEmployee = rows.filter(row =>
+    String(row[employeeCol] || "").trim() === employeeId &&
+    String(row[statusCol] || "").trim() === "有効");
+  if (activeForLine.length !== 1 || activeForEmployee.length !== 1) return false;
+  const link = activeForLine[0];
+  return String(link[employeeCol] || "").trim() === employeeId &&
+    String(link[nameCol] || "").trim() === employeeName;
 }
 
 function appendDailyReport(ss, data) {
@@ -353,9 +371,8 @@ function appendLineLink(ss, data) {
   const lineUserId = String(data.lineUserId || "").trim();
   const displayName = String(data.displayName || "").trim();
   const employeeId = String(data.employeeId || "").trim();
-  const employeeName = String(data.employeeName || "").trim();
   if (!/^U[0-9a-f]{32}$/i.test(lineUserId) || !displayName || displayName.length > 100 ||
-      !/^[A-Z]{2,3}[0-9]{3,6}$/.test(employeeId) || !employeeName || employeeName.length > 100) {
+      !/^[A-Z]{2,3}[0-9]{3,6}$/.test(employeeId)) {
     return output({ ok: false, error: "Invalid LINE link request" });
   }
   const lock = LockService.getScriptLock();
@@ -370,14 +387,20 @@ function appendLineLink(ss, data) {
     const columns = Object.fromEntries(required.map(name => [name, headers.indexOf(name)]));
     if (required.some(name => columns[name] < 0)) return output({ ok: false, error: "Invalid LINE sheet headers" });
     const employee = findEmployeeRecord(ss, employeeId);
-    if (!employee || employee.name !== employeeName) {
-      return output({ ok: false, error: "Employee ID and name must match the employee register" });
+    if (!employee) {
+      return output({ ok: false, error: "Employee ID is not an active employee" });
     }
     const lastRow = sheet.getLastRow();
     if (lastRow >= 2) {
       const rows = sheet.getRange(2, 1, lastRow - 1, lastColumn).getDisplayValues();
-      if (rows.some(row => String(row[columns["LINEユーザーID"]] || "").trim() === lineUserId || String(row[columns["従業員ID"]] || "").trim() === employeeId)) {
-        return output({ ok: false, error: "LINE user or employee already has a link request" });
+      if (rows.some(row => {
+        const status = String(row[columns["状態"]] || "").trim();
+        const blocksNewRequest = status === "確認待ち" || status === "有効";
+        return blocksNewRequest &&
+          (String(row[columns["LINEユーザーID"]] || "").trim() === lineUserId ||
+           String(row[columns["従業員ID"]] || "").trim() === employeeId);
+      })) {
+        return output({ ok: false, error: "LINE user or employee already has a pending or active link" });
       }
     }
     const row = Array(lastColumn).fill("");
@@ -385,7 +408,7 @@ function appendLineLink(ss, data) {
     row[columns["LINEユーザーID"]] = lineUserId;
     row[columns["LINE表示名"]] = displayName;
     row[columns["従業員ID"]] = employeeId;
-    row[columns["氏名"]] = employeeName;
+    row[columns["氏名"]] = employee.name;
     row[columns["権限"]] = "一般";
     row[columns["状態"]] = "確認待ち";
     const timestampColumn = headers.indexOf("申請日時");
@@ -400,7 +423,7 @@ function output(data) {
 }
 
 function registerOneEmployees() {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const ss = SpreadsheetApp.openById(getConfiguredSpreadsheetId());
   const sheet = ss.getSheetByName(EMPLOYEE_SHEET);
   if (!sheet) throw new Error("01 従業員シートがありません");
   const expectedHeaders = ["従業員ID", "氏名", "LINE表示名", "職種", "役職", "単価", "電話番号", "入社日", "登録日", "状態", "備考"];
