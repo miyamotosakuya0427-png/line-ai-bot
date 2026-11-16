@@ -1,4 +1,6 @@
 "use strict";
+const { initGlitchTip } = require("./core/glitchtip");
+const monitoring = initGlitchTip();
 const http = require("node:http");
 const crypto = require("node:crypto");
 const { createJobStore } = require("./core/job-store");
@@ -760,6 +762,9 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
       if (req.method!=="GET"&&req.method!=="POST") return json(res,405,{ok:false,error:"Method Not Allowed"},{Allow:"GET, POST"});
       return json(res,404,{ok:false,error:"Not Found"});
     } catch(error) {
+      if (Number.isInteger(error.statusCode) ? error.statusCode >= 500 : true) {
+        try { monitoring.captureException(error); } catch (monitoringError) { console.error("GlitchTip capture failed."); }
+      }
       if (res.headersSent) return res.destroy();
       const status=Number.isInteger(error.statusCode)?error.statusCode:500;
       return json(res,status,{ok:false,error:status===500?"Internal Server Error":error.message});
