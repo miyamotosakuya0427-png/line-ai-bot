@@ -8,6 +8,7 @@ const ACTIONS=new Set(["external_submit","financial","contract","publish","delet
 const MAX_APPROVALS=5000;
 const MAX_DETAILS=8000;
 function clone(value){return JSON.parse(JSON.stringify(value));}
+function bytes(value){try{return Buffer.byteLength(JSON.stringify(value),"utf8");}catch{return Infinity;}}
 function validText(value,max,required=false){return typeof value==="string"&&value.length<=max&&(!required||Boolean(value.trim()));}
 function publicApproval(item){return clone(item);}
 function digest(value){return crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");}
