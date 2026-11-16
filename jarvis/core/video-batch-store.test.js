@@ -37,4 +37,15 @@ test("review changes require a fresh edit render and QA before approval can resu
 test("external action approval is scoped, expires and cannot be reused with changed details",async t=>{let now="2026-11-16T00:00:00.000Z";const s=createVideoBatchStore({filePath:await fixture(t),clock:()=>now});await s.createBatch({items:[item(1)]});await advanceToOwnerReview(s,"V01");await s.decideReview("V01",{decision:"approve",actor:"owner"});await s.updateStage("V01","publish_ready");const scope={videoId:"V01",action:"paid_generation",provider:"heygen",costEstimate:0,destination:"private-draft"};await s.approveAction("V01",{...scope,actor:"owner"});assert.equal(await s.verifyActionApproval("V01",scope),true);assert.equal(await s.verifyActionApproval("V01",{...scope,costEstimate:1}),false);now="2026-11-16T01:00:00.000Z";assert.equal(await s.verifyActionApproval("V01",scope),false);});
 test("analytics stage requires a recorded YouTube publication URL and timestamp",async t=>{const s=createVideoBatchStore({filePath:await fixture(t)});await s.createBatch({items:[item(1)]});await advanceToOwnerReview(s,"V01");await s.decideReview("V01",{decision:"approve",actor:"owner"});await s.updateStage("V01","publish_ready");await assert.rejects(s.updateStage("V01","analytics"),/Stage evidence required/);const p=await s.updateStage("V01","analytics",{evidence:{publication:E.publication}});assert.equal(p.stage,"analytics");assert.equal(p.stageEvidence.publication.url,E.publication.url);});
 test("external action approval is unavailable before owner review approval",async t=>{const s=createVideoBatchStore({filePath:await fixture(t)});await s.createBatch({items:[item(1)]});await assert.rejects(s.approveAction("V01",{action:"publish",provider:"youtube",costEstimate:0,destination:"channel"}),/Owner review/);});
+test("video journal capacity is enforced before writes without partially creating a batch",async t=>{
+ const filePath=await fixture(t),s=createVideoBatchStore({filePath,maxEvents:1});
+ await assert.rejects(s.createBatch({items:[item(1),item(2)]}),/event capacity/);
+ assert.equal((await s.list()).length,0);
+ await s.createBatch({items:[item(1)]});
+ await assert.rejects(s.saveDraft("V01",{script:"台本初稿",jobId:"capacity-test"}),/event capacity/);
+ assert.equal((await s.get("V01")).stage,"research");
+ const recovered=createVideoBatchStore({filePath,maxEvents:1});
+ assert.equal((await recovered.list()).length,1);
+});
+
 test("corrupt journal fails closed",async t=>{const filePath=await fixture(t);await fs.writeFile(filePath,"{bad}\n");const s=createVideoBatchStore({filePath});await assert.rejects(s.init(),/corrupt/);});
