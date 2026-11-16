@@ -31,7 +31,7 @@ test("command center rejects unknown departments, duplicate IDs, and malformed r
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-cc-invalid-"));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
  const jobStore=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
  const cc=createCommandCenter({jobStore});
- await assert.rejects(cc.dispatch({request:"test",departmentIds:["unknown"]}),/Unknown|not found|Invalid/);
+ const unknown=await cc.dispatch({request:"test",departmentIds:["unknown"]});assert.equal(unknown.results[0].status,"blocked");assert.equal(unknown.results[0].reason,"UNKNOWN_DEPARTMENT");
  await assert.rejects(cc.dispatch({request:"test",departmentIds:["tax","tax"]}),/Duplicate/);
  await assert.rejects(cc.dispatch({request:"",departmentIds:["tax"]}),/Task request/);
 });
