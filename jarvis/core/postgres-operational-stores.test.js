@@ -52,6 +52,7 @@ test("PostgreSQL approval store persists decision actor and verifies request dig
  const a=await approvals.create({departmentId:"content",actionClass:"publish",summary:"Publish video",details:"approved draft",idempotencyKey:"publish-1"});
  const duplicate=await approvals.create({departmentId:"content",actionClass:"publish",summary:"Publish video",details:"approved draft",idempotencyKey:"publish-1"});
  assert.equal(a.created,true);assert.equal(duplicate.created,false);
+ await assert.rejects(approvals.create({departmentId:"content",actionClass:"publish",summary:"Changed operation",details:"approved draft",idempotencyKey:"publish-1"}),/idempotency key conflict/);
  const decided=await approvals.decide(a.approval.id,"approved",{reason:"reviewed",actor:"owner-api"});
  assert.equal(decided.status,"approved");assert.equal(decided.decidedBy,"owner-api");
  assert.equal((await approvals.create({departmentId:"content",actionClass:"publish",summary:"Publish video",details:"approved draft",idempotencyKey:"publish-1"})).approval.status,"approved");
