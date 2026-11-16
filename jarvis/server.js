@@ -340,7 +340,8 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         const result=await callSheets("reviewLineLink",{adminLineUserId:identity.lineUserId,linkId,decision});
         return json(res,200,{ok:true,linkId:result.linkId,status:result.status});
       }
-      if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+      const ownerApprovalRoute=url.pathname==="/v1/approvals" || /^\/v1\/approvals\/[0-9a-f-]{36}\/decision$/.test(url.pathname);
+      if (!ownerApprovalRoute && !isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
       if (req.method==="POST" && url.pathname==="/v1/company/ask") {
         if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
         if (!jobStore) return json(res,503,{ok:false,error:"Persistent job storage is not configured"});
