@@ -11,14 +11,14 @@ const {createVideoBatchStore,STAGES}=require("./core/video-batch-store");
 const token = "test-token-that-is-at-least-32-bytes-long";
 const STAGE_EVIDENCE={
  sourceQa:{status:"passed",allClaimsVerified:true,verifiedClaimCount:4,primarySourceCount:1,reviewedBy:"test-reviewer",claims:Array.from({length:4},(_,i)=>({claim:"史実の主張"+(i+1),status:"verified",sourceUrl:"https://www.bousai.go.jp/report",sourceTitle:"公的資料",quote:"明暦三年に江戸で大火が起きた。"}))},
- pronunciation:{status:"passed",readingsReviewed:true,termsChecked:8,reviewedBy:"test-reviewer"},
+ pronunciation:{status:"passed",readingsReviewed:true,termsChecked:1,reviewedBy:"test-reviewer",terms:[{term:"明暦三年",reading:"めいれきさんねん",status:"confirmed",sourceUrl:"https://www.bousai.go.jp/report",sourceTitle:"公的資料",quote:"明暦三年に江戸で大火が起きた。",reviewedBy:"test-reviewer"}]},
  narration:{status:"recorded",durationSeconds:600,voiceName:"Hinata",voiceConfirmed:true,recordedBy:"test-recorder"},
  assets:{status:"cleared",assetCount:5,rightsConfirmed:true,clearedBy:"test-editor"},
  edit:{status:"rendered",projectId:"072f8671-af62-480c-8072-bb253faf58b7",compositionId:"cd7b6796-23cc-43a7-ae7c-c2e3cfb50d32",durationSeconds:600},
  finalQa:{status:"passed",checklistPassed:true,openIssues:0,durationSeconds:600,checkedBy:"test-reviewer"}
 };
 async function advanceToOwnerReview(store,id,{fromSourceQa=false}={}){
- if(!fromSourceQa){await store.saveDraft(id,{script:"台本初稿。出典と読みを確認する。",jobId:"server-test-"+id});await store.saveSourceReview(id,{answer:"出典候補確認",jobId:"source-server-"+id,sourceSnapshots:[{requestedUrl:"https://www.bousai.go.jp/report",finalUrl:"https://www.bousai.go.jp/report",fetchedAt:"2026-11-16T00:00:00.000Z",httpStatus:200,title:"公的資料",contentSha256:"c".repeat(64),text:"明暦三年に江戸で大火が起きた。",error:""}]});await store.updateStage(id,"source_qa");}
+ if(!fromSourceQa){await store.saveDraft(id,{script:"明暦三年に江戸で大火が起きた。出典と読みを確認する。",jobId:"server-test-"+id});await store.saveSourceReview(id,{answer:"出典候補確認",jobId:"source-server-"+id,sourceSnapshots:[{requestedUrl:"https://www.bousai.go.jp/report",finalUrl:"https://www.bousai.go.jp/report",fetchedAt:"2026-11-16T00:00:00.000Z",httpStatus:200,title:"公的資料",contentSha256:"c".repeat(64),text:"明暦三年に江戸で大火が起きた。",error:""}]});await store.updateStage(id,"source_qa");}
  await store.updateStage(id,"pronunciation",{evidence:{sourceQa:STAGE_EVIDENCE.sourceQa}});
  await store.updateStage(id,"narration",{evidence:{pronunciation:STAGE_EVIDENCE.pronunciation}});
  await store.updateStage(id,"assets",{evidence:{narration:STAGE_EVIDENCE.narration}});
@@ -721,7 +721,7 @@ test("video batch APIs require auth, persist 100-item queues, and expose owner r
     assert.equal(created.status,201);
     const result=await created.json();
     assert.equal(result.videos.length,100);
-    await videoBatchStore.saveDraft("V01",{script:"台本初稿。出典と読みを確認する。",jobId:"api-test-V01"});
+    await videoBatchStore.saveDraft("V01",{script:"明暦三年に江戸で大火が起きた。出典と読みを確認する。",jobId:"api-test-V01"});
     await videoBatchStore.saveSourceReview("V01",{answer:"出典候補確認",jobId:"source-api-V01",sourceSnapshots:[{requestedUrl:"https://www.bousai.go.jp/report",finalUrl:"https://www.bousai.go.jp/report",fetchedAt:"2026-11-16T00:00:00.000Z",httpStatus:200,title:"公的資料",contentSha256:"d".repeat(64),text:"明暦三年に江戸で大火が起きた。",error:""}]});
     const stage=await fetch(root+"/v1/content/videos/V01/stage",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({stage:"source_qa",notes:"台本保存済み"})});
     assert.equal(stage.status,200);
