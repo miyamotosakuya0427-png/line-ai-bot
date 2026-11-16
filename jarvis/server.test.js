@@ -341,6 +341,46 @@ test("Google Sheets list route forwards authenticated request to Apps Script", a
   }
 });
 
+test("raw Google Sheets reads require the separate owner token", async () => {
+  let calls = 0;
+  const app = createServer({
+    token,
+    ownerToken: "owner-token-that-is-at-least-32-bytes-long",
+    sheetsUrl: "https://script.google.com/macros/s/test-id/exec",
+    sheetsToken: "a".repeat(128),
+    fetchImpl: async () => { calls += 1; return { ok:true, json:async()=>({ok:true,rows:[["private"]]}) }; }
+  });
+  await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
+  try {
+    const url = `http://127.0.0.1:${app.address().port}/v1/sheets/read?sheetName=01%20%E5%BE%93%E6%A5%AD%E5%93%A1`;
+    const denied = await fetch(url, { headers:{Authorization:`Bearer ${token}`} });
+    assert.equal(denied.status, 401);
+    assert.equal(calls, 0);
+    const allowed = await fetch(url, { headers:{Authorization:"Bearer owner-token-that-is-at-least-32-bytes-long"} });
+    assert.equal(allowed.status, 200);
+    assert.equal(calls, 1);
+  } finally { await new Promise(resolve => app.close(resolve)); }
+});
+
+test("company financial and employee records require owner authorization", async () => {
+  let calls = 0;
+  const app = createServer({
+    token,
+    ownerToken: "owner-token-that-is-at-least-32-bytes-long",
+    sheetsUrl: "https://script.google.com/macros/s/test-id/exec",
+    sheetsToken: "b".repeat(128),
+    fetchImpl: async () => { calls += 1; return { ok:true, json:async()=>({ok:true,sheets:[]}) }; }
+  });
+  await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
+  try {
+    for (const route of ["/v1/company/employees", "/v1/company/financials"]) {
+      const denied = await fetch(`http://127.0.0.1:${app.address().port}${route}`, { headers:{Authorization:`Bearer ${token}`} });
+      assert.equal(denied.status, 401);
+    }
+    assert.equal(calls, 0);
+  } finally { await new Promise(resolve => app.close(resolve)); }
+});
+
 test("Google Sheets routes reject invalid sheet names", async () => {
   const app = createServer({ token, sheetsUrl: "https://script.google.com/macros/s/test-id/exec", sheetsToken: "b".repeat(128) });
   await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
