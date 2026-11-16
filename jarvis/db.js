@@ -70,13 +70,13 @@ function createDbStore({ pool, connectionString, PoolClass, migrationsDir = path
   const dbPool = pool || createPool({ connectionString, PoolClass });
   if (!dbPool) throw new Error("NEON_DATABASE_URL is not configured");
 
-  async function query(text, values = [], { retry = true } = {}) {
+  async function query(text, values = [], { retry = false } = {}) {
     const run = () => dbPool.query(text, values);
     return retry ? withRetry(run, retryOptions) : run();
   }
 
   async function ping() {
-    const result = await query("SELECT 1 AS ok");
+    const result = await query("SELECT 1 AS ok", [], { retry: true });
     return result.rows[0]?.ok === 1;
   }
 
