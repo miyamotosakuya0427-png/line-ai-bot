@@ -734,7 +734,16 @@ test("video batch APIs require auth, persist 100-item queues, and expose owner r
     assert.equal(toNarration.status,200);
     const audio=await fetch(root+"/v1/content/videos/V01/narration-asset",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({fileName:"narration.wav",mimeType:"audio/wav",durationSeconds:32.8,sha256:"f".repeat(64),voiceName:"Kenichi",provider:"heygen",jobId:"api-audio-1"})});
     assert.equal(audio.status,201);
-    assert.equal((await audio.json()).video.narrationAsset.audioListened,false);
+    const audioData=await audio.json();
+    assert.equal(audioData.video.narrationAsset.audioListened,false);
+    const reviewDenied=await fetch(root+"/v1/content/videos/V01/narration-review",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({reviewer:"api-reviewer",audioListened:false,pronunciationConfirmed:true})});
+    assert.equal(reviewDenied.status,500);
+    const audioReview=await fetch(root+"/v1/content/videos/V01/narration-review",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({reviewer:"api-reviewer",audioListened:true,pronunciationConfirmed:true,corrections:[],notes:"実際に再生して確認"})});
+    assert.equal(audioReview.status,200);
+    const reviewedAudio=(await audioReview.json()).video;
+    assert.equal(reviewedAudio.narrationAsset.audioListened,true);
+    assert.equal(reviewedAudio.narrationAsset.pronunciationConfirmed,true);
+    assert.equal(reviewedAudio.narrationAsset.status,"reviewed_pass");
     const listed=await fetch(root+"/v1/content/batches?limit=200",{headers:{Authorization:"Bearer "+token}});
     assert.equal((await listed.json()).summary.total,100);
     await videoBatchStore.updateStage("V01","assets",{evidence:{narration:STAGE_EVIDENCE.narration}});
