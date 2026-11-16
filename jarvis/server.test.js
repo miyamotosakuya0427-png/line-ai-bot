@@ -372,8 +372,9 @@ test("Sheets diagnostics accept the owner token without requiring the general AP
     fetchImpl: async (_url, options) => {
       calls += 1;
       const request = JSON.parse(options.body);
-      assert.equal(request.action, "listSheets");
-      return { ok:true, json:async()=>({ok:true,sheets:["03 日報","01 従業員","13 LINE連携"]}) };
+      if (request.action === "listSheets") return { ok:true, json:async()=>({ok:true,sheets:["03 日報","01 従業員","13 LINE連携"]}) };
+      assert.equal(request.action, "readRows");
+      return { ok:true, json:async()=>({ok:true,rows:[["見出し"]]}) };
     }
   });
   await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
