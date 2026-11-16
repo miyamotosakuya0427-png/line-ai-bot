@@ -107,6 +107,9 @@ test("LINE link request derives the employee name from the authoritative registe
   assert.equal(h.sheets.get("13 LINE連携").data[1][4], "従業員A");
   const duplicate = h.request({ action:"appendLineLink", lineUserId:"U"+"b".repeat(32), displayName:"別LINE", employeeId:"EMP001" });
   assert.equal(duplicate.ok, false);
+  h.sheets.get("13 LINE連携").data[1][7] = "却下";
+  const reapplication = h.request({ action:"appendLineLink", lineUserId:"U"+"b".repeat(32), displayName:"再申請", employeeId:"EMP001" });
+  assert.equal(reapplication.ok, true);
 });
 
 test("administrator review refuses a tampered pending employee identity", () => {
