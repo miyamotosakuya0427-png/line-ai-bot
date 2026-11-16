@@ -92,5 +92,7 @@ test("PostgreSQL approvals bind immutable target, payload, expiry, and authorize
  await assert.rejects(approvals.claimExecution(decided.id,{resourceId:"V205",operationPayload:payload,actor:"guest"}),/not authorized/);
  const claimed=await approvals.claimExecution(decided.id,{resourceId:"V205",operationPayload:payload,actor:"owner-api"});
  assert.equal(claimed.executionStatus,"claimed");
+ assert.equal((await approvals.validateExecutionClaim(decided.id,{claimId:claimed.executionClaim.id,resourceId:"V205",operationPayload:payload,actor:"owner-api"})).ok,true);
+ await assert.rejects(approvals.validateExecutionClaim(decided.id,{claimId:claimed.executionClaim.id,resourceId:"V206",operationPayload:payload,actor:"owner-api"}),/integrity/);
  await assert.rejects(approvals.claimExecution(decided.id,{resourceId:"V205",operationPayload:payload,actor:"owner-api"}),/already been claimed/);
 });
