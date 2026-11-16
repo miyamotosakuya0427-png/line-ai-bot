@@ -87,3 +87,49 @@ test("unsupported departments never read arbitrary sheet names",async()=>{
 test("receivables as-of date uses Japan local calendar day",()=>{
  assert.equal(japanDate(new Date("2026-11-15T16:00:00.000Z")),"2026-11-16");
 });
+
+
+test("rejects non-Google Apps Script endpoints before making a request",async()=>{
+ let called=false;
+ const loader=createDepartmentContextLoader({
+  sheetsUrl:"https://example.com/macros/s/test/exec",
+  sheetsToken:"secret-token-that-must-not-leak",
+  fetchImpl:async()=>{called=true;return {ok:true,json:async()=>({ok:true,rows:[employeeHeaders]})};}
+ });
+ const result=await loader.load("hr");
+ assert.equal(result.status,"partial");
+ assert.equal(result.employees.status,"unavailable");
+ assert.equal(result.employees.reason,"INVALID_SHEETS_ENDPOINT");
+ assert.equal(called,false);
+});
+
+test("fails closed when Apps Script returns a malformed readRows payload",async()=>{
+ const loader=createDepartmentContextLoader({
+  sheetsUrl:"https://script.google.com/macros/s/test-id/exec",
+  sheetsToken:"secret-token-that-must-not-leak",
+  fetchImpl:async()=>({ok:true,json:async()=>({ok:true,rows:"not-an-array"})})
+ });
+ const result=await loader.load("hr");
+ assert.equal(result.status,"partial");
+ assert.equal(result.employees.status,"unavailable");
+ assert.equal(result.employees.reason,"SHEETS_INVALID_RESPONSE");
+});
+
+test("fails closed when Apps Script exceeds the requested row bound",async()=>{
+ const loader=createDepartmentContextLoader({
+  sheetsUrl:"https://script.google.com/macros/s/test-id/exec",
+  sheetsToken:"secret-token-that-must-not-leak",
+  fetchImpl:async()=>({ok:true,json:async()=>({ok:true,rows:Array.from({length:101},()=>employeeHeaders)})})
+ });
+ const result=await loader.load("hr");
+ assert.equal(result.status,"partial");
+ assert.equal(result.employees.status,"unavailable");
+ assert.equal(result.employees.reason,"DATA_VALIDATION_FAILED");
+});
+
+test("does not claim configured when either endpoint or token is missing",()=>{
+ const withUrlOnly=createDepartmentContextLoader({sheetsUrl:"https://script.google.com/macros/s/test-id/exec"});
+ const withTokenOnly=createDepartmentContextLoader({sheetsToken:"secret-token"});
+ assert.equal(withUrlOnly.configured,false);
+ assert.equal(withTokenOnly.configured,false);
+});
