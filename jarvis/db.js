@@ -69,8 +69,14 @@ function createDbStore({ pool, connectionString, PoolClass, migrationsDir = path
   const dbPool = pool || createPool({ connectionString, PoolClass });
   if (!dbPool) throw new Error("NEON_DATABASE_URL is not configured");
 
-  async function query(text, values = []) {
-    return withRetry(() => dbPool.query(text, values), retryOptions);
+  async function query(text, values = [], { retry = true } = {}) {
+    const run = () => dbPool.query(text, values);
+    return retry ? withRetry(run, retryOptions) : run();
+  }
+
+  async function ping() {
+    const result = await query("SELECT 1 AS ok");
+    return result.rows[0]?.ok === 1;
   }
 
   async function migrate() {
@@ -126,7 +132,9 @@ function createDbStore({ pool, connectionString, PoolClass, migrationsDir = path
 
   async function claimNextJob() {
     const result = await query(
-      "WITH candidate AS (SELECT id FROM jarvis_jobs WHERE status = 'queued' AND run_after <= NOW() ORDER BY run_after, created_at FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE jarvis_jobs j SET status = 'running', attempts = attempts + 1, locked_at = NOW(), updated_at = NOW() FROM candidate WHERE j.id = candidate.id RETURNING j.*"
+      "WITH candidate AS (SELECT id FROM jarvis_jobs WHERE status = 'queued' AND run_after <= NOW() ORDER BY run_after, created_at FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE jarvis_jobs j SET status = 'running', attempts = attempts + 1, locked_at = NOW(), updated_at = NOW() FROM candidate WHERE j.id = candidate.id RETURNING j.*",
+      [],
+      { retry: false }
     );
     return result.rows[0] || null;
   }
@@ -180,7 +188,7 @@ function createDbStore({ pool, connectionString, PoolClass, migrationsDir = path
     await dbPool.end();
   }
 
-  return { pool: dbPool, query, migrate, createJob, claimNextJob, recordAttempt, createApproval, decideApproval, appendAuditEvent, close };
+  return { pool: dbPool, query, ping, migrate, createJob, claimNextJob, recordAttempt, createApproval, decideApproval, appendAuditEvent, close };
 }
 
 module.exports = { createDbStore, createPool, withRetry, isRetryable, hashPayload };
