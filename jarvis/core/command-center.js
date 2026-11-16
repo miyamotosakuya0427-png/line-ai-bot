@@ -40,6 +40,9 @@ function createCommandCenter({jobStore=null,approvalStore=null,worker=null,depar
     if(typeof request!=="string"||!request.trim()||request.length>4000)throw new Error("Task request must be 1-4000 characters");
     if(!Array.isArray(departmentIds)||departmentIds.length<1||departmentIds.length>DEPARTMENTS.length)throw new Error("Select 1 to "+DEPARTMENTS.length+" departments");
     if(new Set(departmentIds).size!==departmentIds.length)throw new Error("Duplicate department IDs are not allowed");
+    const knownDepartmentIds=new Set(DEPARTMENTS.map(department=>department.id));
+    const unknownDepartments=departmentIds.filter(id=>!knownDepartmentIds.has(id));
+    if(unknownDepartments.length){const error=new Error("Unknown department IDs: "+unknownDepartments.join(", "));error.statusCode=400;throw error;}
     if(!ACTIONS.has(actionClass))throw new Error("Unsupported action class");
     if(SAFE_ACTIONS.has(actionClass)){
       if(!jobStore||!worker){const error=new Error("Persistent job queue and worker are not configured");error.statusCode=503;throw error;}
