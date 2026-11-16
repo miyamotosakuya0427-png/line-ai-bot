@@ -2,42 +2,78 @@
 
 This checklist is intentionally separate from the production LINE webhook service.
 
-## Render service
+## Scope and current observed state
 
-Target service: `one-jarvis` (Singapore), not `line-ai-bot-4`.
+- Target Render service: `one-jarvis` (Singapore), not `line-ai-bot-4`.
+- Observed service branch: `one-jarvis-foundation`.
+- Intended code branch: `jarvis-paper-trading-learning`.
+- Observed plan: Free, one instance, auto-deploy off.
+- The integrated code includes owner-only approval authorization and GlitchTip-compatible error monitoring.
+- PR #35 adds CI coverage for the integrated branch and remains a separate review/merge step.
 
-Current observed configuration: Free plan, one instance, auto-deploy off, branch `one-jarvis-foundation`. Do not change it until the code PRs are reviewed and merged in order.
+Do not change the Render branch, plan, disk, environment, instance count, or deployment without explicit approval. Do not enable auto-deploy as part of this checklist.
 
-Persistent job storage requires a paid Render web service. Render's documented current pricing lists the Starter web service at $7/month and persistent disks at $0.25/GB/month. A 1 GB disk therefore estimates to $7.25/month before tax or any other usage. Verify the dashboard price before approving.
+## Persistent storage
 
-## Disk
+Production job processing must use a Render persistent disk. Do not point JSONL stores at the application directory or an ephemeral filesystem.
 
-- Mount path: `/var/data`
-- Initial disk size: 1 GB
-- Journal path: `/var/data/jobs.jsonl`
+- Suggested mount path: `/var/data`
+- Suggested job journal: `/var/data/jobs.jsonl`
+- Approval journal: `JARVIS_APPROVAL_STORE_PATH`, or the default `/var/data/jobs.jsonl.approvals`
+- Other stores are created alongside the job journal:
+  - `jobs.jsonl.video-batches.jsonl`
+  - `jobs.jsonl.paper-trading.jsonl`
+  - `jobs.jsonl.influence-events.jsonl`
 
-Render persistent disks are available only on paid web services, survive restarts/deploys, and are attached to a single service instance. Disk-backed services cannot scale horizontally and disk attachment causes a redeploy with a brief interruption.
+The stores are append-only JSONL files with fsync-backed writes. The current implementation is single-process/single-instance: file locking and multi-instance coordination are not implemented. Keep exactly one service instance. Configure backups/retention appropriate to the business records before relying on this as the only copy.
 
-## Required environment
+A persistent disk is a paid-resource and deployment change. Confirm the current Render dashboard price, disk size, tax, and any other usage before approving. Do not rely on historical price estimates in old notes.
 
-- `JARVIS_API_TOKEN`: existing strong secret, at least 32 bytes
-- `JARVIS_JOB_STORE_PATH=/var/data/jobs.jsonl`
+## Environment variables
+
+Required for the API and queue:
+
+- `JARVIS_API_TOKEN`: strong random secret, at least 32 bytes.
+- `JARVIS_JOB_STORE_PATH=/var/data/jobs.jsonl`: absolute path on the persistent disk.
+
+Required to enable the AI worker:
+
 - `JARVIS_WORKER_ENABLED=true`
-- `OPENAI_API_KEY`: user-managed OpenAI API key
-- Optional `JARVIS_OPENAI_MODEL=gpt-5.6-luna`
-- Optional `JARVIS_WORKER_POLL_MS=1500`
+- `OPENAI_API_KEY`: user-managed OpenAI API key.
 
-Never copy or print API secrets into source code, PRs, logs, or chat. Do not reuse the production LINE webhook token.
+Required for owner-only approval review:
 
-## Release order
+- `JARVIS_OWNER_TOKEN`: separate strong random secret, at least 32 bytes. Do not reuse `JARVIS_API_TOKEN` or any LINE production token.
 
-1. Review and merge PR #4 (security) first.
-2. Review and merge PR #5 (durable queue, worker, assistant handler, dashboard) second.
-3. Change only the `one-jarvis` Render service to a paid Starter plan after explicit cost approval.
-4. Attach the 1 GB disk at `/var/data`.
-5. Set the environment variables above without replacing unrelated existing values.
-6. Keep instance count at one and auto-deploy off until a planned deploy is approved.
-7. Deploy and verify health, authenticated dashboard, job creation, answer persistence, restart recovery, and error retry.
-8. Do not change `line-ai-bot-4`, root `server.js`, Apps Script, or Google Sheets daily-report schema.
+Recommended / optional:
 
-No deployment, paid resource, environment change, or production data change is authorized by this document.
+- `JARVIS_APPROVAL_STORE_PATH=/var/data/approvals.jsonl` (otherwise defaults to `<JARVIS_JOB_STORE_PATH>.approvals`).
+- `GLITCHTIP_DSN`: GlitchTip project DSN; alternatively the code accepts `SENTRY_DSN`.
+- `JARVIS_ENVIRONMENT=production`.
+- `JARVIS_WORKER_POLL_MS=1500`.
+- `JARVIS_OPENAI_MODEL`: optional model override; code default applies when omitted.
+- `JARVIS_CONTENT_AUTOPLAN_ENABLED` and `JARVIS_SUBSIDY_AUTOMONITOR_ENABLED`: leave unset/false until their scheduled tasks have been separately reviewed and approved.
+
+Never copy secrets into source code, PRs, logs, or chat. Set them directly in the Render environment UI. Do not reuse production LINE webhook credentials.
+
+## Release sequence
+
+1. Review the security and owner-only approval changes already integrated into `jarvis-paper-trading-learning`.
+2. Review the GlitchTip integration already present on that branch; verify the DSN is stored only in Render environment settings.
+3. Review and merge the CI-target-branch PR only after its latest checks pass and the change is approved.
+4. Separately approve any paid Render plan/disk cost before provisioning persistent storage.
+5. Attach the approved persistent disk to `one-jarvis` at `/var/data`.
+6. Set the environment variables above without replacing unrelated existing values. Keep worker/autoplan flags off until the release test plan is approved.
+7. Only after explicit deployment approval, change the `one-jarvis` service branch to `jarvis-paper-trading-learning` and deploy with auto-deploy still off.
+8. Verify health, authenticated API access, owner-only approval access, queue creation, stored result recovery, interrupted-job recovery, journal permissions, GlitchTip error capture/redaction, and restart recovery.
+9. Verify the production LINE webhook service and live Sheets remain unchanged.
+
+## Execution and retry guarantees
+
+- Owner approval records an authorization decision; it does not execute external publishing, submissions, payments, purchases, deletion, or permission changes.
+- The worker is single-process and serial. Interrupted running jobs are re-queued at startup. A handler may therefore run again after an interruption.
+- Any future external integration must independently verify the approval record and implement provider-side idempotency/reconciliation before side effects. Do not treat a persistent disk alone as an exactly-once execution guarantee.
+
+## Explicit exclusions
+
+Do not change `line-ai-bot-4`, root `server.js`, Apps Script, the production LINE webhook, live Google Sheets data/schema, or existing video projects as part of this JARVIS deployment. This document does not authorize deployment, paid resources, environment changes, or production data changes.
