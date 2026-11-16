@@ -82,6 +82,34 @@ test("journal corruption fails closed instead of silently losing history", async
   await assert.rejects(store.init(), /corrupt/);
 });
 
+test("an incomplete final journal write is quarantined while prior jobs recover", async t => {
+  const filePath = await fixture(t);
+  const first = createJobStore({ filePath });
+  const job = (await first.create({ type: "report.generate", payload: { date: "2026-11-17" } })).job;
+  const validBytes = await fs.readFile(filePath);
+  await fs.appendFile(filePath, '{"type":"job","job":{"id":"partial');
+  const recoveredStore = createJobStore({ filePath });
+  const initialized = await recoveredStore.init();
+  assert.equal(initialized.count, 1);
+  assert.equal((await recoveredStore.get(job.id)).status, "queued");
+  const names = await fs.readdir(path.dirname(filePath));
+  const quarantine = names.find(name => name.startsWith("jobs.jsonl.recovery-") && name.endsWith(".tail"));
+  assert.ok(quarantine, "incomplete bytes should be preserved in a quarantine file");
+  assert.equal(await fs.readFile(path.join(path.dirname(filePath), quarantine), "utf8"), '{"type":"job","job":{"id":"partial');
+  assert.deepEqual(await fs.readFile(filePath), validBytes);
+});
+
+test("a complete final JSON event without newline is retained and normalized", async t => {
+  const filePath = await fixture(t);
+  const first = createJobStore({ filePath });
+  const job = (await first.create({ type: "report.generate", payload: {} })).job;
+  const raw = await fs.readFile(filePath, "utf8");
+  await fs.writeFile(filePath, raw.trimEnd());
+  const recovered = createJobStore({ filePath });
+  assert.equal((await recovered.get(job.id)).status, "queued");
+  assert.equal((await fs.readFile(filePath, "utf8")).endsWith("\n"), true);
+});
+
 test("concurrent creates are serialized and unique", async t => {
   const filePath = await fixture(t);
   const store = createJobStore({ filePath });

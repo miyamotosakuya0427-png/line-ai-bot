@@ -48,22 +48,57 @@ function createJobStore({ filePath, clock = () => new Date().toISOString(), maxE
     const bytes = Buffer.byteLength(line, "utf8");
     if (eventCount >= maxEvents) throw new Error("JARVIS job journal event capacity reached");
     if (journalBytes + bytes > maxJournalBytes) throw new Error("JARVIS job journal size limit reached");
-    const handle = await fs.open(filePath, "a", 0o600);
     try {
-      await handle.writeFile(line, "utf8");
-      await handle.sync();
-    } finally { await handle.close(); }
-    await fs.chmod(filePath, 0o600);
-    eventCount += 1;
-    journalBytes += bytes;
+      const handle = await fs.open(filePath, "a", 0o600);
+      try {
+        await handle.writeFile(line, "utf8");
+        await handle.sync();
+      } finally { await handle.close(); }
+      await fs.chmod(filePath, 0o600);
+      eventCount += 1;
+      journalBytes += bytes;
+    } catch (error) {
+      // A failed append may have written a partial or fully durable record before
+      // reporting an error. Force the next operation through journal recovery rather
+      // than appending again to an uncertain tail in this process.
+      initialized = false;
+      throw error;
+    }
   }
   async function init() {
     return serialize(async () => {
       if (initialized) return;
       await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
-      let raw = "";
-      try { raw = await fs.readFile(filePath, "utf8"); }
+      let rawBuffer = Buffer.alloc(0);
+      try { rawBuffer = await fs.readFile(filePath); }
       catch (error) { if (error.code !== "ENOENT") throw error; }
+      // Appends are newline-terminated. Preserve and quarantine an incomplete final
+      // fragment before truncating only that fragment; corruption in earlier lines
+      // still fails closed below.
+      if (rawBuffer.length && rawBuffer[rawBuffer.length - 1] !== 0x0a) {
+        const lastNewline = rawBuffer.lastIndexOf(0x0a);
+        const validPrefixBytes = lastNewline + 1;
+        const tail = rawBuffer.subarray(validPrefixBytes);
+        const tailText = tail.toString("utf8");
+        let completeJson = false;
+        try { JSON.parse(tailText); completeJson = true; } catch {}
+        if (completeJson) {
+          const handle = await fs.open(filePath, "a", 0o600);
+          try { await handle.writeFile("\n", "utf8"); await handle.sync(); }
+          finally { await handle.close(); }
+          rawBuffer = Buffer.concat([rawBuffer, Buffer.from("\n")]);
+        } else {
+          const quarantinePath = filePath + ".recovery-" + crypto.randomUUID() + ".tail";
+          const quarantine = await fs.open(quarantinePath, "wx", 0o600);
+          try { await quarantine.writeFile(tail); await quarantine.sync(); }
+          finally { await quarantine.close(); }
+          const journal = await fs.open(filePath, "r+");
+          try { await journal.truncate(validPrefixBytes); await journal.sync(); }
+          finally { await journal.close(); }
+          rawBuffer = rawBuffer.subarray(0, validPrefixBytes);
+        }
+      }
+      const raw = rawBuffer.toString("utf8");
       const recovered = new Map();
       const journalLines = raw.split("\n").filter(Boolean);
       if (journalLines.length > maxEvents) throw new Error("JARVIS job journal exceeds configured event limit");
