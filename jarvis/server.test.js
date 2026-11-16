@@ -794,3 +794,33 @@ test("command center API stores external actions as owner approvals without queu
     assert.equal((await approvalStore.list({status:"pending"})).length,1);
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
+
+
+test("command center AI plan endpoint validates planner output and dispatches safe tasks", async t => {
+  const {createJobStore}=require("./core/job-store");
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-command-planner-api-"));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const jobStore=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
+  const commandPlanner={plan:async({request})=>({departmentIds:["management","tax"],actionClass:"analyze",rationale:"経営数値と会計の照合",model:"test-model"})};
+  const app=createServer({token,jobStore,worker:{},commandPlanner});
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  const root="http://127.0.0.1:"+app.address().port;
+  try {
+    const response=await fetch(root+"/v1/command-center/plan",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({request:"今月の経営状況を分析して",idempotencyKey:"ai-plan-test"})});
+    assert.equal(response.status,200);
+    const result=await response.json();
+    assert.deepEqual(result.plan.departmentIds,["management","tax"]);
+    assert.equal(result.results.length,2);
+    assert.equal(result.results.every(x=>x.status==="queued"),true);
+    assert.equal(result.externalActionsEnabled,false);
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
+
+test("command center AI plan endpoint is unavailable when planner is not configured", async () => {
+  const app=createServer({token});
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  try {
+    const response=await fetch("http://127.0.0.1:"+app.address().port+"/v1/command-center/plan",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({request:"分析して"})});
+    assert.equal(response.status,503);
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
