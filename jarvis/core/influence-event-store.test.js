@@ -4,7 +4,7 @@ const assert=require("node:assert/strict");
 const fs=require("node:fs/promises");
 const os=require("node:os");
 const path=require("node:path");
-const {createInfluenceEventStore,normalizeInfluenceEvent}=require("./influence-event-store");
+const {createInfluenceEventStore,normalizeInfluenceEvent,validTimestamp}=require("./influence-event-store");
 
 const event={platform:"x",actor:"Elon Musk",handle:"@elonmusk",sourceId:"post-1",postedAt:"2026-11-16T00:00:00.000Z",sourceUrl:"https://x.com/elonmusk/status/1",verification:"official_api",text:"Market relevant announcement."};
 test("normalizes provenance and stable id",()=>{const a=normalizeInfluenceEvent(event,"2026-11-16T00:01:00Z");const b=normalizeInfluenceEvent(event,"2026-11-16T00:02:00Z");assert.equal(a.id,b.id);assert.equal(a.verification,"official_api");assert.equal(a.observedAt,"2026-11-16T00:01:00Z");});
@@ -17,6 +17,11 @@ test("requires timezone-qualified ISO timestamps and safe source URLs",()=>{
  assert.throws(()=>normalizeInfluenceEvent(event,"not-a-time"),/observation timestamp/);
  assert.throws(()=>normalizeInfluenceEvent({...event,sourceUrl:"https://user:pass@x.com/post"}),/credential-free HTTPS/);
  assert.throws(()=>normalizeInfluenceEvent({...event,sourceId:"x".repeat(201)}),/Source ID is too long/);
+});
+test("rejects impossible calendar dates and invalid UTC offsets",()=>{
+ assert.equal(validTimestamp("2026-02-30T12:00:00Z"),false);
+ assert.equal(validTimestamp("2026-11-16T12:00:00+14:01"),false);
+ assert.equal(validTimestamp("2026-11-16T12:00:00+09:00"),true);
 });
 test("does not exceed the configured journal byte limit",async()=>{
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-influence-limit-"));const file=path.join(dir,"events.jsonl");
