@@ -107,7 +107,7 @@ test("a complete final JSON event without newline is retained and normalized", a
   await fs.writeFile(filePath, raw.trimEnd());
   const recovered = createJobStore({ filePath });
   assert.equal((await recovered.get(job.id)).status, "queued");
-  assert.equal((await fs.readFile(filePath, "utf8")).endsWith("\\n"), true);
+  assert.equal((await fs.readFile(filePath, "utf8")).endsWith("\n"), true);
 });
 
 test("concurrent creates are serialized and unique", async t => {
