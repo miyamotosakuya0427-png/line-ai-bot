@@ -26,6 +26,37 @@ test("job journal persists and recovers job state", async t => {
   assert.equal(recovered.result, null);
 });
 
+test("retry schedule and last error persist across store restart", async t => {
+  const filePath = await fixture(t);
+  const first = createJobStore({ filePath });
+  const job = (await first.create({ type: "report.generate", payload: {} })).job;
+  await first.transition(job.id, "running");
+  const retryAt = "2026-11-16T00:00:05.000Z";
+  await first.transition(job.id, "queued", { retryAt, lastError: "rate limited" });
+  const second = createJobStore({ filePath });
+  const recovered = await second.get(job.id);
+  assert.equal(recovered.status, "queued");
+  assert.equal(recovered.retryAt, retryAt);
+  assert.equal(recovered.lastError, "rate limited");
+});
+
+test("job journal capacity fails closed before a state transition is partially written", async t => {
+  const filePath = await fixture(t);
+  const store = createJobStore({ filePath, maxEvents: 2 });
+  const job = (await store.create({ type: "report.generate", payload: {} })).job;
+  await store.transition(job.id, "running");
+  await assert.rejects(store.transition(job.id, "succeeded"), /event capacity/);
+  const recovered = createJobStore({ filePath, maxEvents: 2 });
+  assert.equal((await recovered.get(job.id)).status, "running");
+});
+
+test("job journal byte limit is checked before appending", async t => {
+  const filePath = await fixture(t);
+  const store = createJobStore({ filePath, maxJournalBytes: 1024 });
+  await assert.rejects(store.create({ type: "report.generate", payload: { text: "x".repeat(1500) } }), /size limit/);
+  assert.equal((await fs.readFile(filePath, "utf8").catch(() => "")), "");
+});
+
 test("idempotency key prevents duplicate jobs", async t => {
   const filePath = await fixture(t);
   const store = createJobStore({ filePath });

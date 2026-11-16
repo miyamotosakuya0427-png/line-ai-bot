@@ -13,6 +13,8 @@ const NEXT = {
 };
 const MAX_PAYLOAD_BYTES = 16 * 1024;
 const MAX_JOBS = 10000;
+const MAX_EVENTS = 500000;
+const MAX_JOURNAL_BYTES = 256 * 1024 * 1024;
 
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
 function validPayload(value) {
@@ -22,12 +24,18 @@ function validPayload(value) {
 }
 function publicJob(job) { return clone(job); }
 
-function createJobStore({ filePath, clock = () => new Date().toISOString() } = {}) {
+function createJobStore({ filePath, clock = () => new Date().toISOString(), maxEvents = MAX_EVENTS, maxJournalBytes = MAX_JOURNAL_BYTES } = {}) {
   if (typeof filePath !== "string" || !path.isAbsolute(filePath)) {
     throw new Error("JARVIS job store requires an absolute persistent file path");
   }
+  if (!Number.isInteger(maxEvents) || maxEvents < 1 || maxEvents > MAX_EVENTS ||
+      !Number.isInteger(maxJournalBytes) || maxJournalBytes < 1024 || maxJournalBytes > MAX_JOURNAL_BYTES) {
+    throw new Error("Invalid JARVIS job journal limits");
+  }
   let jobs = new Map();
   let initialized = false;
+  let eventCount = 0;
+  let journalBytes = 0;
   let queue = Promise.resolve();
 
   async function serialize(operation) {
@@ -36,12 +44,18 @@ function createJobStore({ filePath, clock = () => new Date().toISOString() } = {
     return result;
   }
   async function append(event) {
+    const line = JSON.stringify(event) + "\n";
+    const bytes = Buffer.byteLength(line, "utf8");
+    if (eventCount >= maxEvents) throw new Error("JARVIS job journal event capacity reached");
+    if (journalBytes + bytes > maxJournalBytes) throw new Error("JARVIS job journal size limit reached");
     const handle = await fs.open(filePath, "a", 0o600);
     try {
-      await handle.writeFile(JSON.stringify(event) + "\n", "utf8");
+      await handle.writeFile(line, "utf8");
       await handle.sync();
     } finally { await handle.close(); }
     await fs.chmod(filePath, 0o600);
+    eventCount += 1;
+    journalBytes += bytes;
   }
   async function init() {
     return serialize(async () => {
@@ -51,18 +65,27 @@ function createJobStore({ filePath, clock = () => new Date().toISOString() } = {
       try { raw = await fs.readFile(filePath, "utf8"); }
       catch (error) { if (error.code !== "ENOENT") throw error; }
       const recovered = new Map();
+      const journalLines = raw.split("\n").filter(Boolean);
+      if (journalLines.length > maxEvents) throw new Error("JARVIS job journal exceeds configured event limit");
+      journalBytes = Buffer.byteLength(raw, "utf8");
+      if (journalBytes > maxJournalBytes) throw new Error("JARVIS job journal exceeds configured size limit");
       for (const [index,line] of raw.split("\n").entries()) {
         if (!line) continue;
         let event;
         try { event = JSON.parse(line); }
         catch { throw new Error("JARVIS job journal is corrupt at line " + (index + 1)); }
-        if (!event || event.type !== "job" || !event.job || typeof event.job.id !== "string" || !STATES.has(event.job.status)) {
+        if (!event || event.type !== "job" || !event.job || typeof event.job.id !== "string" || !STATES.has(event.job.status) ||
+            (event.job.retryAt !== undefined && event.job.retryAt !== null &&
+              (typeof event.job.retryAt !== "string" || !Number.isFinite(Date.parse(event.job.retryAt)))) ||
+            (event.job.lastError !== undefined && event.job.lastError !== null &&
+              (typeof event.job.lastError !== "string" || event.job.lastError.length > 500))) {
           throw new Error("JARVIS job journal contains an invalid event at line " + (index + 1));
         }
         recovered.set(event.job.id, event.job);
       }
       if (recovered.size > MAX_JOBS) throw new Error("JARVIS job journal exceeds the configured job limit");
       jobs = recovered;
+      eventCount = journalLines.length;
       initialized = true;
     });
   }
@@ -107,7 +130,8 @@ function createJobStore({ filePath, clock = () => new Date().toISOString() } = {
       return [...jobs.values()].filter(job => !status || job.status === status)
         .sort((a,b) => b.createdAt.localeCompare(a.createdAt)).slice(0,limit).map(publicJob);
     },
-    async transition(id, nextStatus, { error = null, result = undefined } = {}) {
+    async transition(id, nextStatus, options = {}) {
+      const { error = null, result = undefined } = options;
       await ready();
       return serialize(async () => {
         const current = jobs.get(id);
@@ -115,7 +139,14 @@ function createJobStore({ filePath, clock = () => new Date().toISOString() } = {
         if (!STATES.has(nextStatus) || !NEXT[current.status].has(nextStatus)) throw new Error("Invalid job state transition");
         if (error !== null && (typeof error !== "string" || error.length > 500)) throw new Error("Invalid job error");
         if (result !== undefined && !validPayload(result)) throw new Error("Invalid job result");
+        const retryAt = options.retryAt;
+        const lastError = options.lastError;
+        if (retryAt !== undefined && retryAt !== null &&
+            (typeof retryAt !== "string" || !Number.isFinite(Date.parse(retryAt)))) throw new Error("Invalid retry time");
+        if (lastError !== undefined && (typeof lastError !== "string" || lastError.length > 500)) throw new Error("Invalid last error");
         const next = { ...current, status: nextStatus, updatedAt: clock(), error: nextStatus === "failed" ? (error || "Job failed") : null,
+          lastError: lastError === undefined ? (nextStatus === "queued" ? current.lastError || null : null) : lastError,
+          retryAt: nextStatus === "queued" ? (retryAt || null) : null,
           result: nextStatus === "succeeded" ? (result === undefined ? current.result : clone(result)) : null };
         if (nextStatus === "running") next.attempts += 1;
         await append({ type: "job", job: next });

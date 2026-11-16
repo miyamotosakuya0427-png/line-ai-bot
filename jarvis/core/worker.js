@@ -1,10 +1,13 @@
 "use strict";
 
-function createWorker({ store, handlers = {}, maxAttempts = 3 } = {}) {
+function createWorker({ store, handlers = {}, maxAttempts = 3, clock = () => new Date().toISOString(), retryBaseMs = 1000, retryMaxMs = 60000 } = {}) {
   if (!store || typeof store.list !== "function" || typeof store.transition !== "function") {
     throw new Error("A compatible durable job store is required");
   }
   if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 10) throw new Error("Invalid max attempts");
+  if (!Number.isInteger(retryBaseMs) || retryBaseMs < 250 || retryBaseMs > 60000 ||
+      !Number.isInteger(retryMaxMs) || retryMaxMs < retryBaseMs || retryMaxMs > 3600000 ||
+      typeof clock !== "function") throw new Error("Invalid retry configuration");
   const registry = new Map(Object.entries(handlers));
   for (const [type, handler] of registry) {
     if (!/^[a-z][a-z0-9._-]{1,63}$/.test(type) || typeof handler !== "function") {
@@ -33,9 +36,12 @@ function createWorker({ store, handlers = {}, maxAttempts = 3 } = {}) {
   async function runNext() {
     if (!started) throw new Error("Worker has not been started");
     const operation = active.then(async () => {
+      const now = Date.parse(clock());
+      if (!Number.isFinite(now)) throw new Error("Worker clock returned an invalid timestamp");
       const queued = await store.list({ status: "queued", limit: 200 });
-      if (!queued.length) return { processed: false, job: null };
-      const candidate = queued.sort((a,b) => a.createdAt.localeCompare(b.createdAt))[0];
+      const eligible = queued.filter(job => !job.retryAt || Date.parse(job.retryAt) <= now);
+      if (!eligible.length) return queued.length ? { processed: false, job: null, waiting: true } : { processed: false, job: null };
+      const candidate = eligible.sort((a,b) => a.createdAt.localeCompare(b.createdAt))[0];
       const handler = registry.get(candidate.type);
       const running = await store.transition(candidate.id, "running");
       if (!running) return { processed: false, job: null };
@@ -53,8 +59,10 @@ function createWorker({ store, handlers = {}, maxAttempts = 3 } = {}) {
       } catch (error) {
         const message = error && typeof error.message === "string" ? error.message : "Job failed";
         if (error?.retryable === true && running.attempts < maxAttempts) {
-          const queued = await store.transition(running.id, "queued");
-          return { processed: true, job: queued, retryScheduled: true };
+          const delay = Math.min(retryMaxMs, retryBaseMs * (2 ** Math.max(0, running.attempts - 1)));
+          const retryAt = new Date(Date.parse(clock()) + delay).toISOString();
+          const queued = await store.transition(running.id, "queued", { retryAt, lastError: message.slice(0, 500) });
+          return { processed: true, job: queued, retryScheduled: true, retryAt, retryDelayMs: delay };
         }
         const failed = await store.transition(running.id, "failed", { error: message.slice(0, 500) });
         return { processed: true, job: failed, retryScheduled: false };
