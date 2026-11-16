@@ -199,13 +199,14 @@ test("daily report requires an active LINE link and appends a validated report",
   try {
     const response=await fetch(`http://127.0.0.1:${app.address().port}/v1/daily-report`,{
       method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({idToken:"verified-test-token-123456",workDate:"2026-11-15",siteName:"岡山現場",workDetails:"掘削作業",startTime:"08:00",endTime:"17:00",breakMinutes:"60",workerCount:"3",equipment:"バックホウ",materials:"RC30",notes:""})
+      body:JSON.stringify({idToken:"verified-test-token-123456",reportId:"DR-123e4567-e89b-12d3-a456-426614174000",workDate:"2026-11-15",siteName:"岡山現場",workDetails:"掘削作業",startTime:"08:00",endTime:"17:00",breakMinutes:"60",workerCount:"3",equipment:"バックホウ",materials:"RC30",notes:""})
     });
     const result=await response.json();
     assert.equal(response.status,201);
     assert.equal(result.employeeName,"宮本朔也");
     const write=sent.find(x=>x.action==="appendDailyReport");
     assert.equal(write.report.employeeId,"EMP003");
+    assert.equal(write.report.reportId,"DR-123e4567-e89b-12d3-a456-426614174000");
     assert.equal(write.report.lineUserId,"U"+"a".repeat(32));
     assert.equal(write.report.workDetails,"掘削作業");
   } finally { await new Promise(resolve=>app.close(resolve)); }
