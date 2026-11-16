@@ -97,17 +97,15 @@ test("Apps Script read allowlist denies settings and generic writes", () => {
   });
 });
 
-test("LINE link request requires an exact active employee-register ID/name match", () => {
+test("LINE link request derives the employee name from the authoritative register, ignoring client-supplied names", () => {
   const h = createGasHarness();
   h.addSheet("01 従業員", [EMPLOYEE_HEADERS,["EMP001","従業員A","","","","","","","","有効",""]]);
   h.addSheet("13 LINE連携", [LINE_HEADERS]);
-  const invalid = h.request({ action:"appendLineLink", lineUserId:"U"+"a".repeat(32), displayName:"LINE名", employeeId:"EMP001", employeeName:"別人" });
-  assert.equal(invalid.ok, false);
-  assert.match(invalid.error, /employee register/);
-  const valid = h.request({ action:"appendLineLink", lineUserId:"U"+"a".repeat(32), displayName:"LINE名", employeeId:"EMP001", employeeName:"従業員A" });
+  const valid = h.request({ action:"appendLineLink", lineUserId:"U"+"a".repeat(32), displayName:"LINE名", employeeId:"EMP001", employeeName:"別人" });
   assert.equal(valid.ok, true);
   assert.equal(valid.status, "確認待ち");
-  const duplicate = h.request({ action:"appendLineLink", lineUserId:"U"+"b".repeat(32), displayName:"別LINE", employeeId:"EMP001", employeeName:"従業員A" });
+  assert.equal(h.sheets.get("13 LINE連携").data[1][4], "従業員A");
+  const duplicate = h.request({ action:"appendLineLink", lineUserId:"U"+"b".repeat(32), displayName:"別LINE", employeeId:"EMP001" });
   assert.equal(duplicate.ok, false);
 });
 
@@ -171,4 +169,29 @@ test("daily report requires the active verified LINE-to-employee link and is ide
   assert.equal(duplicate.ok,true);
   assert.equal(duplicate.duplicate,true);
   assert.equal(h.sheets.get("03 日報").data.length,2);
+});
+
+test("Apps Script never contains a hardcoded production spreadsheet ID and requires explicit Script Property", () => {
+  const h = createGasHarness();
+  assert.equal(h.context.getConfiguredSpreadsheetId(), "test-sheet");
+  h.properties.delete("SPREADSHEET_ID");
+  assert.throws(() => h.context.setupOneJarvis(), /SPREADSHEET_ID Script Property/);
+  assert.throws(() => h.context.registerOneEmployees(), /SPREADSHEET_ID Script Property/);
+});
+
+test("initial administrator bootstrap refuses an already active employee or LINE link", () => {
+  const h = createGasHarness();
+  const lineId = "U" + "a".repeat(32);
+  h.addSheet("01 従業員", [EMPLOYEE_HEADERS,["EMP003","代表者","","","","","","","","有効",""]]);
+  h.addSheet("13 LINE連携", [
+    LINE_HEADERS,
+    ["ACTIVE-1",lineId,"代表者","EMP003","代表者","","一般","有効",""],
+    ["PENDING-1",lineId,"代表者","EMP003","代表者","","一般","確認待ち",""]
+  ]);
+  const props = { getProperty:key => key==="JARVIS_INITIAL_ADMIN_LINE_USER_ID"?lineId:null };
+  const result = JSON.parse(h.context.bootstrapAdmin(h.ss,{lineUserId:lineId,employeeId:"EMP003"},props).text);
+  assert.equal(result.ok,false);
+  assert.match(result.error,/already exists/);
+  assert.equal(h.sheets.get("13 LINE連携").data[2][6],"一般");
+  assert.equal(h.sheets.get("13 LINE連携").data[2][7],"確認待ち");
 });
