@@ -736,9 +736,9 @@ test("video batch APIs require auth, persist 100-item queues, and expose owner r
     assert.equal(audio.status,201);
     const audioData=await audio.json();
     assert.equal(audioData.video.narrationAsset.audioListened,false);
-    const reviewDenied=await fetch(root+"/v1/content/videos/V01/narration-review",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({reviewer:"api-reviewer",audioListened:false,pronunciationConfirmed:true})});
-    assert.equal(reviewDenied.status,500);
-    const audioReview=await fetch(root+"/v1/content/videos/V01/narration-review",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({reviewer:"api-reviewer",audioListened:true,pronunciationConfirmed:true,corrections:[],notes:"実際に再生して確認"})});
+    const reviewDenied=await fetch(root+"/v1/content/videos/V01/narration-review",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({reviewer:"api-reviewer",reviewedSha256:"f".repeat(64),audioListened:false,pronunciationConfirmed:true})});
+    assert.equal(reviewDenied.status,400);
+    const audioReview=await fetch(root+"/v1/content/videos/V01/narration-review",{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify({reviewer:"api-reviewer",reviewedSha256:"f".repeat(64),audioListened:true,pronunciationConfirmed:true,corrections:[],notes:"実際に再生して確認"})});
     assert.equal(audioReview.status,200);
     const reviewedAudio=(await audioReview.json()).video;
     assert.equal(reviewedAudio.narrationAsset.audioListened,true);
