@@ -60,6 +60,7 @@ function createPool({ connectionString = process.env.NEON_DATABASE_URL, PoolClas
     max: 5,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 5000,
+    ssl: { rejectUnauthorized: true },
     allowExitOnIdle: false,
     ...poolOptions
   });
@@ -142,9 +143,27 @@ function createDbStore({ pool, connectionString, PoolClass, migrationsDir = path
   async function recordAttempt({ jobId, attemptNo, status, errorCode = null, errorMessage = null }) {
     if (!["running", "succeeded", "failed", "retrying"].includes(status)) throw new TypeError("Invalid attempt status");
     const result = await query(
-      "INSERT INTO jarvis_job_attempts(job_id, attempt_no, status, error_code, error_message, finished_at) VALUES ($1,$2,$3,$4,$5,CASE WHEN $3 = 'running' THEN NULL ELSE NOW() END) RETURNING *",
+      "INSERT INTO jarvis_job_attempts(job_id, attempt_no, status, error_code, error_message, finished_at) VALUES ($1,$2,$3,$4,$5,CASE WHEN $3 = 'running' THEN NULL ELSE NOW() END) ON CONFLICT (job_id, attempt_no) DO NOTHING RETURNING *",
       [jobId, attemptNo, status, errorCode, errorMessage ? String(errorMessage).slice(0, 1000) : null]
     );
+    if (result.rows[0]) return result.rows[0];
+    const existing = await query("SELECT * FROM jarvis_job_attempts WHERE job_id = $1 AND attempt_no = $2", [jobId, attemptNo]);
+    return existing.rows[0] || null;
+  }
+
+  async function finishJob({ jobId, success, retryDelayMs = 30000 }) {
+    if (typeof success !== "boolean") throw new TypeError("success must be a boolean");
+    if (!Number.isInteger(retryDelayMs) || retryDelayMs < 0 || retryDelayMs > 86400000) throw new TypeError("Invalid retryDelayMs");
+    const sql = success
+      ? "UPDATE jarvis_jobs SET status = 'succeeded', completed_at = NOW(), locked_at = NULL, updated_at = NOW() WHERE id = $1 AND status = 'running' RETURNING *"
+      : "UPDATE jarvis_jobs SET status = CASE WHEN attempts < max_attempts THEN 'queued' ELSE 'failed' END, run_after = CASE WHEN attempts < max_attempts THEN NOW() + ($2 * INTERVAL '1 millisecond') ELSE run_after END, completed_at = CASE WHEN attempts < max_attempts THEN NULL ELSE NOW() END, locked_at = NULL, updated_at = NOW() WHERE id = $1 AND status = 'running' RETURNING *";
+    const result = await query(sql, success ? [jobId] : [jobId, retryDelayMs], { retry: false });
+    if (!result.rows[0]) {
+      const error = new Error("Job is missing or is not running");
+      error.code = "JOB_NOT_RUNNING";
+      error.statusCode = 409;
+      throw error;
+    }
     return result.rows[0];
   }
 
@@ -188,7 +207,7 @@ function createDbStore({ pool, connectionString, PoolClass, migrationsDir = path
     await dbPool.end();
   }
 
-  return { pool: dbPool, query, ping, migrate, createJob, claimNextJob, recordAttempt, createApproval, decideApproval, appendAuditEvent, close };
+  return { pool: dbPool, query, ping, migrate, createJob, claimNextJob, recordAttempt, finishJob, createApproval, decideApproval, appendAuditEvent, close };
 }
 
 module.exports = { createDbStore, createPool, withRetry, isRetryable, hashPayload };
