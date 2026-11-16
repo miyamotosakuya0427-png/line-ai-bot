@@ -206,7 +206,12 @@ test("LINE link application derives employee name from the register and stores f
     lineUserId: adminId, displayName: "別LINE", employeeId: "EMP001"
   }).content);
   assert.equal(duplicate.ok, false);
-  assert.match(duplicate.error, /already has a link request/);
+  assert.match(duplicate.error, /pending or active/);
+  ss.sheets["13 LINE連携"].rows[1][7] = "却下";
+  const reapplication = JSON.parse(app.appendLineLink(ss, {
+    lineUserId: adminId, displayName: "再申請", employeeId: "EMP001"
+  }).content);
+  assert.equal(reapplication.ok, true);
   const inactive = JSON.parse(app.appendLineLink(ss, {
     lineUserId: adminId, displayName: "退職者", employeeId: "EMP002"
   }).content);
