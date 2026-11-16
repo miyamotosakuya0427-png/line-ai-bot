@@ -274,6 +274,9 @@ function appendDailyReport(ss, data) {
       !/^DR-[0-9a-f-]{36}$/i.test(String(report.reportId || "")) ||
       !/^U[0-9a-f]{32}$/i.test(String(report.lineUserId || "")) ||
       !/^\d{4}-\d{2}-\d{2}$/.test(String(report.workDate || "")) ||
+      !Number.isFinite(Date.parse(String(report.workDate || "") + "T00:00:00Z")) ||
+      new Date(String(report.workDate || "") + "T00:00:00Z").toISOString().slice(0, 10) !== String(report.workDate || "") ||
+      !Number.isFinite(Date.parse(String(report.recordedAt || ""))) ||
       !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(report.startTime || "")) ||
       !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(report.endTime || "")) ||
       !Number.isInteger(Number(report.breakMinutes)) || Number(report.breakMinutes) < 0 || Number(report.breakMinutes) > 600 ||
