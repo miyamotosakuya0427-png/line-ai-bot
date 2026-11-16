@@ -4,18 +4,18 @@ const crypto=require("node:crypto");
 
 function stripHtml(value){
  return String(value||"")
-  .replace(/<script\\b[^>]*>[\\s\\S]*?<\\/script>/gi," ")
-  .replace(/<style\\b[^>]*>[\\s\\S]*?<\\/style>/gi," ")
-  .replace(/<noscript\\b[^>]*>[\\s\\S]*?<\\/noscript>/gi," ")
+  .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi," ")
+  .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi," ")
+  .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi," ")
   .replace(/<[^>]+>/g," ")
   .replace(/&nbsp;|&#160;/gi," ")
   .replace(/&amp;/gi,"&").replace(/&lt;/gi,"<").replace(/&gt;/gi,">")
   .replace(/&quot;/gi,'"').replace(/&#39;|&apos;/gi,"'")
-  .replace(/\\s+/g," ").trim();
+  .replace(/\s+/g," ").trim();
 }
 function normalizeAllowedHosts(value){
  const entries=Array.isArray(value)?value:String(value||"").split(",");
- return [...new Set(entries.map(x=>String(x).trim().toLowerCase()).filter(x=>/^(?:[a-z0-9-]+\\.)*[a-z0-9-]+$/.test(x)))];
+ return [...new Set(entries.map(x=>String(x).trim().toLowerCase()).filter(x=>/^(?:[a-z0-9-]+\.)*[a-z0-9-]+$/.test(x)))];
 }
 async function fetchHistorySourceSnapshots({sources=[],allowedHosts=[],fetchImpl=fetch,now=()=>new Date()}={}){
  if(!Array.isArray(sources)||sources.length>20)throw new Error("Invalid history source list");
@@ -31,10 +31,10 @@ async function fetchHistorySourceSnapshots({sources=[],allowedHosts=[],fetchImpl
    if(response.status>=300&&response.status<400)throw new Error("Redirects are not followed for source safety");
    if(!response.ok)throw new Error("Source returned HTTP "+response.status);
    const type=response.headers?.get?.("content-type")||"";
-   if(!/^(?:text\\/html|application\\/xhtml\\+xml)(?:\\s*;|$)/i.test(type))throw new Error("Only HTML source pages are supported");
+   if(!/^(?:text\/html|application\/xhtml\+xml)(?:\s*;|$)/i.test(type))throw new Error("Only HTML source pages are supported");
    const html=await response.text();
    if(Buffer.byteLength(html,"utf8")>500000)throw new Error("Source page exceeds 500 KB limit");
-   const title=stripHtml((/<title[^>]*>([\\s\\S]*?)<\\/title>/i.exec(html)||[])[1]||"").slice(0,200);
+   const title=stripHtml((/<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)||[])[1]||"").slice(0,200);
    const text=stripHtml(html);
    if(text.length<40)throw new Error("Source page contains too little readable text");
    const excerpt=text.slice(0,1200);
