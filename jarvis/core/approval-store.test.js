@@ -43,3 +43,27 @@ test("approval store rejects malformed requests and journal corruption",async t=
  const broken=createApprovalStore({filePath});
  await assert.rejects(()=>broken.init(),/corrupt/);
 });
+
+test("approval execution is bound to resource, exact payload, expiry, and one authorized claim",async t=>{
+ const filePath=await tempStore(t),clock=()=> "2026-11-17T00:00:00.000Z";
+ const store=createApprovalStore({filePath,clock,authorizeActor:async actor=>actor==="owner-api"});
+ const payload={videoId:"V104",destination:"youtube",operation:"publish"};
+ const created=await store.create({departmentId:"content",actionClass:"publish",summary:"Publish V104",resourceId:"V104",operationPayload:payload,expiresAt:"2026-11-17T01:00:00.000Z"});
+ const approved=await store.decide(created.approval.id,"approved",{reason:"reviewed",actor:"owner-api"});
+ assert.equal(approved.decidedBy,"owner-api");
+ await assert.rejects(store.verifyExecutionRequest(approved.id,{resourceId:"V105",operationPayload:payload}),/integrity/);
+ await assert.rejects(store.verifyExecutionRequest(approved.id,{resourceId:"V104",operationPayload:{...payload,destination:"other"}}),/integrity/);
+ assert.equal((await store.verifyExecutionRequest(approved.id,{resourceId:"V104",operationPayload:payload})).ok,true);
+ await assert.rejects(store.claimExecution(approved.id,{resourceId:"V104",operationPayload:payload,actor:"untrusted"}),/not authorized/);
+ const claimed=await store.claimExecution(approved.id,{resourceId:"V104",operationPayload:payload,actor:"owner-api"});
+ assert.equal(claimed.executionStatus,"claimed");
+ await assert.rejects(store.claimExecution(approved.id,{resourceId:"V104",operationPayload:payload,actor:"owner-api"}),/already been claimed/);
+});
+
+test("expired approvals cannot be decided or claimed",async t=>{
+ const filePath=await tempStore(t);let now="2026-11-17T00:00:00.000Z";
+ const store=createApprovalStore({filePath,clock:()=>now,authorizeActor:async()=>true});
+ const created=await store.create({departmentId:"content",actionClass:"publish",summary:"Expired",resourceId:"V1",operationPayload:{id:"V1"},expiresAt:"2026-11-17T00:00:01.000Z"});
+ now="2026-11-17T00:00:02.000Z";
+ await assert.rejects(store.decide(created.approval.id,"approved"),/expired/);
+});
