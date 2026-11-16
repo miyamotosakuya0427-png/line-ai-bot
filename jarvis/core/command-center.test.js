@@ -45,7 +45,8 @@ test("approval-only dispatch works without a job queue",async t=>{
  assert.equal((await approvalStore.list({status:"pending"})).length,1);
  await assert.rejects(cc.dispatch({request:"社内分析",departmentIds:["management"],actionClass:"analyze"}),error=>error.statusCode===503);
 });
-\n
+
+
 test("department readiness reflects actual registered handlers",async t=>{
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-cc-readiness-"));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
  const jobStore=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
@@ -54,7 +55,8 @@ test("department readiness reflects actual registered handlers",async t=>{
  assert.equal(view.departments.find(x=>x.id==="tax").runtimeConfigured,true);
  assert.equal(view.departments.find(x=>x.id==="management").runtimeConfigured,false);
 });
-\n
+
+
 test("safe dispatch fails closed when a selected department handler is missing",async t=>{
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),"jarvis-cc-missing-handler-"));t.after(()=>fs.rm(dir,{recursive:true,force:true}));
  const jobStore=createJobStore({filePath:path.join(dir,"jobs.jsonl")});
@@ -62,7 +64,8 @@ test("safe dispatch fails closed when a selected department handler is missing",
  await assert.rejects(cc.dispatch({request:"分析",departmentIds:["management","tax"],actionClass:"analyze"}),error=>error.statusCode===503);
  assert.equal((await jobStore.list({limit:20})).length,0);
 });
-\ntest("command center reports disabled dependencies honestly",async()=>{
+
+test("command center reports disabled dependencies honestly",async()=>{
  const cc=createCommandCenter();
  const view=await cc.snapshot();
  assert.equal(view.execution.queueConfigured,false);assert.equal(view.execution.workerConfigured,false);
