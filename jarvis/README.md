@@ -171,3 +171,12 @@ AI-assisted scripts, outlines, titles, thumbnails, and captions alone generally 
 
 A separate 100-topic finance/economics idea backlog is stored at `jarvis/content/finance-100-ideas.md`. It is a research-first idea list only: the finance channel destination is not configured, the ideas are not inserted into the production queue, and no finance videos are generated or published.
 
+
+
+## History-source retrieval (safe, opt-in)
+- Video plans may include up to 20 HTTPS source URLs. ONE CONTENT receives retrieval snapshots before drafting.
+- Configure `JARVIS_HISTORY_SOURCE_HOSTS` as a comma-separated exact-host allowlist (for example, `www.ndl.go.jp,www.archives.go.jp`). Leave it unset to fail closed: source URLs are recorded as unavailable and are not fetched.
+- Only allowlisted HTTPS hosts, HTML/XHTML pages, HTTP 200 responses, and pages up to 500 KB are accepted. Redirects are not followed; PDFs and other binary documents remain unsupported by this retrieval adapter.
+- Snapshots include fetch time, HTTP status, page title, excerpt, character count, and SHA-256 of extracted text.
+- A fetched page is retrieval evidence only. It does not prove that the page is a primary source, that the page is authentic, or that any historical claim is true. Source-QA still requires a human/qualified review of each claim against the underlying source.
+- No source fetching occurs for ordinary department jobs. No external upload, paid generation, or publication is enabled by this feature.
