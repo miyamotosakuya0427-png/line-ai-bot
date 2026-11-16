@@ -10,8 +10,8 @@ function createVideoBatchContentHandler({contentHandler,videoBatchStore,research
   const existing=await videoBatchStore.get(payload.videoId);
   if(existing.draftJobId===context.jobId&&typeof existing.script==="string"&&existing.script.trim())return {answer:existing.script,videoId:payload.videoId,draftPersisted:true,reused:true};
   const sources=Array.isArray(payload.researchSources)?payload.researchSources:[];
-  const sourceSnapshots=sources.length?await fetchHistorySourceSnapshots({sources,allowedHosts,fetchImpl:researchFetchImpl}):[];
-  const result=await contentHandler({...payload,researchContext:{retrievalOnly:true,allowedHostsConfigured:allowedHosts.length>0,sourceSnapshots,important:"Fetched means only that an HTTPS page was retrieved. It does not mean primary-source authenticity or factual claims were verified."}},context);
+  const sourceSnapshots=sources.length?await fetchHistorySourceSnapshots({sources:sources.slice(0,10),allowedHosts,fetchImpl:researchFetchImpl}):[];
+  const result=await contentHandler({...payload,researchContext:{retrievalOnly:true,allowedHostsConfigured:allowedHosts.length>0,omittedSourceCount:Math.max(0,sources.length-10),sourceSnapshots,important:"Fetched means only that an HTTPS page was retrieved. It does not mean primary-source authenticity or factual claims were verified."}},context);
   if(!result||typeof result.answer!=="string"||!result.answer.trim())throw new Error("ONE CONTENT did not return a usable script draft");
   const saved=await videoBatchStore.saveDraft(payload.videoId,{script:result.answer,jobId:context.jobId});
   if(!saved||!saved.video)throw new Error("ONE CONTENT draft could not be saved to the video queue");
