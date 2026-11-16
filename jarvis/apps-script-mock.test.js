@@ -143,3 +143,32 @@ test("initial administrator bootstrap refuses a mismatched employee name", () =>
   assert.equal(h.sheets.get("13 LINE連携").data[1][6], "一般");
   assert.equal(h.sheets.get("13 LINE連携").data[1][7], "確認待ち");
 });
+
+test("daily report requires the active verified LINE-to-employee link and is idempotent", () => {
+  const h = createGasHarness();
+  const lineId = "U"+"c".repeat(32);
+  const employeeHeaders = EMPLOYEE_HEADERS;
+  const reportHeaders = ["日報ID","記録日時","作業日","従業員ID","氏名","現場名","作業内容","開始時刻","終了時刻","休憩（分）","作業人数","使用機械・車両","使用材料","連絡事項"];
+  h.addSheet("01 従業員", [employeeHeaders,["EMP001","従業員A","","","","","","","","有効",""]]);
+  h.addSheet("13 LINE連携", [LINE_HEADERS,["LINK-1",lineId,"LINE名","EMP001","従業員A","","一般","有効",""]]);
+  h.addSheet("03 日報", [reportHeaders]);
+  const report = {
+    reportId:"DR-123e4567-e89b-42d3-a456-426614174000",
+    recordedAt:"2026-11-17T00:00:00.000Z", workDate:"2026-11-17",
+    lineUserId:lineId, employeeId:"EMP001", employeeName:"従業員A",
+    siteName:"岡山現場", workDetails:"=IMPORTXML(\"https://invalid.example\")",
+    startTime:"08:00", endTime:"17:00", breakMinutes:60, workerCount:2,
+    equipment:"", materials:"", notes:""
+  };
+  const spoofed = JSON.parse(h.context.appendDailyReport(h.ss,{report:{...report,lineUserId:"U"+"d".repeat(32)}}).text);
+  assert.equal(spoofed.ok,false);
+  assert.match(spoofed.error,/active LINE link/);
+  const saved = JSON.parse(h.context.appendDailyReport(h.ss,{report}).text);
+  assert.equal(saved.ok,true);
+  assert.equal(saved.saved,true);
+  assert.equal(h.sheets.get("03 日報").data[1][6], "'=IMPORTXML(\"https://invalid.example\")");
+  const duplicate = JSON.parse(h.context.appendDailyReport(h.ss,{report}).text);
+  assert.equal(duplicate.ok,true);
+  assert.equal(duplicate.duplicate,true);
+  assert.equal(h.sheets.get("03 日報").data.length,2);
+});
