@@ -2,7 +2,7 @@ name: ONE JARVIS CI
 
 on:
   push:
-    branches: [one-jarvis-foundation]
+    branches: [one-jarvis-foundation, jarvis-paper-trading-learning]
     paths:
       - "jarvis/**"
       - "apps-script/**"
