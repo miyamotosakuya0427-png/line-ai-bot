@@ -77,8 +77,11 @@ test("PostgreSQL job claims are exclusive, renewable, and reclaimable after leas
  now="2026-11-17T00:00:06.000Z";
  const reclaimed=await jobs.claimNext({workerId:"worker-c",leaseMs:5000});
  assert.equal(reclaimed.id,job.id);assert.equal(reclaimed.attempts,2);assert.equal(reclaimed.lease.owner,"worker-c");
+ await assert.rejects(jobs.heartbeat(job.id,{workerId:owner,leaseMs:5000}),/lease/);
  await assert.rejects(jobs.transition(job.id,"succeeded",{leaseOwner:owner}),/lease/);
- const completed=await jobs.transition(job.id,"succeeded",{leaseOwner:"worker-c",result:{ok:true}});
+ const retry=await jobs.transition(job.id,"queued",{leaseOwner:"worker-c"});assert.equal(retry.status,"queued");
+ const retried=await jobs.claimNext({workerId:"worker-d",leaseMs:5000});assert.equal(retried.attempts,3);
+ const completed=await jobs.transition(job.id,"succeeded",{leaseOwner:"worker-d",result:{ok:true}});
  assert.equal(completed.status,"succeeded");assert.equal(completed.lease,undefined);
 });
 
