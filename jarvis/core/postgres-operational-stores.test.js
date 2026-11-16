@@ -8,8 +8,8 @@ function fakePool(){
  async function query(sql,p=[]){
   if(sql.includes("COALESCE(MAX(aggregate_version)")){const a=state.events.filter(x=>x.aggregate_type===p[0]&&x.aggregate_id===p[1]);return{rows:[{v:a.reduce((n,x)=>Math.max(n,x.aggregate_version),0)}]};}
   if(sql.includes("count(DISTINCT aggregate_id)")){return{rows:[{n:new Set(state.events.filter(x=>x.aggregate_type===p[0]).map(x=>x.aggregate_id)).size}]};}
-  if(sql.includes("SELECT payload FROM jarvis.events WHERE aggregate_type='job' AND payload->>")){const x=state.events.filter(x=>x.aggregate_type==="job"&&x.payload.idempotencyKey===p[0]).at(-1);return{rows:x?[{payload:x.payload}]:[]};}
-  if(sql.includes("SELECT DISTINCT ON (aggregate_id) payload FROM jarvis.events WHERE aggregate_type='approval'")){const x=state.events.filter(x=>x.aggregate_type==="approval"&&x.payload.idempotencyKey===p[0]).at(-1);return{rows:x?[{payload:x.payload}]:[]};}
+  if(sql.includes("aggregate_type='job' AND aggregate_id=(SELECT aggregate_id")){const first=state.events.find(x=>x.aggregate_type==="job"&&x.payload.idempotencyKey===p[0]);const x=first?state.events.filter(y=>y.aggregate_type==="job"&&y.aggregate_id===first.aggregate_id).at(-1):null;return{rows:x?[{payload:x.payload}]:[]};}
+  if(sql.includes("aggregate_type='approval' AND aggregate_id=(SELECT aggregate_id")){const first=state.events.find(x=>x.aggregate_type==="approval"&&x.payload.idempotencyKey===p[0]);const x=first?state.events.filter(y=>y.aggregate_type==="approval"&&y.aggregate_id===first.aggregate_id).at(-1):null;return{rows:x?[{payload:x.payload}]:[]};}
   if(sql.includes("aggregate_type='job' AND aggregate_id=$1")){const x=state.events.filter(x=>x.aggregate_type==="job"&&x.aggregate_id===p[0]).at(-1);return{rows:x?[{payload:x.payload}]:[]};}
   if(sql.includes("aggregate_type='approval' AND aggregate_id=$1")){const x=state.events.filter(x=>x.aggregate_type==="approval"&&x.aggregate_id===p[0]).at(-1);return{rows:x?[{payload:x.payload}]:[]};}
   if(sql.includes("ORDER BY aggregate_version DESC LIMIT 1")){const x=state.events.filter(x=>x.aggregate_type===p[0]&&x.aggregate_id===p[1]).at(-1);return{rows:x?[{payload:x.payload}]:[]};}
@@ -30,7 +30,7 @@ test("PostgreSQL job store preserves create/get/idempotency/list/transition cont
  assert.equal(running.attempts,1);
  const done=await jobs.transition(a.job.id,"succeeded",{result:{ok:true}});
  assert.equal(done.status,"succeeded");
- assert.equal((await jobs.get(a.job.id)).result.ok,true);
+ assert.equal((await jobs.get(a.job.id)).result.ok,true);\n assert.equal((await jobs.getByIdempotencyKey("daily")).status,"succeeded");\n assert.equal((await jobs.create({type:"report.generate",payload:{date:"2026-11-17"},idempotencyKey:"daily"})).job.status,"succeeded");
  assert.equal((await jobs.list({status:"succeeded"})).length,1);
 });
 
@@ -49,7 +49,7 @@ test("PostgreSQL approval store persists decision actor and verifies request dig
  const duplicate=await approvals.create({departmentId:"content",actionClass:"publish",summary:"Publish video",details:"approved draft",idempotencyKey:"publish-1"});
  assert.equal(a.created,true);assert.equal(duplicate.created,false);
  const decided=await approvals.decide(a.approval.id,"approved",{reason:"reviewed",actor:"owner-api"});
- assert.equal(decided.status,"approved");assert.equal(decided.decidedBy,"owner-api");
+ assert.equal(decided.status,"approved");assert.equal(decided.decidedBy,"owner-api");\n assert.equal((await approvals.create({departmentId:"content",actionClass:"publish",summary:"Publish video",details:"approved draft",idempotencyKey:"publish-1"})).approval.status,"approved");
  await assert.rejects(approvals.decide(a.approval.id,"rejected"),/already been decided/);
 });
 
