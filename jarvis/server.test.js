@@ -362,6 +362,30 @@ test("raw Google Sheets reads require the separate owner token", async () => {
   } finally { await new Promise(resolve => app.close(resolve)); }
 });
 
+test("Sheets diagnostics accept the owner token without requiring the general API token", async () => {
+  let calls = 0;
+  const app = createServer({
+    token: "g".repeat(64),
+    ownerToken: "o".repeat(64),
+    sheetsUrl: "https://script.google.com/macros/s/test-id/exec",
+    sheetsToken: "s".repeat(128),
+    fetchImpl: async (_url, options) => {
+      calls += 1;
+      const request = JSON.parse(options.body);
+      assert.equal(request.action, "ping");
+      return { ok:true, json:async()=>({ok:true,title:"Test spreadsheet"}) };
+    }
+  });
+  await new Promise(resolve => app.listen(0, "127.0.0.1", resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${app.address().port}/health/sheets/metadata`, {
+      headers:{Authorization:"Bearer " + "o".repeat(64)}
+    });
+    assert.equal(response.status, 200);
+    assert.equal(calls, 1);
+  } finally { await new Promise(resolve => app.close(resolve)); }
+});
+
 test("company financial and employee records require owner authorization", async () => {
   let calls = 0;
   const app = createServer({ ownerToken: token,
