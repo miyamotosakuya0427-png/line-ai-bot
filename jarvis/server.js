@@ -719,7 +719,7 @@ function createServer({token=TOKEN,sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN
             if(!Array.isArray(d.departmentIds)||(d.actionClass!==undefined&&typeof d.actionClass!=="string"))return json(res,400,{ok:false,error:"Invalid command-center dispatch request"});
             const result=await commandCenter.dispatch(d);
             return json(res,200,result);
-          }catch(error){return json(res,400,{ok:false,error:error.message});}
+          }catch(error){const status=Number.isInteger(error.statusCode)?error.statusCode:(url.pathname==="/v1/command-center/plan"?502:400);return json(res,status,{ok:false,error:error.message});}
         }
         return json(res,405,{ok:false,error:"Method Not Allowed"},{Allow:"GET, POST"});
       }
