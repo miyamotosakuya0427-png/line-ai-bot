@@ -13,19 +13,23 @@ function createCommandCenter({jobStore=null,approvalStore=null,worker=null,depar
     const departments=DEPARTMENTS.map(department=>{
       const matching=jobs.filter(job=>job.type==="department."+department.id);
       const latest=matching.sort((a,b)=>b.createdAt.localeCompare(a.createdAt))[0]||null;
+      const dataAdapterConfigured=Boolean(departmentContextLoader&&departmentContextLoader.configured&&typeof departmentContextLoader.supports==="function"&&departmentContextLoader.supports(department.id));
       return {
         id:department.id,name:department.name,agent:department.agent,mission:department.mission,
         runtimeConfigured:Boolean(jobStore&&worker&&departmentHandlers&&typeof departmentHandlers["department."+department.id]==="function"),
-        dataAdapterConfigured:Boolean(departmentContextLoader&&departmentContextLoader.configured&&typeof departmentContextLoader.supports==="function"&&departmentContextLoader.supports(department.id)),capabilities:department.canAutonomously,
+        dataAdapterConfigured,
+        dataAdapterStatus:dataAdapterConfigured?"configured_unverified":"not_configured",
+        capabilities:department.canAutonomously,
         requiresOwnerApproval:department.requiresOwnerApproval,
         recentJobs:matching.length,latestJob:latest?{id:latest.id,status:latest.status,createdAt:latest.createdAt,updatedAt:latest.updatedAt}:null
       };
     });
     const counts=Object.fromEntries(JOB_STATES.map(state=>[state,jobs.filter(job=>job.status===state).length]));
+    const companyDataAdapterConfigured=Boolean(departmentContextLoader&&departmentContextLoader.configured);
     return {
       system:"ONE JARVIS COMMAND CENTER",generatedAt:clock(),
       operatingMode:"controlled_autonomy",
-      execution:{queueConfigured:Boolean(jobStore),workerConfigured:Boolean(worker),companyDataAdapterConfigured:Boolean(departmentContextLoader&&departmentContextLoader.configured),externalActionsEnabled:false,liveTradingEnabled:false,publicPublishingEnabled:false},
+      execution:{queueConfigured:Boolean(jobStore),workerConfigured:Boolean(worker),companyDataAdapterConfigured,companyDataAdapterStatus:companyDataAdapterConfigured?"configured_unverified":"not_configured",externalActionsEnabled:false,liveTradingEnabled:false,publicPublishingEnabled:false},
       jobSample:{limit:200,returned:jobs.length,counts,mayBePartial:jobs.length===200},
       pendingApprovals:approvals.length,
       departments
