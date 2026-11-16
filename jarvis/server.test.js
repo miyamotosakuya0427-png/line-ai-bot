@@ -1036,3 +1036,56 @@ test("Apps Script JSON internal errors map to an upstream failure instead of cli
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
 
+
+test("LINE link requests use uniform acknowledgements for unknown and already-linked employee IDs", async () => {
+  const lineUserId="U"+"a".repeat(32);
+  const app=createServer({
+    lineLoginChannelId:"1234567890",
+    sheetsUrl:"https://script.google.com/macros/s/test-id/exec",
+    sheetsToken:"s".repeat(128),
+    fetchImpl:async(url)=> {
+      if(url==="https://api.line.me/oauth2/v2.1/verify") return {ok:true,json:async()=>({iss:"https://access.line.me",aud:"1234567890",sub:lineUserId,exp:Math.floor(Date.now()/1000)+300})};
+      const body=JSON.parse(arguments[1]?.body||"{}");
+      if(body.action==="listSheets") return {ok:true,json:async()=>({ok:true,sheets:["01 従業員","13 LINE連携"]})};
+      if(body.action==="readRows" && body.sheetName==="01 従業員") return {ok:true,json:async()=>({ok:true,rows:[["従業員ID","氏名","状態"],["EMP001","社員A","有効"]]})};
+      if(body.action==="readRows" && body.sheetName==="13 LINE連携") return {ok:true,json:async()=>({ok:true,rows:[["連携ID","LINEユーザーID","LINE表示名","従業員ID","氏名","権限","状態"],["L1",lineUserId,"LINE","EMP001","社員A","一般","有効"]]})};
+      return {ok:true,json:async()=>({ok:true,appended:1})};
+    }
+  });
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  try {
+    const root="http://127.0.0.1:"+app.address().port+"/v1/line/link";
+    const request=employeeId=>fetch(root,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({idToken:"verified-test-token-123456",employeeId})});
+    const unknown=await request("EMP999");
+    const known=await request("EMP001");
+    assert.equal(unknown.status,202);
+    assert.equal(known.status,202);
+    assert.deepEqual(await unknown.json(),await known.json());
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
+
+test("LINE link endpoint rate-limits repeated requests by verified LINE subject", async () => {
+  const lineUserId="U"+"c".repeat(32);
+  const app=createServer({
+    lineLoginChannelId:"1234567890",
+    sheetsUrl:"https://script.google.com/macros/s/test-id/exec",
+    sheetsToken:"s".repeat(128),
+    fetchImpl:async(url,options)=> {
+      if(url==="https://api.line.me/oauth2/v2.1/verify") return {ok:true,json:async()=>({iss:"https://access.line.me",aud:"1234567890",sub:lineUserId,exp:Math.floor(Date.now()/1000)+300})};
+      const body=JSON.parse(options.body);
+      if(body.action==="listSheets") return {ok:true,json:async()=>({ok:true,sheets:["01 従業員","13 LINE連携"]})};
+      if(body.action==="readRows" && body.sheetName==="01 従業員") return {ok:true,json:async()=>({ok:true,rows:[["従業員ID","氏名"],["EMP001","社員A"]]})};
+      if(body.action==="readRows") return {ok:true,json:async()=>({ok:true,rows:[["連携ID","LINEユーザーID","LINE表示名","従業員ID","氏名","権限","状態"]]})};
+      return {ok:true,json:async()=>({ok:true,appended:1})};
+    }
+  });
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  try {
+    const root="http://127.0.0.1:"+app.address().port+"/v1/line/link";
+    const request=()=>fetch(root,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({idToken:"verified-test-token-123456",employeeId:"EMP001"})});
+    for(let i=0;i<5;i++) assert.equal((await request()).status,202);
+    const limited=await request();
+    assert.equal(limited.status,429);
+    assert.equal(limited.headers.get("retry-after"),"900");
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
