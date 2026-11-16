@@ -49,7 +49,7 @@ Open the service root URL, enter the JARVIS API token, connect, and submit a req
 
 ## API overview
 
-All API endpoints except `GET /health` and the dashboard shell require `Authorization: Bearer <token>`.
+All API endpoints except `GET /health` and the dashboard shell require bearer-token authentication. General API/job routes use `JARVIS_API_TOKEN`; approval list and decision routes use the separate `JARVIS_OWNER_TOKEN`.
 
 - `GET /v1/company/overview` (read-only counts and five recent reports)
 - `GET /v1/company/employees` (approved non-sensitive employee fields)
@@ -61,7 +61,7 @@ All API endpoints except `GET /health` and the dashboard shell require `Authoriz
 - `GET /v1/content/workflow` (authenticated video production stages, quality checklist, and approval gates)
 - `GET /v1/subsidy/sources` (authenticated official source catalog and One-specific priority topics)
 - `GET /v1/status`
-- `GET /v1/approvals` (authenticated approval journal; bearer-token access, without separate human identity proof)
+- `GET /v1/approvals` (owner-only approval journal; requires the separate `JARVIS_OWNER_TOKEN`)
 - `POST /v1/approvals` (record an owner approval request)
 - `POST /v1/approvals/:id/decision` (record approved/rejected decision; never executes external work)
 - `GET /v1/jobs`
