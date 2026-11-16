@@ -13,6 +13,8 @@ const NEXT = {
 };
 const MAX_PAYLOAD_BYTES = 16 * 1024;
 const MAX_JOBS = 10000;
+const MAX_EVENTS = 500000;
+const MAX_JOURNAL_BYTES = 256 * 1024 * 1024;
 
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
 function validPayload(value) {
@@ -22,12 +24,18 @@ function validPayload(value) {
 }
 function publicJob(job) { return clone(job); }
 
-function createJobStore({ filePath, clock = () => new Date().toISOString() } = {}) {
+function createJobStore({ filePath, clock = () => new Date().toISOString(), maxEvents = MAX_EVENTS, maxJournalBytes = MAX_JOURNAL_BYTES } = {}) {
   if (typeof filePath !== "string" || !path.isAbsolute(filePath)) {
     throw new Error("JARVIS job store requires an absolute persistent file path");
   }
+  if (!Number.isInteger(maxEvents) || maxEvents < 1 || maxEvents > MAX_EVENTS ||
+      !Number.isInteger(maxJournalBytes) || maxJournalBytes < 1024 || maxJournalBytes > MAX_JOURNAL_BYTES) {
+    throw new Error("Invalid JARVIS job journal limits");
+  }
   let jobs = new Map();
   let initialized = false;
+  let eventCount = 0;
+  let journalBytes = 0;
   let queue = Promise.resolve();
 
   async function serialize(operation) {
@@ -36,12 +44,18 @@ function createJobStore({ filePath, clock = () => new Date().toISOString() } = {
     return result;
   }
   async function append(event) {
+    const line = JSON.stringify(event) + "\n";
+    const bytes = Buffer.byteLength(line, "utf8");
+    if (eventCount >= maxEvents) throw new Error("JARVIS job journal event capacity reached");
+    if (journalBytes + bytes > maxJournalBytes) throw new Error("JARVIS job journal size limit reached");
     const handle = await fs.open(filePath, "a", 0o600);
     try {
-      await handle.writeFile(JSON.stringify(event) + "\n", "utf8");
+      await handle.writeFile(line, "utf8");
       await handle.sync();
     } finally { await handle.close(); }
     await fs.chmod(filePath, 0o600);
+    eventCount += 1;
+    journalBytes += bytes;
   }
   async function init() {
     return serialize(async () => {
