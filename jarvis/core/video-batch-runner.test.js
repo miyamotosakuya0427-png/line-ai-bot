@@ -43,3 +43,12 @@ test("limits retrieval to ten source pages and reports omitted candidates",async
  await handler({taskKind:"video-batch-plan",videoId:"V04",researchSources:sources},{jobId:"job-404"});
  assert.equal(calls,10);assert.equal(received.researchContext.sourceSnapshots.length,10);assert.equal(received.researchContext.omittedSourceCount,2);
 });
+
+test("does not regenerate a draft for a missing or already advanced video",async()=>{
+ let calls=0;
+ const missing=createVideoBatchContentHandler({videoBatchStore:{get:async()=>null,saveDraft:async()=>null},contentHandler:async()=>{calls++;return{answer:"should not run"};}});
+ await assert.rejects(missing({taskKind:"video-batch-plan",videoId:"V05"},{jobId:"job-505"}),/not found/);
+ const advanced=createVideoBatchContentHandler({videoBatchStore:{get:async()=>({id:"V06",stage:"script",status:"in_progress",script:"既存台本",draftJobId:"other-job"}),saveDraft:async()=>null},contentHandler:async()=>{calls++;return{answer:"should not run"};}});
+ await assert.rejects(advanced({taskKind:"video-batch-plan",videoId:"V06"},{jobId:"job-606"}),/not awaiting/);
+ assert.equal(calls,0);
+});
