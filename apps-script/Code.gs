@@ -193,9 +193,9 @@ function reviewLineLink(ss, data) {
     const employeeNameCol = headers.indexOf("氏名");
     if (employeeNameCol < 0) return output({ ok: false, error: "Invalid LINE sheet headers" });
     const employeeName = String(sheet.getRange(rowNumber, employeeNameCol + 1).getValue() || "").trim();
-    const employee = findEmployeeRecord(ss, employeeId);
-    if (!employee || employee.name !== employeeName) return output({ ok: false, error: "Employee identity does not match the employee register" });
     if (decision === "approve") {
+      const employee = findEmployeeRecord(ss, employeeId);
+      if (!employee || employee.name !== employeeName) return output({ ok: false, error: "Employee identity does not match the employee register" });
       const targetLineId = String(sheet.getRange(rowNumber, lineCol + 1).getValue() || "").trim();
       const duplicateActive = values.slice(1).some((row, index) => index + 2 !== rowNumber &&
         String(row[statusCol] || "").trim() === "有効" &&
