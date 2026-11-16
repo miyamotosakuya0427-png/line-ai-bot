@@ -11,7 +11,8 @@ function clone(value){return JSON.parse(JSON.stringify(value));}
 function validText(value,max,required=false){return typeof value==="string"&&value.length<=max&&(!required||Boolean(value.trim()));}
 function publicApproval(item){return clone(item);}
 
-function createApprovalStore({filePath,clock=()=>new Date().toISOString()}={}){
+function createApprovalStore({filePath,pool,clock=()=>new Date().toISOString()}={}){
+ if(pool)return require("./postgres-operational-stores").createPostgresOperationalStores({pool,clock}).approvals;
  if(typeof filePath!=="string"||!path.isAbsolute(filePath))throw new Error("Approval store requires an absolute persistent file path");
  let items=new Map(),initialized=false,queue=Promise.resolve();
  async function serialize(operation){const result=queue.then(operation);queue=result.catch(()=>{});return result;}
