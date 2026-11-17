@@ -24,6 +24,11 @@ function createPostgresExecutionKernel({pool,clock=()=>new Date().toISOString(),
     catch(e){try{await c.query("ROLLBACK");}catch{}throw e;}
     finally{c.release();}
   }
+  async function appendWorkerEvent(c,workerId,eventType,payload){
+    const r=await c.query("SELECT COALESCE(MAX(aggregate_version),0)::bigint AS version FROM jarvis.events WHERE aggregate_type='worker' AND aggregate_id=$1",[workerId]);
+    const version=Number(r.rows[0].version)+1;
+    await c.query("INSERT INTO jarvis.events(aggregate_type,aggregate_id,aggregate_version,event_type,payload,created_at) VALUES('worker',$1,$2,$3,$4::jsonb,$5)",[workerId,version,eventType,JSON.stringify(payload),clock()]);
+  }
   async function getLease(c,lease,{lock=true}={}){
     if(!lease||!validId(lease.resourceKey)||!validId(lease.ownerId)||typeof lease.token!=="string"||!Number.isSafeInteger(lease.fencingToken))throw new Error("A valid lease is required");
     const r=await c.query("SELECT resource_key,owner_id,token_hash,fencing_token,expires_at FROM jarvis.coordination_leases WHERE resource_key=$1"+(lock?" FOR UPDATE":""),[lease.resourceKey]);
@@ -71,19 +76,43 @@ function createPostgresExecutionKernel({pool,clock=()=>new Date().toISOString(),
       await init();
       if(!validId(workerId))throw new Error("Invalid worker ID");
       return tx(async c=>{
+        // Read the lease key without locking, then lock Lease -> Worker.
+        // claimTaskForWorker uses the same order; Worker -> Lease here could deadlock.
+        const snapshot=await c.query("SELECT lease_resource_key FROM jarvis.worker_registry WHERE worker_id=$1",[workerId]);
+        if(!snapshot.rows[0])return null;
+        const leaseKey=snapshot.rows[0].lease_resource_key;
+        let leaseRow=null;
+        if(leaseKey){
+          const lease=await c.query("SELECT expires_at,fencing_token FROM jarvis.coordination_leases WHERE resource_key=$1 FOR UPDATE",[leaseKey]);
+          leaseRow=lease.rows[0]||null;
+          if(!leaseRow)throw new Error("Worker lease record is missing; quarantine required");
+        }
         const r=await c.query("SELECT status,current_task_id,lease_resource_key,fencing_token,version FROM jarvis.worker_registry WHERE worker_id=$1 FOR UPDATE",[workerId]);
         const worker=r.rows[0];
         if(!worker)return null;
         if(!worker.lease_resource_key||!worker.current_task_id)return {recovered:false,reason:"worker has no active task lease"};
-        const lease=await c.query("SELECT expires_at,fencing_token FROM jarvis.coordination_leases WHERE resource_key=$1 FOR UPDATE",[worker.lease_resource_key]);
-        if(!lease.rows[0])throw new Error("Worker lease record is missing; quarantine required");
-        if(Date.parse(lease.rows[0].expires_at)>Date.parse(clock()))return {recovered:false,reason:"lease is still active"};
-        if(Number(lease.rows[0].fencing_token)!==Number(worker.fencing_token))throw new Error("Worker fencing token does not match expired lease; quarantine required");
+        if(worker.lease_resource_key!==leaseKey)return {recovered:false,reason:"worker lease changed during recovery; retry scan"};
+        if(!leaseRow)throw new Error("Worker lease record is missing; quarantine required");
+        if(Date.parse(leaseRow.expires_at)>Date.parse(clock()))return {recovered:false,reason:"lease is still active"};
+        if(Number(leaseRow.fencing_token)!==Number(worker.fencing_token))throw new Error("Worker fencing token does not match expired lease; quarantine required");
         const now=clock();
         const updated=await c.query("UPDATE jarvis.worker_registry SET status='recovering',current_task_id=NULL,lease_resource_key=NULL,fencing_token=NULL,stopped_at=$1,version=version+1,updated_at=$1 WHERE worker_id=$2 AND version=$3 RETURNING *",[now,workerId,Number(worker.version)]);
         if(!updated.rows[0])throw new Error("Worker recovery lost an optimistic concurrency race");
+        await appendWorkerEvent(c,workerId,"worker_recovered",{workerId,expiredTaskId:worker.current_task_id,leaseResourceKey:leaseKey,expiredFencingToken:Number(worker.fencing_token),recoveredAt:now,workerVersion:Number(updated.rows[0].version)});
         return {recovered:true,worker:updated.rows[0],expiredTaskId:worker.current_task_id,expiredFencingToken:Number(worker.fencing_token)};
       });
+    },
+    async listExpiredWorkers({limit=50}={}){
+      await init();
+      if(!Number.isInteger(limit)||limit<1||limit>500)throw new Error("Invalid recovery candidate limit");
+      const r=await pool.query("SELECT w.worker_id,w.current_task_id,w.lease_resource_key,w.fencing_token,w.heartbeat_at,l.expires_at FROM jarvis.worker_registry w JOIN jarvis.coordination_leases l ON l.resource_key=w.lease_resource_key WHERE w.current_task_id IS NOT NULL AND w.lease_resource_key IS NOT NULL AND w.status IN ('assigned','running','waiting','retrying') AND l.expires_at<=$1::timestamptz ORDER BY l.expires_at ASC,w.worker_id ASC LIMIT $2",[clock(),limit]);
+      return r.rows;
+    },
+    async recoverExpiredWorkers({limit=50}={}){
+      const candidates=await this.listExpiredWorkers({limit});
+      const results=[];
+      for(const candidate of candidates)results.push({workerId:candidate.worker_id,...await this.recoverExpiredWorker({workerId:candidate.worker_id})});
+      return results;
     },
     async transitionWorker({workerId,expectedVersion,status}={}){
       await init();
