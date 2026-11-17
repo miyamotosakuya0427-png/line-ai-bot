@@ -51,6 +51,41 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
     await c.query("INSERT INTO jarvis.events(aggregate_type,aggregate_id,aggregate_version,event_type,payload,created_at) VALUES('coordination_lease',$1,$2,$3,$4::jsonb,$5)",[resourceKey,version,eventType,JSON.stringify(payload),clock()]);
     return version;
   }
+  function normalizedPath(value){
+    if(typeof value!=="string"||!value.trim()||value.length>500||value.startsWith("/")||value.includes("\\\\"))throw new Error("Invalid task path");
+    const parts=value.split("/");
+    if(parts.some(part=>!part||part==="."||part===".."))throw new Error("Invalid task path");
+    return parts.join("/");
+  }
+  async function assertRequiredResourceLeases(c,{task,patch,taskLease,resourceLeases=[]}){
+    if(!Array.isArray(resourceLeases)||resourceLeases.length>100)throw new Error("Invalid resource leases");
+    const supplied=new Map();
+    for(const lease of resourceLeases){
+      if(!lease||typeof lease.resourceKey!=="string"||supplied.has(lease.resourceKey))throw new Error("Invalid resource leases");
+      supplied.set(lease.resourceKey,lease);
+    }
+    const required=new Set();
+    for(const field of ["branch","baseBranch"]){
+      if(Object.prototype.hasOwnProperty.call(patch,field)&&patch[field]!==task[field]){
+        for(const name of [task[field],patch[field]])if(typeof name==="string"&&name.trim())required.add("branch:"+task.projectId+":"+name);
+      }
+    }
+    if(Object.prototype.hasOwnProperty.call(patch,"headSha")&&patch.headSha!==task.headSha){
+      const branch=typeof patch.branch==="string"&&patch.branch.trim()?patch.branch:task.branch;
+      if(typeof branch==="string"&&branch.trim())required.add("branch:"+task.projectId+":"+branch);
+    }
+    if(Object.prototype.hasOwnProperty.call(patch,"changedPaths")){
+      if(!Array.isArray(patch.changedPaths)||patch.changedPaths.length>100)throw new Error("Invalid task paths");
+      const before=Array.isArray(task.changedPaths)?task.changedPaths:[];
+      const after=patch.changedPaths;
+      for(const path of [...before,...after])required.add("path:"+task.projectId+":"+normalizedPath(path));
+    }
+    for(const key of [...required].sort()){
+      const lease=supplied.get(key);
+      if(!lease||lease.ownerId!==taskLease.ownerId)throw new Error("Current resource lease is required: "+key);
+      await assertLease(c,lease);
+    }
+  }
   async function validateDependencies(c,taskId,dependencyTaskIds){
     const dependencies=[...new Set(dependencyTaskIds||[])];
     if(dependencies.length!==(dependencyTaskIds||[]).length||dependencies.includes(taskId))throw new Error("Invalid task dependencies");
@@ -91,7 +126,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
     const r=await c.query("SELECT 1 FROM jarvis.coordination_leases WHERE resource_key=$1 AND owner_id=$2 AND token_hash=$3 AND fencing_token=$4 AND expires_at > $5::timestamptz FOR UPDATE",[lease.resourceKey,lease.ownerId,hash(lease.token),lease.fencingToken,clock()]);
     if(!r.rows[0])throw new Error("Lease is expired, stale, or not owned by this caller");
   }
-  async function transitionInTx(c,{taskId,expectedVersion,lease,status,patch={}}){
+  async function transitionInTx(c,{taskId,expectedVersion,lease,status,patch={},resourceLeases=[]}){
     if(!TASK_STATES.has(status))throw new Error("Invalid task status");
     if(!patch||typeof patch!=="object"||Array.isArray(patch)||Object.keys(patch).some(key=>!PATCH_FIELDS.has(key)))throw new Error("Invalid task patch");
     await assertLease(c,lease);
@@ -105,6 +140,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
       await lock(c,"task-dependency-graph");
       await validateDependencies(c,taskId,patch.dependencyTaskIds);
     }
+    await assertRequiredResourceLeases(c,{task:current.task,patch,taskLease:lease,resourceLeases});
     const next={...current.task,...clone(patch),status,updatedAt:clock(),fencingToken:lease.fencingToken};
     await append(c,taskId,"status_changed",next);
     return {task:clone(next),version:current.version+1};
