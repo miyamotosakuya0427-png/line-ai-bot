@@ -70,3 +70,19 @@ test("expired approvals cannot be decided or claimed",async t=>{
  now="2026-11-17T00:00:02.000Z";
  await assert.rejects(store.decide(created.approval.id,"approved"),/expired/);
 });
+
+test("approval execution outcomes are finalized once and expiry is recorded",async t=>{
+ const filePath=await tempStore(t);let now="2026-11-17T00:00:00.000Z";
+ const store=createApprovalStore({filePath,clock:()=>now,authorizeActor:async actor=>actor==="owner-api"});
+ const payload={resourceId:"R-1",operation:"internal-test"};
+ const created=await store.create({departmentId:"content",actionClass:"publish",summary:"Test execution",resourceId:"R-1",operationPayload:payload,expiresAt:"2026-11-17T01:00:00.000Z"});
+ await store.decide(created.approval.id,"approved",{actor:"owner-api"});
+ const claim=await store.claimExecution(created.approval.id,{resourceId:"R-1",operationPayload:payload,actor:"owner-api"});
+ const finished=await store.finishExecution(created.approval.id,{claimId:claim.executionClaim.id,actor:"owner-api",outcome:"failed",reason:"Simulated failure"});
+ assert.equal(finished.executionStatus,"failed");
+ await assert.rejects(store.finishExecution(created.approval.id,{claimId:claim.executionClaim.id,actor:"owner-api",outcome:"succeeded"}),/not active/);
+ const exp=await store.create({departmentId:"content",actionClass:"publish",summary:"Will expire",resourceId:"R-2",operationPayload:{id:"R-2"},expiresAt:"2026-11-17T00:00:01.000Z"});
+ await store.decide(exp.approval.id,"approved",{actor:"owner-api"});
+ now="2026-11-17T00:00:02.000Z";
+ assert.equal((await store.expireExecution(exp.approval.id)).executionStatus,"expired");
+});
