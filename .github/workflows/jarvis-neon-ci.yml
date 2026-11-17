@@ -7,7 +7,7 @@ on:
       - "jarvis/**"
       - ".github/workflows/jarvis-neon-ci.yml"
   push:
-    branches: [feature/one-jarvis-neon-postgres-foundation]
+    branches: [feature/one-jarvis-neon-postgres-foundation, security/jarvis-postgres-append-only-ledger]
     paths:
       - "jarvis/**"
       - ".github/workflows/jarvis-neon-ci.yml"
