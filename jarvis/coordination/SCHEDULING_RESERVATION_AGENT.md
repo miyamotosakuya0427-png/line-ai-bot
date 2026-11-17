@@ -72,3 +72,14 @@ The ChatGPT app connectors are available in this assistant session; their author
 4. For Wix, select or create a site, install/configure Bookings, create the service catalog and public booking page only after the site owner approves those live changes.
 5. Keep Wix booking creation manual/approval-gated until a documented idempotency contract or safe provider-side reconciliation guarantee is proven.
 6. Add separate cancellation/reschedule/payment approvals and webhook signature verification, replay protection, and event deduplication.
+
+
+## Communication decision (Windows PC voice + LINE + Web)
+The selected user-facing channels are all three: LINE, Web dashboard, and voice. Windows PC is the primary voice endpoint.
+- The existing authenticated Web dashboard is the first shared operator console; existing job APIs remain the task execution source.
+- The dashboard now includes opt-in, push-to-talk browser speech recognition (Japanese) and speech synthesis for completed assistant answers. Recognized text is placed into the request field and is NOT submitted automatically; the user must inspect it and press the existing submit button.
+- Voice capture is never always-on in this phase. No wake-word detector, background microphone, remote audio streaming, or audio retention is introduced.
+- Use a current Windows version of Microsoft Edge or Google Chrome with microphone permission and HTTPS (or localhost for development). Browser support varies; unsupported browsers must fall back to text.
+- LINE remains a separate planned ingress/notification adapter; it is not connected to the same conversation/session store by this dashboard change. No LINE webhook, customer message, or production setting is changed.
+- A unified conversation/session model across LINE, Web and voice, secure LINE identity mapping, WebSocket/SSE live updates, and cross-channel conversation history remain follow-up work. Do not describe cross-channel synchronization as complete.
+- The browser uses the existing JARVIS API token in memory only. Disconnect clears the in-memory token and stops speech capture/playback.
