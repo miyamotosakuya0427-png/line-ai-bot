@@ -20,6 +20,7 @@ async function main() {
     process.exitCode = 1;
   } finally {
     await pool.end();
+    if (process.connected) process.disconnect();
   }
 }
 main().catch(error => { if (process.send) process.send({ ok: false, error: error.message }); process.exitCode = 1; });
