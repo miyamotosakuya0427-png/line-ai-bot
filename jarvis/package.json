@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node server.js",
     "test": "node --test",
-    "migration:dry-run": "node scripts/jsonl-migration-dry-run.js"
+    "migration:dry-run": "node scripts/jsonl-migration-dry-run.js",
+    "migration:rehearsal:test": "node --test scripts/postgres-migration-rehearsal.test.js"
   },
   "engines": {
     "node": ">=20"
