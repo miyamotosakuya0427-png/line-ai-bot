@@ -27,11 +27,13 @@ test("PostgreSQL 16 execution kernel fences stale workers at the resource write 
   await kernel.registerWorker({workerId:"worker-a",agentId:"agent-a",departmentId:"engineering",instanceId:"instance-a",processId:"100"});
   await kernel.bindWorker({workerId:"worker-a",taskId:first.task.taskId,lease:claimedA.lease,status:"running"});
   const resourceAttempts=await Promise.all([
-   registry.acquireLease({resourceKey:"resource:shared-doc",ownerId:"worker-a",leaseMs:5000}),
-   registry.acquireLease({resourceKey:"resource:shared-doc",ownerId:"worker-b",leaseMs:5000})
+   registry.acquireLease({resourceKey:"resource:race",ownerId:"worker-a",leaseMs:5000}),
+   registry.acquireLease({resourceKey:"resource:race",ownerId:"worker-b",leaseMs:5000})
   ]);
   assert.equal(resourceAttempts.filter(Boolean).length,1,"only one worker may acquire the same resource lease");
-  const resourceLeaseA=resourceAttempts.find(Boolean);
+  const resourceLeaseA=await registry.acquireLease({resourceKey:"resource:shared-doc",ownerId:"worker-a",leaseMs:5000});
+  assert.ok(resourceLeaseA);
+  assert.equal(await registry.acquireLease({resourceKey:"resource:shared-doc",ownerId:"worker-b",leaseMs:5000}),null);
   const initial=await kernel.writeResource({resourceId:"shared-doc",projectId:"one-jarvis",workerId:"worker-a",taskId:first.task.taskId,taskLease:claimedA.lease,lease:resourceLeaseA,operationId:"op-a1",idempotencyKey:"idem-a1",operationScope:"resource.update",payload:{value:1},expectedVersion:0});
   assert.equal(initial.version,1);
   const replay=await kernel.writeResource({resourceId:"shared-doc",projectId:"one-jarvis",workerId:"worker-a",taskId:first.task.taskId,taskLease:claimedA.lease,lease:resourceLeaseA,operationId:"op-a1",idempotencyKey:"idem-a1",operationScope:"resource.update",payload:{value:1},expectedVersion:0});
