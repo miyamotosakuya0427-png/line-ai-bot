@@ -6,9 +6,9 @@ const {createServer}=require("../server");
 function fixture({configured=true,authorize=true}={}){
   const tasks=new Map();let sequence=0;
   const registry={
-    async listTasks({status=null,limit=50,offset=0}={}){return [...tasks.values()].filter(x=>status===null||x.task.status===status).slice(offset,offset+limit);},
+    async listTasks({status=null,limit=50,offset=0,ownerAgent=null,ownerConversation=null}={}){return [...tasks.values()].filter(x=>(status===null||x.task.status===status)&&(ownerAgent===null||x.task.ownerAgent===ownerAgent)&&(ownerConversation===null||x.task.ownerConversation===ownerConversation)).slice(offset,offset+limit);},
     async createTask(input){const id="task-"+(++sequence);const task={taskId:id,...input};const value={task,version:1};tasks.set(id,value);return{...value,created:true};},
-    async getTask(id){return tasks.get(id)||null;},
+    async getTask(id,{ownerAgent=null,ownerConversation=null}={}){const value=tasks.get(id);if(!value)return null;if(ownerAgent!==null&&value.task.ownerAgent!==ownerAgent)return null;if(ownerConversation!==null&&value.task.ownerConversation!==ownerConversation)return null;return value;},
     async claimTask({taskId,ownerId,leaseMs}){const current=tasks.get(taskId);if(!current||current.task.status!=="ready")return null;const lease={resourceKey:"task:"+taskId,ownerId,token:"opaque-token",fencingToken:1,expiresAt:new Date(Date.now()+leaseMs).toISOString()};const next={...current.task,status:"claimed",ownerAgent:ownerId};const value={task:next,version:current.version+1};tasks.set(taskId,value);return{...value,lease};},
     async heartbeatLease({lease,leaseMs}){return{...lease,expiresAt:new Date(Date.now()+leaseMs).toISOString()};},
     async releaseLease(){return true;},
@@ -18,7 +18,7 @@ function fixture({configured=true,authorize=true}={}){
   const scopes=["tasks:read","tasks:write","tasks:dispatch","tasks:claim","tasks:lease","tasks:transition","resources:lease"];
   const server=createServer({
     taskRegistry:configured?registry:null,
-    authorizeTaskRegistry:authorize?async(req)=>req.headers.authorization==="Bearer agent-a"?{agentId:"agent-a",conversationId:"opaque-conversation",scopes}:req.headers.authorization==="Bearer agent-b"?{agentId:"agent-b",scopes}:null:null
+    authorizeTaskRegistry:authorize?async(req)=>req.headers.authorization==="Bearer agent-a"?{agentId:"agent-a",conversationId:"opaque-conversation",scopes}:req.headers.authorization==="Bearer agent-b"?{agentId:"agent-b",scopes}:req.headers.authorization==="Bearer agent-a-other"?{agentId:"agent-a",conversationId:"other-conversation",scopes}:null:null
   });
   return{server,registry,tasks};
 }
@@ -52,6 +52,12 @@ test("Task Registry API creates, claims, heartbeats, transitions and releases un
   const body=await created.json();assert.equal(body.task.ownerAgent,"agent-a");assert.equal(body.task.status,"ready");
   const id=body.task.taskId;
   assert.equal((await fetch(root+"/v1/tasks/"+id,{headers:{Authorization:"Bearer agent-a"}})).status,200);
+  assert.equal((await fetch(root+"/v1/tasks/"+id,{headers:{Authorization:"Bearer agent-b"}})).status,404,"another agent cannot read this task");
+  assert.equal((await fetch(root+"/v1/tasks/"+id,{headers:{Authorization:"Bearer agent-a-other"}})).status,404,"another conversation cannot read this task");
+  const otherAgentList=await fetch(root+"/v1/tasks",{headers:{Authorization:"Bearer agent-b"}});
+  assert.deepEqual((await otherAgentList.json()).tasks,[],"task listing is scoped to the authenticated agent");
+  const otherConversationList=await fetch(root+"/v1/tasks",{headers:{Authorization:"Bearer agent-a-other"}});
+  assert.deepEqual((await otherConversationList.json()).tasks,[],"task listing is scoped to the authenticated conversation");
   const claimed=await post(root,"/v1/tasks/"+id+"/claim",{leaseMs:10000});
   assert.equal(claimed.status,200);const claim=await claimed.json();
   assert.equal(claim.lease.ownerId,"agent-a");
