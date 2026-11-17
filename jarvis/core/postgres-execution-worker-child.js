@@ -1,6 +1,7 @@
 "use strict";
 const { Pool } = require("pg");
 const { createTaskRegistry } = require("./task-registry-store");
+const { createPostgresTaskRegistryRateLimiter } = require("./postgres-task-registry-rate-limiter");
 
 async function main() {
   const url = process.env.JARVIS_EXECUTION_TEST_DATABASE_URL || "";
@@ -13,8 +14,11 @@ async function main() {
     let result;
     if (mode === "claim") result = await registry.claimTaskForWorker({ taskId, workerId, leaseMs: 30000 });
     else if (mode === "resource") result = await registry.acquireLease({ resourceKey: "resource:multi-process-race", ownerId: workerId, leaseMs: 30000 });
-    else throw new Error("Unsupported child test mode");
-    if (process.send) process.send({ ok: true, acquired: Boolean(result), workerId, fencingToken: result?.lease?.fencingToken ?? result?.fencingToken ?? null });
+    else if (mode === "rate-limit") {
+      const limiter = createPostgresTaskRegistryRateLimiter({ pool, limits: { agent: 5, project: 100, conversation: 100, worker: 100, operation: 100 } });
+      result = await limiter.consume("shared-agent", { projectIds: ["one-jarvis"], conversationId: "shared-conversation", workerId: "shared-worker", operation: "tasks.claim" });
+    } else throw new Error("Unsupported child test mode");
+    if (process.send) process.send({ ok: true, acquired: mode === "rate-limit" ? result.allowed : Boolean(result), retryAfter: result?.retryAfter ?? 0, workerId, fencingToken: result?.lease?.fencingToken ?? result?.fencingToken ?? null });
   } catch (error) {
     if (process.send) process.send({ ok: false, workerId, error: error.message });
     process.exitCode = 1;
