@@ -88,15 +88,20 @@ function createPostgresExecutionKernel({pool,clock=()=>new Date().toISOString(),
     },
     async writeResource(input={}){
       await init();
-      const {resourceId,projectId,workerId,taskId,lease,operationId,idempotencyKey,operationScope,payload,expectedVersion}=input;
+      const {resourceId,projectId,workerId,taskId,lease,taskLease,operationId,idempotencyKey,operationScope,payload,expectedVersion}=input;
       if(![resourceId,projectId,workerId,taskId,operationId,idempotencyKey].every(validId)||!OP_SCOPE.test(operationScope||"")||!scopes.has(operationScope)||!Number.isSafeInteger(expectedVersion)||expectedVersion<0||payload===undefined)throw new Error("Invalid or unauthorized fenced write request");
       const payloadJson=canonical(payload),payloadHash=sha(payloadJson),now=clock();
       return tx(async c=>{
         await getLease(c,lease);
-        if(lease.ownerId!==workerId)throw new Error("Lease owner does not match worker");
+        await getLease(c,taskLease);
+        if(lease.ownerId!==workerId||lease.resourceKey!=="resource:"+resourceId)throw new Error("Resource lease owner or key does not match worker and resource");
+        if(taskLease.ownerId!==workerId||taskLease.resourceKey!=="task:"+taskId)throw new Error("Task lease owner or key does not match worker and task");
         const w=await c.query("SELECT status,current_task_id,lease_resource_key,fencing_token FROM jarvis.worker_registry WHERE worker_id=$1 FOR UPDATE",[workerId]);
         const worker=w.rows[0];
-        if(!worker||worker.status!=="running"||worker.current_task_id!==taskId||worker.lease_resource_key!==lease.resourceKey||Number(worker.fencing_token)!==lease.fencingToken)throw new Error("Worker does not own the active task and lease");
+        if(!worker||worker.status!=="running"||worker.current_task_id!==taskId||worker.lease_resource_key!==taskLease.resourceKey||Number(worker.fencing_token)!==taskLease.fencingToken)throw new Error("Worker does not own the active task lease");
+        const task=await c.query("SELECT payload FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1 ORDER BY aggregate_version DESC LIMIT 1 FOR SHARE",[taskId]);
+        const taskState=task.rows[0]?.payload;
+        if(!taskState||!["claimed","in_progress"].includes(taskState.status)||taskState.leaseOwner!==workerId||Number(taskState.fencingToken)!==taskLease.fencingToken||taskState.projectId!==projectId)throw new Error("Task is not actively owned by this worker");
         const prior=await c.query("SELECT * FROM jarvis.fenced_operations WHERE operation_id=$1 OR idempotency_key=$2 FOR UPDATE",[operationId,idempotencyKey]);
         if(prior.rows[0]){
           const p=prior.rows[0];
@@ -108,7 +113,8 @@ function createPostgresExecutionKernel({pool,clock=()=>new Date().toISOString(),
         if(currentVersion!==expectedVersion)throw new Error("Stale resource version");
         if(current.rows[0]&&Number(current.rows[0].fencing_token)>lease.fencingToken)throw new Error("Stale fencing token rejected at database write boundary");
         const nextVersion=currentVersion+1;
-        await c.query("INSERT INTO jarvis.fenced_resources(resource_id,project_id,payload,version,fencing_token,updated_at) VALUES($1,$2,$3::jsonb,$4,$5,$6) ON CONFLICT(resource_id) DO UPDATE SET payload=EXCLUDED.payload,version=EXCLUDED.version,fencing_token=EXCLUDED.fencing_token,updated_at=EXCLUDED.updated_at WHERE jarvis.fenced_resources.project_id=EXCLUDED.project_id AND jarvis.fenced_resources.version=$7 AND jarvis.fenced_resources.fencing_token<=EXCLUDED.fencing_token",[resourceId,projectId,payloadJson,nextVersion,lease.fencingToken,now,currentVersion]);
+        const write=await c.query("INSERT INTO jarvis.fenced_resources(resource_id,project_id,payload,version,fencing_token,updated_at) VALUES($1,$2,$3::jsonb,$4,$5,$6) ON CONFLICT(resource_id) DO UPDATE SET payload=EXCLUDED.payload,version=EXCLUDED.version,fencing_token=EXCLUDED.fencing_token,updated_at=EXCLUDED.updated_at WHERE jarvis.fenced_resources.project_id=EXCLUDED.project_id AND jarvis.fenced_resources.version=$7 AND jarvis.fenced_resources.fencing_token<=EXCLUDED.fencing_token",[resourceId,projectId,payloadJson,nextVersion,lease.fencingToken,now,currentVersion]);
+        if(write.rowCount!==1)throw new Error("Concurrent or stale resource write rejected");
         await c.query("INSERT INTO jarvis.fenced_operations(operation_id,idempotency_key,resource_id,project_id,worker_id,task_id,lease_resource_key,fencing_token,operation_scope,payload_hash,result_version,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",[operationId,idempotencyKey,resourceId,projectId,workerId,taskId,lease.resourceKey,lease.fencingToken,operationScope,payloadHash,nextVersion,now]);
         return {replayed:false,version:nextVersion,fencingToken:lease.fencingToken};
       });
