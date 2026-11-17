@@ -17,6 +17,8 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
       const sql=fs.readFileSync(path.join(__dirname,"..","migrations",file),"utf8");
       await pool.query(sql);
     }
+    const migration4=fs.readFileSync(path.join(__dirname,"..","migrations","0004_task_registry.sql"),"utf8");
+    await pool.query(migration4); // idempotent rerun
     const a=createTaskRegistry({pool,clock});
     const b=createTaskRegistry({pool,clock});
     await a.init();
@@ -40,12 +42,27 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     assert.ok(reclaimed.fencingToken>first.fencingToken,"fencing token must increase after expiry takeover");
     await assert.rejects(a.heartbeatLease({lease:first,leaseMs:10000}),/expired, stale, or not owned/);
 
-    const claim=await a.claimTask({taskId:created.task.taskId,ownerId:"worker-a",leaseMs:10000});
+    const taskClaims=await Promise.all([
+      a.claimTask({taskId:created.task.taskId,ownerId:"worker-a",leaseMs:10000}),
+      b.claimTask({taskId:created.task.taskId,ownerId:"worker-b",leaseMs:10000})
+    ]);
+    assert.equal(taskClaims.filter(Boolean).length,1,"one worker may claim a task");
+    const claim=taskClaims.find(Boolean);
     assert.ok(claim);
     const moved=await a.transitionTask({taskId:created.task.taskId,expectedVersion:claim.version,lease:claim.lease,status:"in_progress",patch:{nextAction:"integration verified"}});
     assert.equal(moved.task.status,"in_progress");
     await assert.rejects(a.transitionTask({taskId:created.task.taskId,expectedVersion:claim.version,lease:claim.lease,status:"review"}),/Stale task version/);
     await assert.rejects(a.transitionTask({taskId:created.task.taskId,expectedVersion:moved.version,lease:claim.lease,status:"review",patch:{taskId:"tamper"}}),/Invalid task patch/);
+    await assert.rejects(pool.query("UPDATE jarvis.events SET event_type='tampered' WHERE aggregate_type='task' AND aggregate_id=$1",[created.task.taskId]),/append-only/);
+    await assert.rejects(pool.query("DELETE FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1",[created.task.taskId]),/append-only/);
+    await assert.rejects(pool.query("TRUNCATE jarvis.events"),/append-only/);
+
+    const releaseKey="integration-release:"+cryptoRandom();
+    const released=await a.acquireLease({resourceKey:releaseKey,ownerId:"release-a",leaseMs:5000});
+    assert.ok(released);
+    assert.equal(await a.releaseLease({lease:released}),true);
+    const afterRelease=await b.acquireLease({resourceKey:releaseKey,ownerId:"release-b",leaseMs:5000});
+    assert.ok(afterRelease.fencingToken>released.fencingToken,"release/reacquire must not reset fencing token");
 
     const staleRace=await Promise.allSettled([
       a.acquireLease({resourceKey:"integration-race:"+cryptoRandom(),ownerId:"race-a",leaseMs:5000}),
