@@ -54,9 +54,9 @@ test("approval execution is bound to resource, exact payload, expiry, and one au
  assert.equal(approved.decidedBy,"owner-api");
  await assert.rejects(store.verifyExecutionRequest(approved.id,{resourceId:"V105",operationPayload:payload}),/integrity/);
  await assert.rejects(store.verifyExecutionRequest(approved.id,{resourceId:"V104",operationPayload:{...payload,destination:"other"}}),/integrity/);
- assert.equal((await store.verifyExecutionRequest(approved.id,{resourceId:"V104",operationPayload:payload})).ok,true);
+ assert.equal((await store.verifyExecutionRequest(approved.id,{resourceId:"V104",operationPayload:{operation:"publish",destination:"youtube",videoId:"V104"}})).ok,true);
  await assert.rejects(store.claimExecution(approved.id,{resourceId:"V104",operationPayload:payload,actor:"untrusted"}),/not authorized/);
- const claimed=await store.claimExecution(approved.id,{resourceId:"V104",operationPayload:payload,actor:"owner-api"});
+ const claimed=await store.claimExecution(approved.id,{resourceId:"V104",operationPayload:{operation:"publish",destination:"youtube",videoId:"V104"},actor:"owner-api"});
  assert.equal(claimed.executionStatus,"claimed");
  assert.equal((await store.validateExecutionClaim(approved.id,{claimId:claimed.executionClaim.id,resourceId:"V104",operationPayload:payload,actor:"owner-api"})).ok,true);
  await assert.rejects(store.validateExecutionClaim(approved.id,{claimId:claimed.executionClaim.id,resourceId:"V105",operationPayload:payload,actor:"owner-api"}),/integrity/);
