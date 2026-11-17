@@ -100,3 +100,19 @@ test("PostgreSQL approvals bind immutable target, payload, expiry, and authorize
  await assert.rejects(approvals.validateExecutionClaim(decided.id,{claimId:claimed.executionClaim.id,resourceId:"V206",operationPayload:payload,actor:"owner-api"}),/integrity/);
  await assert.rejects(approvals.claimExecution(decided.id,{resourceId:"V205",operationPayload:payload,actor:"owner-api"}),/already been claimed/);
 });
+
+test("PostgreSQL approval execution outcomes are finalized and expired exactly once",async()=>{
+ let now="2026-11-17T00:00:00.000Z";
+ const {approvals}=createPostgresOperationalStores({pool:fakePool(),clock:()=>now,authorizeActor:async actor=>actor==="owner-api"});
+ const payload={resourceId:"R-1",operation:"internal-test"};
+ const created=await approvals.create({departmentId:"content",actionClass:"publish",summary:"Test execution",resourceId:"R-1",operationPayload:payload,expiresAt:"2026-11-17T01:00:00.000Z"});
+ await approvals.decide(created.approval.id,"approved",{actor:"owner-api"});
+ const claim=await approvals.claimExecution(created.approval.id,{resourceId:"R-1",operationPayload:payload,actor:"owner-api"});
+ const finished=await approvals.finishExecution(created.approval.id,{claimId:claim.executionClaim.id,actor:"owner-api",outcome:"succeeded"});
+ assert.equal(finished.executionStatus,"succeeded");
+ await assert.rejects(approvals.finishExecution(created.approval.id,{claimId:claim.executionClaim.id,actor:"owner-api",outcome:"failed"}),/not active/);
+ const exp=await approvals.create({departmentId:"content",actionClass:"publish",summary:"Will expire",resourceId:"R-2",operationPayload:{id:"R-2"},expiresAt:"2026-11-17T00:00:01.000Z"});
+ await approvals.decide(exp.approval.id,"approved",{actor:"owner-api"});
+ now="2026-11-17T00:00:02.000Z";
+ assert.equal((await approvals.expireExecution(exp.approval.id)).executionStatus,"expired");
+});
