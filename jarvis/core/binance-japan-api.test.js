@@ -32,3 +32,9 @@ test("requires owner authentication for execute and reconcile endpoints",async()
  await handleBinanceApi({req:{method:"POST",headers:{authorization:"Bearer token"}},res,url:new URL("https://jarvis.test/v1/binance/orders/11111111-1111-4111-8111-111111111111/execute"),client:{},executor:{execute:async()=>({ok:true})},token:"token",ownerToken:"owner",...h});
  assert.equal(res.status,401);
 });
+
+test("account data accepts the owner token without requiring the general API token",async()=>{
+ const res=makeResponse(),h=helpers();
+ await handleBinanceApi({req:{method:"GET",headers:{authorization:"Bearer owner"}},res,url:new URL("https://jarvis.test/v1/binance/account"),client:{configured:true,account:async()=>({accountType:"SPOT",canTrade:true,balances:[{asset:"JPY",free:"1000",locked:"0"}]})},token:"api-token",ownerToken:"owner",...h});
+ assert.equal(res.status,200);assert.equal(res.body.account.balances[0].asset,"JPY");
+});
