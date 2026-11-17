@@ -15,6 +15,11 @@ async function main() {
     let result;
     if (mode === "claim") result = await registry.claimTaskForWorker({ taskId, workerId, leaseMs: 30000 });
     else if (mode === "resource") result = await registry.acquireLease({ resourceKey: "resource:multi-process-race", ownerId: workerId, leaseMs: 30000 });
+    else if (mode === "heartbeat") {
+      const lease = JSON.parse(process.env.JARVIS_EXECUTION_CHILD_HEARTBEAT_LEASE || "null");
+      const kernel = createPostgresExecutionKernel({ pool });
+      result = await kernel.heartbeatWorker({ workerId, lease });
+    }
     else if (mode === "idempotency") {
       const input = JSON.parse(process.env.JARVIS_EXECUTION_CHILD_WRITE_INPUT || "{}");
       const kernel = createPostgresExecutionKernel({ pool, allowedOperationScopes: ["resource.update"] });
