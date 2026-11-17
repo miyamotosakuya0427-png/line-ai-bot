@@ -99,7 +99,7 @@ test("agent cannot acquire or release resources outside its explicit resource pr
 
 test("Task Registry API applies a per-agent rate limit and returns Retry-After",async t=>{
   let count=0;
-  const rateLimiter={async consume(agentId){assert.equal(agentId,"agent-a");count++;return count===1?{allowed:true}:{allowed:false,retryAfter:23};}};
+  const rateLimiter={async consume(agentId,context){assert.equal(agentId,"agent-a");assert.deepEqual(context,{projectIds:["one-jarvis"],conversationId:"opaque-conversation",workerId:"agent-a",operation:"list"});count++;return count===1?{allowed:true}:{allowed:false,retryAfter:23};}};
   const {server}=fixture({rateLimiter});t.after(()=>new Promise(resolve=>server.close(resolve)));
   const root=await listen(server);
   const first=await fetch(root+"/v1/tasks",{headers:{Authorization:"Bearer agent-a"}});
