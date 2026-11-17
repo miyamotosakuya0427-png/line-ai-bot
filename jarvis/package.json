@@ -6,12 +6,15 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "migration:dry-run": "node scripts/jsonl-migration-dry-run.js",
+    "migration:rehearsal:test": "node --test scripts/postgres-migration-rehearsal.test.js"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
-    "@sentry/node": "^10.0.0"
+    "@sentry/node": "^10.0.0",
+    "pg": "^8.16.3"
   }
 }

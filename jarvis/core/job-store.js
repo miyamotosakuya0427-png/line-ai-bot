@@ -22,7 +22,8 @@ function validPayload(value) {
 }
 function publicJob(job) { return clone(job); }
 
-function createJobStore({ filePath, clock = () => new Date().toISOString() } = {}) {
+function createJobStore({ filePath, pool, clock = () => new Date().toISOString() } = {}) {
+  if (pool) return require("./postgres-operational-stores").createPostgresOperationalStores({ pool, clock }).jobs;
   if (typeof filePath !== "string" || !path.isAbsolute(filePath)) {
     throw new Error("JARVIS job store requires an absolute persistent file path");
   }

@@ -862,6 +862,18 @@ test("approval decisions and inbox require a separate owner token", async t => {
     })});
     assert.equal(created.status,201);
     const item=(await created.json()).approval;
+    const boundResponse=await fetch(root+"/v1/approvals",{method:"POST",headers:regularHeaders,body:JSON.stringify({
+      departmentId:"content",actionClass:"publish",summary:"動画V123の公開承認",resourceId:"V123",
+      operationPayload:{videoId:"V123",destination:"youtube",operation:"publish"},
+      expiresAt:new Date(Date.now()+60*60*1000).toISOString()
+    })});
+    assert.equal(boundResponse.status,201);
+    const boundApproval=(await boundResponse.json()).approval;
+    assert.equal(boundApproval.resourceId,"V123");assert.ok(boundApproval.requestDigest);assert.ok(boundApproval.expiresAt);
+    const partialBinding=await fetch(root+"/v1/approvals",{method:"POST",headers:regularHeaders,body:JSON.stringify({
+      departmentId:"content",actionClass:"publish",summary:"不完全な承認",resourceId:"V124"
+    })});
+    assert.equal(partialBinding.status,400);
     const regularList=await fetch(root+"/v1/approvals",{headers:{Authorization:"Bearer "+token}});
     assert.equal(regularList.status,401);
     const regularDecision=await fetch(root+"/v1/approvals/"+item.id+"/decision",{method:"POST",headers:regularHeaders,body:JSON.stringify({decision:"approved"})});

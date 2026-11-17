@@ -495,7 +495,9 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
               (d.details!==undefined&&(typeof d.details!=="string"||d.details.length>8000))||
               (d.idempotencyKey!==undefined&&(typeof d.idempotencyKey!=="string"||d.idempotencyKey.length>128))) return json(res,400,{ok:false,error:"Invalid approval request"});
           if (!["external_submit","financial","contract","publish","delete","permission_change","unknown"].includes(d.actionClass)) return json(res,400,{ok:false,error:"This action class does not require owner approval"});
-          const result=await approvalStore.create({departmentId:d.departmentId,actionClass:d.actionClass,summary:d.summary,details:d.details||"",idempotencyKey:d.idempotencyKey||""});
+          const hasExecutionBinding=d.resourceId!==undefined||d.operationPayload!==undefined||d.expiresAt!==undefined;
+          if(hasExecutionBinding&&(typeof d.resourceId!=="string"||!d.resourceId.trim()||d.resourceId.length>256||!d.operationPayload||typeof d.operationPayload!=="object"||Array.isArray(d.operationPayload)||Buffer.byteLength(JSON.stringify(d.operationPayload),"utf8")>16*1024||typeof d.expiresAt!=="string"||!Number.isFinite(Date.parse(d.expiresAt))||Date.parse(d.expiresAt)<=now().getTime()))return json(res,400,{ok:false,error:"Approval execution binding requires a resource ID, JSON payload under 16 KB, and future expiry"});
+          const result=await approvalStore.create({departmentId:d.departmentId,actionClass:d.actionClass,summary:d.summary,details:d.details||"",idempotencyKey:d.idempotencyKey||"",resourceId:hasExecutionBinding?d.resourceId:"",operationPayload:hasExecutionBinding?d.operationPayload:null,expiresAt:hasExecutionBinding?d.expiresAt:null});
           return json(res,result.created?201:200,{ok:true,created:result.created,approval:result.approval,executionEnabled:false,message:"承認記録のみを保存しました。外部送信・公開・支払い等は実行していません。"});
         }
         const match=new RegExp("^/v1/approvals/([0-9a-f-]{36})/decision$").exec(url.pathname);
@@ -504,7 +506,7 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
           if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
           const d=await readJson(req);
           if (!["approved","rejected"].includes(d.decision)||(d.reason!==undefined&&(typeof d.reason!=="string"||d.reason.length>1000))) return json(res,400,{ok:false,error:"Invalid approval decision"});
-          const approval=await approvalStore.decide(match[1],d.decision,{reason:d.reason||""});
+          const approval=await approvalStore.decide(match[1],d.decision,{reason:d.reason||"",actor:"owner-api"});
           if (!approval) return json(res,404,{ok:false,error:"Approval not found"});
           return json(res,200,{ok:true,approval,executionEnabled:false,message:d.decision==="approved"?"承認を記録しました。外部処理は別途接続・実行が必要です。":"却下を記録しました。外部処理は実行していません。"});
         }
@@ -774,15 +776,29 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
 if (require.main===module) {
   (async()=>{
     if (!TOKEN||Buffer.byteLength(TOKEN,"utf8")<32) throw new Error("JARVIS_API_TOKEN must be configured with at least 32 bytes.");
-    const jobStore=JOB_STORE_PATH?createJobStore({filePath:JOB_STORE_PATH}):null;
+    let postgresPool=null;
+    let jobStore=null,approvalStore=null;
+    if(process.env.JARVIS_STORAGE_MODE==="postgres"){
+      if(!process.env.DATABASE_URL)throw new Error("PostgreSQL storage mode requires DATABASE_URL.");
+      const {createNeonPool,createPostgresEventStore}=require("./core/postgres-event-store");
+      const {createPostgresOperationalStores}=require("./core/postgres-operational-stores");
+      postgresPool=createNeonPool({connectionString:process.env.DATABASE_URL});
+      const eventStore=createPostgresEventStore({pool:postgresPool});
+      await eventStore.migrate();
+      const operational=createPostgresOperationalStores({pool:postgresPool});
+      jobStore=operational.jobs;approvalStore=operational.approvals;
+      await jobStore.init();await approvalStore.init();
+    }else{
+      jobStore=JOB_STORE_PATH?createJobStore({filePath:JOB_STORE_PATH}):null;
+      approvalStore=APPROVAL_STORE_PATH?createApprovalStore({filePath:APPROVAL_STORE_PATH}):null;
+    }
     const videoBatchStore=JOB_STORE_PATH?createVideoBatchStore({filePath:JOB_STORE_PATH+".video-batches.jsonl"}):null;
     const paperTradingStore=JOB_STORE_PATH?createPaperTradingStore({filePath:JOB_STORE_PATH+".paper-trading.jsonl"}):null;
     if(paperTradingStore)await paperTradingStore.init();
     const influenceEventStore=JOB_STORE_PATH?createInfluenceEventStore({filePath:JOB_STORE_PATH+".influence-events.jsonl"}):null;
     if(influenceEventStore)await influenceEventStore.init();
     if(videoBatchStore)await videoBatchStore.init();
-    const approvalStore=APPROVAL_STORE_PATH?createApprovalStore({filePath:APPROVAL_STORE_PATH}):null;
-    if(approvalStore)await approvalStore.init();
+    if(process.env.JARVIS_STORAGE_MODE!=="postgres"&&approvalStore)await approvalStore.init();
     const workerEnabled=process.env.JARVIS_WORKER_ENABLED==="true";
     if (workerEnabled && (!jobStore || !process.env.OPENAI_API_KEY)) throw new Error("Worker requires JARVIS_JOB_STORE_PATH and OPENAI_API_KEY.");
     const departmentContextLoader=createDepartmentContextLoader({sheetsUrl:SHEETS_URL,sheetsToken:SHEETS_TOKEN});
@@ -794,9 +810,9 @@ if (require.main===module) {
     const subsidyScheduler=worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"?startDailySubsidyMonitor({store:jobStore}):null;
     const commandPlanner=createCommandPlanner();
     const server=createServer({jobStore,approvalStore,videoBatchStore,paperTradingStore,influenceEventStore,worker,departmentHandlers,departmentContextLoader,commandPlanner}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
-    const shutdown=signal=>{ console.log(`Received ${signal}; shutting down.`); if(subsidyScheduler)subsidyScheduler.stop(); if(contentScheduler)contentScheduler.stop(); if(worker)worker.stop(); server.close(error=>{if(error){console.error("Graceful shutdown failed.");process.exit(1);}process.exit(0);}); setTimeout(()=>process.exit(1),10000).unref(); };
+    const shutdown=signal=>{ console.log(`Received ${signal}; shutting down.`); if(subsidyScheduler)subsidyScheduler.stop(); if(contentScheduler)contentScheduler.stop(); if(worker)worker.stop(); server.close(async error=>{if(error){console.error("Graceful shutdown failed.");process.exit(1);}if(postgresPool){try{await postgresPool.end();}catch{console.error("Database pool shutdown failed.");}}process.exit(0);}); setTimeout(()=>process.exit(1),10000).unref(); };
     process.on("SIGTERM",()=>shutdown("SIGTERM")); process.on("SIGINT",()=>shutdown("SIGINT"));
     server.listen(PORT,"0.0.0.0",()=>console.log(`ONE JARVIS running on port ${PORT}`));
-  })().catch(error=>{console.error(error.message);process.exit(1);});
+  })().catch(error=>{console.error(process.env.JARVIS_STORAGE_MODE==="postgres"?"ONE JARVIS startup failed; check PostgreSQL configuration and connectivity.":error.message);process.exit(1);});
 }
 module.exports={createServer,isAuthorized,readJson};

@@ -29,6 +29,7 @@ test("approval requests are idempotent and only pending requests can be decided"
  const input={departmentId:"office",actionClass:"external_submit",summary:"補助金申請の提出",idempotencyKey:"grant-001"};
  const a=await store.create(input),b=await store.create(input);
  assert.equal(a.created,true);assert.equal(b.created,false);assert.equal(a.approval.id,b.approval.id);
+ await assert.rejects(store.create({...input,summary:"別の操作"}),/idempotency key conflict/);
  await store.decide(a.approval.id,"rejected");
  await assert.rejects(()=>store.decide(a.approval.id,"approved"),/already been decided/);
  assert.equal((await store.list({status:"rejected"})).length,1);
@@ -42,4 +43,46 @@ test("approval store rejects malformed requests and journal corruption",async t=
  await fs.writeFile(filePath,"not-json\n");
  const broken=createApprovalStore({filePath});
  await assert.rejects(()=>broken.init(),/corrupt/);
+});
+
+test("approval execution is bound to resource, exact payload, expiry, and one authorized claim",async t=>{
+ const filePath=await tempStore(t),clock=()=> "2026-11-17T00:00:00.000Z";
+ const store=createApprovalStore({filePath,clock,authorizeActor:async actor=>actor==="owner-api"});
+ const payload={videoId:"V104",destination:"youtube",operation:"publish"};
+ const created=await store.create({departmentId:"content",actionClass:"publish",summary:"Publish V104",resourceId:"V104",operationPayload:payload,expiresAt:"2026-11-17T01:00:00.000Z"});
+ const approved=await store.decide(created.approval.id,"approved",{reason:"reviewed",actor:"owner-api"});
+ assert.equal(approved.decidedBy,"owner-api");
+ await assert.rejects(store.verifyExecutionRequest(approved.id,{resourceId:"V105",operationPayload:payload}),/integrity/);
+ await assert.rejects(store.verifyExecutionRequest(approved.id,{resourceId:"V104",operationPayload:{...payload,destination:"other"}}),/integrity/);
+ assert.equal((await store.verifyExecutionRequest(approved.id,{resourceId:"V104",operationPayload:{operation:"publish",destination:"youtube",videoId:"V104"}})).ok,true);
+ await assert.rejects(store.claimExecution(approved.id,{resourceId:"V104",operationPayload:payload,actor:"untrusted"}),/not authorized/);
+ const claimed=await store.claimExecution(approved.id,{resourceId:"V104",operationPayload:{operation:"publish",destination:"youtube",videoId:"V104"},actor:"owner-api"});
+ assert.equal(claimed.executionStatus,"claimed");
+ assert.equal((await store.validateExecutionClaim(approved.id,{claimId:claimed.executionClaim.id,resourceId:"V104",operationPayload:payload,actor:"owner-api"})).ok,true);
+ await assert.rejects(store.validateExecutionClaim(approved.id,{claimId:claimed.executionClaim.id,resourceId:"V105",operationPayload:payload,actor:"owner-api"}),/integrity/);
+ await assert.rejects(store.claimExecution(approved.id,{resourceId:"V104",operationPayload:payload,actor:"owner-api"}),/already been claimed/);
+});
+
+test("expired approvals cannot be decided or claimed",async t=>{
+ const filePath=await tempStore(t);let now="2026-11-17T00:00:00.000Z";
+ const store=createApprovalStore({filePath,clock:()=>now,authorizeActor:async()=>true});
+ const created=await store.create({departmentId:"content",actionClass:"publish",summary:"Expired",resourceId:"V1",operationPayload:{id:"V1"},expiresAt:"2026-11-17T00:00:01.000Z"});
+ now="2026-11-17T00:00:02.000Z";
+ await assert.rejects(store.decide(created.approval.id,"approved"),/expired/);
+});
+
+test("approval execution outcomes are finalized once and expiry is recorded",async t=>{
+ const filePath=await tempStore(t);let now="2026-11-17T00:00:00.000Z";
+ const store=createApprovalStore({filePath,clock:()=>now,authorizeActor:async actor=>actor==="owner-api"});
+ const payload={resourceId:"R-1",operation:"internal-test"};
+ const created=await store.create({departmentId:"content",actionClass:"publish",summary:"Test execution",resourceId:"R-1",operationPayload:payload,expiresAt:"2026-11-17T01:00:00.000Z"});
+ await store.decide(created.approval.id,"approved",{actor:"owner-api"});
+ const claim=await store.claimExecution(created.approval.id,{resourceId:"R-1",operationPayload:payload,actor:"owner-api"});
+ const finished=await store.finishExecution(created.approval.id,{claimId:claim.executionClaim.id,actor:"owner-api",outcome:"failed",reason:"Simulated failure"});
+ assert.equal(finished.executionStatus,"failed");
+ await assert.rejects(store.finishExecution(created.approval.id,{claimId:claim.executionClaim.id,actor:"owner-api",outcome:"succeeded"}),/not active/);
+ const exp=await store.create({departmentId:"content",actionClass:"publish",summary:"Will expire",resourceId:"R-2",operationPayload:{id:"R-2"},expiresAt:"2026-11-17T00:00:01.000Z"});
+ await store.decide(exp.approval.id,"approved",{actor:"owner-api"});
+ now="2026-11-17T00:00:02.000Z";
+ assert.equal((await store.expireExecution(exp.approval.id)).executionStatus,"expired");
 });
