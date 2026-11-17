@@ -7,10 +7,10 @@ test("fenced resource writer verifies the lease before crossing the adapter boun
   let checks=0,writes=0;
   const registry={async assertLeaseCurrent({lease}){checks++;if(lease.token==="expired")throw new Error("Lease is expired, stale, or not owned by this caller");return true;}};
   const adapter={async writeFenced(){writes++;return{ok:true};}};
-  const write=createFencedResourceWriter({registry,adapter});
+  const write=createFencedResourceWriter({registry,adapter,allowedScopes:["git:write"]});
   await assert.rejects(write({resourceKey:"path:repo:file.js",operationId:"op-1",payload:{x:1}}),/valid resource lease/);
   assert.equal(checks,0);
-  await assert.rejects(write({lease:{resourceKey:"path:repo:file.js",ownerId:"worker",token:"expired",fencingToken:1,expiresAt:new Date(Date.now()+10000).toISOString()},resourceKey:"path:repo:file.js",operationId:"op-1",payload:{x:1}}),/expired, stale/);
+  await assert.rejects(write({lease:{resourceKey:"path:repo:file.js",ownerId:"worker",token:"expired",fencingToken:1,expiresAt:new Date(Date.now()+10000).toISOString()},resourceKey:"path:repo:file.js",operationId:"op-1",operationScope:"git:write",payload:{x:1}}),/expired, stale/);
   assert.equal(checks,1);
   assert.equal(writes,0);
 });
@@ -29,13 +29,24 @@ test("fenced adapter contract rejects stale tokens and deduplicates operation ID
     const result={ok:true,operationId:input.operationId,fencingToken:input.fencingToken};
     operations.set(key,result);return result;
   }};
-  const write=createFencedResourceWriter({registry,adapter});
+  const write=createFencedResourceWriter({registry,adapter,allowedScopes:["git:write","db:migrate"]});
   const lease2={resourceKey:"branch:repo:main",ownerId:"worker-b",token:"token-b",fencingToken:2,expiresAt:new Date(now+10000).toISOString()};
-  const first=await write({lease:lease2,resourceKey:lease2.resourceKey,operationId:"commit-1",payload:{sha:"abc"}});
-  const duplicate=await write({lease:lease2,resourceKey:lease2.resourceKey,operationId:"commit-1",payload:{sha:"different"}});
+  const first=await write({lease:lease2,resourceKey:lease2.resourceKey,operationId:"commit-1",operationScope:"git:write",payload:{sha:"abc"}});
+  const duplicate=await write({lease:lease2,resourceKey:lease2.resourceKey,operationId:"commit-1",operationScope:"git:write",payload:{sha:"different"}});
   assert.deepEqual(duplicate,first,"retries with the same operation ID return the original result");
   const stale={...lease2,ownerId:"worker-a",token:"token-a",fencingToken:1};
-  await assert.rejects(write({lease:stale,resourceKey:stale.resourceKey,operationId:"commit-2",payload:{sha:"def"}}),/Stale fencing token/);
+  await assert.rejects(write({lease:stale,resourceKey:stale.resourceKey,operationId:"commit-2",operationScope:"git:write",payload:{sha:"def"}}),/Stale fencing token/);
   const expired={...lease2,expiresAt:new Date(now-1).toISOString()};
-  await assert.rejects(write({lease:expired,resourceKey:expired.resourceKey,operationId:"commit-3",payload:{sha:"ghi"}}),/expired/);
+  await assert.rejects(write({lease:expired,resourceKey:expired.resourceKey,operationId:"commit-3",operationScope:"git:write",payload:{sha:"ghi"}}),/expired/);
+});
+
+test("resource writes fail closed when operation scope is not explicitly allowed",async()=>{
+  let writes=0;
+  const registry={async assertLeaseCurrent(){return true;}};
+  const adapter={async writeFenced(){writes++;return{ok:true};}};
+  const write=createFencedResourceWriter({registry,adapter,allowedScopes:["git:write"]});
+  const lease={resourceKey:"branch:repo:main",ownerId:"worker",token:"token",fencingToken:1,expiresAt:new Date(Date.now()+10000).toISOString()};
+  await assert.rejects(write({lease,resourceKey:lease.resourceKey,operationId:"op-1",operationScope:"db:migrate"}),/permitted operation scope/);
+  await assert.rejects(write({lease,resourceKey:lease.resourceKey,operationId:"op-2"}),/permitted operation scope/);
+  assert.equal(writes,0);
 });
