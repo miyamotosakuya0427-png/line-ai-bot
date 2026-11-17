@@ -824,8 +824,9 @@ if (require.main===module) {
       maxNotionalYen:binanceMaxNotionalYen,
       authorizeRisk:async({notionalYen,payload})=>{
         if(process.env.JARVIS_BINANCE_RISK_GATE_ENABLED!=="true"||process.env.JARVIS_BINANCE_VALIDATION_PASSED!=="true")return{allowed:false,reason:"RISK_GATE_OR_VALIDATION_DISABLED"};
-        const account=await binanceClient.account();
-        if(account.canTrade!==true)return{allowed:false,reason:"ACCOUNT_TRADING_PERMISSION_DISABLED"};
+        const [account,permissions]=await Promise.all([binanceClient.account(),binanceClient.apiRestrictions()]);
+        if(account.canTrade!==true||permissions.enableSpotAndMarginTrading!==true)return{allowed:false,reason:"SPOT_TRADING_PERMISSION_DISABLED"};
+        if(permissions.enableWithdrawals!==false||permissions.enableInternalTransfer!==false||permissions.permitsUniversalTransfer!==false||permissions.enableMargin!==false||permissions.enableFutures!==false||permissions.enableVanillaOptions!==false)return{allowed:false,reason:"API_KEY_HAS_UNSAFE_PERMISSIONS"};
         const asset=payload.side==="BUY"?"JPY":payload.symbol.slice(0,-3);
         const balance=(account.balances||[]).find(item=>item.asset===asset);
         const free=Number(balance?.free||0);
