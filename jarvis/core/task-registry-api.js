@@ -1,7 +1,6 @@
 "use strict";
 
 const TASK_STATES=new Set(["proposed","ready","claimed","in_progress","blocked","review","verified","completed","cancelled"]);
-const SAFE_ID=/^[A-Za-z0-9._:-]{1,80}$/;
 const ACTIONS=Object.freeze({
   list:"tasks:read",get:"tasks:read",create:"tasks:write",claim:"tasks:claim",
   heartbeat:"tasks:lease",release:"tasks:lease",transition:"tasks:transition",resourceLease:"resources:lease"
@@ -37,7 +36,7 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson}={}){
     if(!url||(!url.pathname.startsWith("/v1/tasks")&&!url.pathname.startsWith("/v1/resources/leases")))return false;
     const path=url.pathname;
     try{
-      const resourceMatch=/^\\/v1\\/resources\\/leases(?:\\/(heartbeat|release))?$/.exec(path);
+      const resourceMatch=/^\/v1\/resources\/leases(?:\/(heartbeat|release))?$/.exec(path);
       if(resourceMatch){
         if(req.method!=="POST")return json(res,405,{ok:false,error:"Method not allowed"});
         const auth=await principalFor(req,"resourceLease");
@@ -75,7 +74,7 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson}={}){
         const d=await readJson(req),agentId=auth.principal.agentId;
         const result=await registry.createTask({
           title:d.title,scope:d.scope||"",acceptanceCriteria:d.acceptanceCriteria||[],dedupeKey:d.dedupeKey,
-          projectId:d.projectId||"one-jarvis",priority:d.priority||"P2",status:"proposed",
+          projectId:d.projectId||"one-jarvis",priority:d.priority||"P2",
           dependencyTaskIds:d.dependencyTaskIds||[],ownerConversation:auth.principal.conversationId||"agent:"+agentId,ownerAgent:agentId,
           ...(d.status==="ready"&&auth.principal.scopes.includes("tasks:dispatch")?{status:"ready"}:{status:"proposed"})
         });
