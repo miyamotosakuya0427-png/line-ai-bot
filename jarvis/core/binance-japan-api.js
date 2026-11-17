@@ -53,7 +53,7 @@ async function handleBinanceApi({req,res,url,client=null,executor=null,approvalS
     const operationPayload={...order,clientOrderId};
     const expiresAt=new Date(now().getTime()+15*60*1000).toISOString();
     const result=await approvalStore.create({
-      departmentId:"management",actionClass:"financial",
+      departmentId:"trader",actionClass:"financial",
       summary:"Binance Japan Spot "+order.side+" "+order.symbol+" limit order",
       details:"JPY notional="+(Number(order.price)*Number(order.quantity))+"; GTC limit; no leverage; approval required.",
       idempotencyKey:"binance-japan:"+clientOrderId,resourceId:RESOURCE_ID,operationPayload,expiresAt
