@@ -56,10 +56,10 @@ test("live execution stays disabled unless both feature flag and owner auth are 
 test("approved order claims once and sends a limit order; ambiguous dispatch is never retried",async()=>{
  let claimed=0,placed=0,finished=0;
  const payload={symbol:"BTCJPY",side:"BUY",type:"LIMIT",timeInForce:"GTC",quantity:"0.0001",price:"10000000",clientOrderId:"OJ1234567890abcdef1234567890"};
- const approval={id:"a",status:"approved",actionClass:"financial",resourceId:RESOURCE_ID,operationPayload:payload,executionStatus:"not_started"};
+ const approval={id:"a",status:"approved",departmentId:"trader",actionClass:"financial",resourceId:RESOURCE_ID,operationPayload:payload,executionStatus:"not_started"};
  const claim={...approval,executionClaim:{id:"claim",actor:ACTOR}};
  const store={get:async()=>approval,claimExecution:async()=>{claimed++;return claim;},finishExecution:async()=>{finished++;}};
- const executor=createBinanceJapanOrderExecutor({client:{placeLimitOrder:async()=>{placed++;throw new Error("socket timeout");}},approvalStore:store,enabled:true,ownerAuthReady:true,maxNotionalYen:5000,authorizeRisk:async()=>({allowed:true})});
+ const executor=createBinanceJapanOrderExecutor({client:{exchangeInfo:async()=>exchangeInfo,placeLimitOrder:async()=>{placed++;throw new Error("socket timeout");}},approvalStore:store,enabled:true,ownerAuthReady:true,maxNotionalYen:5000,authorizeRisk:async()=>({allowed:true})});
  const result=await executor.execute("a");
  assert.equal(result.status,"outcome_unknown");assert.equal(claimed,1);assert.equal(placed,1);assert.equal(finished,0);
 });
@@ -71,6 +71,6 @@ test("definitive exchange rejection finalizes approval as failed",async()=>{
  const claim={...approval,executionClaim:{id:"claim",actor:ACTOR}};
  const store={get:async()=>approval,claimExecution:async()=>claim,finishExecution:async(_id,value)=>{outcome=value.outcome;}};
  const error=Object.assign(new Error("rejected"),{definitive:true,code:-1013});
- const executor=createBinanceJapanOrderExecutor({client:{placeLimitOrder:async()=>{throw error;}},approvalStore:store,enabled:true,ownerAuthReady:true,authorizeRisk:async()=>({allowed:true})});
+ const executor=createBinanceJapanOrderExecutor({client:{exchangeInfo:async()=>exchangeInfo,placeLimitOrder:async()=>{throw error;}},approvalStore:store,enabled:true,ownerAuthReady:true,authorizeRisk:async()=>({allowed:true})});
  assert.equal((await executor.execute("a")).status,"rejected");assert.equal(outcome,"failed");
 });
