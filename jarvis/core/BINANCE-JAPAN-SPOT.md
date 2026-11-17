@@ -7,7 +7,9 @@ This adapter targets Binance Japan's Spot API only. It does not use Futures, Mar
 The default deployment is read-only. Live order execution is disabled unless all of the following are true:
 
 - `JARVIS_BINANCE_ENABLED=true`
-- `JARVIS_BINANCE_LIVE_ORDERS_ENABLED=true`\n- `JARVIS_BINANCE_RISK_GATE_ENABLED=true`\n- `JARVIS_BINANCE_VALIDATION_PASSED=true`
+- `JARVIS_BINANCE_LIVE_ORDERS_ENABLED=true`
+- `JARVIS_BINANCE_RISK_GATE_ENABLED=true`
+- `JARVIS_BINANCE_VALIDATION_PASSED=true`
 - `JARVIS_OWNER_TOKEN` is configured with at least 32 bytes
 - `JARVIS_BINANCE_API_KEY` and `JARVIS_BINANCE_API_SECRET` are configured
 - The approval store has an execution authorizer for the internal `binance-japan-spot-executor` actor
@@ -34,8 +36,13 @@ A live order is bound to a specific approval resource and immutable payload. The
 - `JARVIS_BINANCE_API_KEY` — API key (secret)
 - `JARVIS_BINANCE_API_SECRET` — API secret (secret)
 - `JARVIS_BINANCE_BASE_URL` — optional, allowlisted Binance API host only
-- `JARVIS_BINANCE_LIVE_ORDERS_ENABLED` — explicit live order kill switch (default false)\n- `JARVIS_BINANCE_RISK_GATE_ENABLED` — explicit asset-balance risk gate (default false)\n- `JARVIS_BINANCE_VALIDATION_PASSED` — explicit operator gate after testnet/demo and security validation (default false)\n- `JARVIS_OWNER_TOKEN` — separate owner-only token required for account, open-order, and order execution routes
-- `JARVIS_BINANCE_MAX_ORDER_JPY` — maximum notional per order (default 5000)\n\nAccount balances and open orders require the separate owner token. The risk callback checks the available JPY balance for buys and base-asset balance for sells. There is not yet a production-grade daily realized-loss ledger or exchange reconciliation monitor, so the validation flag must remain false until those controls and a full demo rehearsal are independently completed.
+- `JARVIS_BINANCE_LIVE_ORDERS_ENABLED` — explicit live order kill switch (default false)
+- `JARVIS_BINANCE_RISK_GATE_ENABLED` — explicit asset-balance risk gate (default false)
+- `JARVIS_BINANCE_VALIDATION_PASSED` — explicit operator gate after testnet/demo and security validation (default false)
+- `JARVIS_OWNER_TOKEN` — separate owner-only token required for account, open-order, and order execution routes
+- `JARVIS_BINANCE_MAX_ORDER_JPY` — maximum notional per order (default 5000)
+
+Account balances and open orders require the separate owner token. The risk callback checks the available JPY balance for buys and base-asset balance for sells. There is not yet a production-grade daily realized-loss ledger or exchange reconciliation monitor, so the validation flag must remain false until those controls and a full demo rehearsal are independently completed.
 
 Never set the live-order flag until the read-only account test, market-data freshness checks, risk-policy review, approval identity checks, and end-to-end testnet/demo rehearsal have passed. Do not assume a global Binance MCP endpoint is available to a Binance Japan account; verify account eligibility and product support separately.
 
