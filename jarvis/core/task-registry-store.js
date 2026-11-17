@@ -113,12 +113,12 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
     if(!current||current.task.leaseOwner!==lease.ownerId||current.task.leaseTokenHash!==hash(lease.token)||current.task.fencingToken!==lease.fencingToken)throw new Error("Task lease is expired, stale, or not owned by this caller");
     return {taskId,current};
   }
-  async function dependenciesCompleted(c,dependencyTaskIds){
-    const dependencies=dependencyTaskIds||[];
-    if(!dependencies.length)return true;
+  async function assertDependenciesCompleted(c,task){
+    const dependencies=task.dependencyTaskIds||[];
+    if(!dependencies.length)return;
     const r=await c.query("SELECT DISTINCT ON (aggregate_id) aggregate_id,payload FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=ANY($1::text[]) ORDER BY aggregate_id,aggregate_version DESC",[dependencies]);
     const statuses=new Map(r.rows.map(row=>[row.aggregate_id,row.payload.status]));
-    return dependencies.every(id=>statuses.get(id)==="completed");
+    if(dependencies.some(id=>statuses.get(id)!=="completed"))throw new Error("Task dependencies are not completed");
   }
   function validateLeaseInput({resourceKey,ownerId,leaseMs}){
     if(!text(resourceKey,240)||!text(ownerId,MAX_OWNER)||!Number.isInteger(leaseMs)||leaseMs<5000||leaseMs>3600000)throw new Error("Invalid lease request");
@@ -246,20 +246,13 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
     async claimTask({taskId,ownerId,leaseMs=60000}={}){
       await init();
       return tx(async c=>{
-        const initial=await latest(c,taskId);
-        if(!initial)throw new Error("Task does not exist");
-        if(!(await dependenciesCompleted(c,initial.task.dependencyTaskIds||[])))return null;
         const lease=await acquireInTx(c,{resourceKey:"task:"+taskId,ownerId,leaseMs});
         if(!lease)return null;
         await lock(c,"task:"+taskId);
         const current=await latest(c,taskId);
         if(!current)throw new Error("Task does not exist");
-        if(!(await dependenciesCompleted(c,current.task.dependencyTaskIds||[]))){
-          const now=clock();
-          await c.query("UPDATE jarvis.coordination_leases SET expires_at=$1,updated_at=$1 WHERE resource_key=$2 AND owner_id=$3 AND token_hash=$4 AND fencing_token=$5",[now,lease.resourceKey,lease.ownerId,hash(lease.token),lease.fencingToken]);
-          await appendCoordinationEvent(c,lease.resourceKey,"lease_released",{resourceKey:lease.resourceKey,ownerId:lease.ownerId,tokenHash:hash(lease.token),fencingToken:lease.fencingToken,releasedAt:now,reason:"dependencies_not_completed"});
-          return null;
-        }
+        await lock(c,"task-dependency-graph");
+        await assertDependenciesCompleted(c,current.task);
         const now=clock();
         const reclaimable=current.task.status==="claimed"||current.task.status==="in_progress";
         if(current.task.status!=="ready"&&!reclaimable)throw new Error("Task is not claimable");
