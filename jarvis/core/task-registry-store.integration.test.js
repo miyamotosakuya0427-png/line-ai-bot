@@ -23,6 +23,10 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     }
     const migration4=fs.readFileSync(path.join(__dirname,"..","migrations","0004_task_registry.sql"),"utf8");
     await pool.query(migration4); // idempotent rerun
+    const migration5=fs.readFileSync(path.join(__dirname,"..","migrations","0005_task_registry_scoped_dedupe.sql"),"utf8");
+    await pool.query(migration5); // scoped index and migration ledger are idempotent
+    const migrationVersion=await pool.query("SELECT 1 FROM jarvis.schema_migrations WHERE version='0005_task_registry_scoped_dedupe'");
+    assert.equal(migrationVersion.rowCount,1,"migration 0005 must be recorded exactly once");
     const a=createTaskRegistry({pool,clock});
     const b=createTaskRegistry({pool,clock});
     await a.init();
