@@ -16,7 +16,7 @@ Migration 0007 creates:
 
 `claimTaskForWorker({ taskId, workerId, leaseMs })` performs Task Lease acquisition, Task Registry claim-event append, and Worker binding in one PostgreSQL transaction. If Worker validation or binding fails, the Task event and Lease acquisition roll back together.
 
-The lock order is Task Lease -> Worker row -> Task event. Recovery uses the same Lease -> Worker order to avoid a Worker/Lease lock inversion. `recoverExpiredWorker()` only clears Worker ownership after the persisted Lease has expired and the fencing token still matches. `listExpiredWorkers()` discovers candidates; `recoverExpiredWorkers()` processes them with per-Worker transaction/locking. Recovery appends an immutable `worker_recovered` event to `jarvis.events`.
+The lock order is Task Lease -> Worker row -> Task event. Recovery first reads the lease key without locking, then locks Lease -> Worker in the same order to avoid a Worker/Lease lock inversion. Recovery writes an append-only `worker_recovered` event. `recoverExpiredWorker()` only clears Worker ownership after the persisted Lease has expired and the fencing token still matches. `listExpiredWorkers()` discovers candidates; `recoverExpiredWorkers()` processes them with per-Worker transaction/locking. Recovery appends an immutable `worker_recovered` event to `jarvis.events`.
 
 Heartbeat age is diagnostic only: a stale heartbeat does not revoke an unexpired Lease. Callers must continue renewing the authoritative Task Lease. The recovery scanner does not run on a background schedule by itself.
 
@@ -30,11 +30,11 @@ This guarantee protects only writes stored through `jarvis.fenced_resources`. It
 
 ## Shared rate limiting
 
-`createPostgresTaskRegistryRateLimiter({ pool, limits, windowMs })` atomically consumes shared PostgreSQL buckets for Agent, each authorized Project, Conversation, Worker, and API operation. It can be injected into `createServer({ taskRegistryRateLimiter })`. The API maps quota exhaustion to HTTP 429 with `Retry-After`. The default in-memory limiter remains process-local and is not a cluster-wide guarantee.
+`createPostgresTaskRegistryRateLimiter({ pool, limits, windowMs })` atomically consumes shared PostgreSQL buckets for Agent, each authorized Project, Conversation, Worker, and API operation. Operation-ID and idempotency-key advisory locks serialize concurrent duplicate writes so one process commits and the others receive the prior result. It can be injected into `createServer({ taskRegistryRateLimiter })`. The API maps quota exhaustion to HTTP 429 with `Retry-After`. The default in-memory limiter remains process-local and is not a cluster-wide guarantee.
 
 ## Test boundary
 
-The PostgreSQL integration test refuses non-loopback hosts and database names without `test`, and drops only the `jarvis` schema in that isolated test database. CI uses PostgreSQL 16. It includes ten independent Node.js child processes with separate PostgreSQL pools racing for one Task, one Resource Lease, and a shared Agent quota, plus atomic rollback, expiry/recovery, recovery audit, idempotency, and stale-writer checks.
+The PostgreSQL integration test refuses non-loopback hosts and database names without `test`, and drops only the `jarvis` schema in that isolated test database. CI uses PostgreSQL 16. It includes ten independent Node.js child processes with separate PostgreSQL pools racing for one Task, one Resource Lease, and a shared Agent quota; concurrent duplicate writes; independent Worker heartbeats; exact Lease expiry; atomic rollback; recovery audit; and stale-writer checks.
 
 ## Remaining gaps before end-to-end completion
 
