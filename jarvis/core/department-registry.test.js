@@ -3,13 +3,14 @@ const test=require("node:test");
 const assert=require("node:assert/strict");
 const {CANONICAL_IDS,resolveDepartmentId,getUnifiedDepartment,createDepartmentDispatcher}=require("./department-registry");
 
-function fakeRegistry(){
+function fakeRegistry({heartbeatFails=false}={}){
   const tasks=new Map();let sequence=0;const releases=[];
   return {
     tasks,releases,
     async createTask(input){const task={...input,taskId:"task-"+(++sequence),status:input.status};tasks.set(task.taskId,task);return{created:true,task,version:1};},
     async claimTask({taskId,ownerId}){const task=tasks.get(taskId);task.status="claimed";task.leaseOwner=ownerId;return{task:{...task},version:2,lease:{resourceKey:"task:"+taskId,ownerId,token:"opaque",fencingToken:1,expiresAt:new Date(Date.now()+60000).toISOString()}};},
     async transitionTask({taskId,expectedVersion,status,patch}){assert.ok(expectedVersion>=2);const task={...tasks.get(taskId),...patch,status};tasks.set(taskId,task);return{task,version:expectedVersion+1};},
+    async heartbeatLease({lease,leaseMs}){if(heartbeatFails)throw new Error("stale lease");return{...lease,expiresAt:new Date(Date.now()+leaseMs).toISOString()};},
     async releaseLease({lease}){releases.push(lease);return true;}
   };
 }
@@ -57,4 +58,27 @@ test("handler outcomes marked unknown are blocked for manual reconciliation and 
   assert.match(result.task.nextAction,/outcome unknown/i);
   assert.equal(calls,1);
   assert.equal(registry.releases.length,1);
+});
+
+test("department handler is aborted and not completed when its lease heartbeat is lost",async()=>{
+  const registry=fakeRegistry({heartbeatFails:true});
+  let signal;
+  let startedResolve;
+  const started=new Promise(resolve=>{startedResolve=resolve;});
+  const dispatch=createDepartmentDispatcher({
+    registry,leaseMs:5000,heartbeatMs:1000,
+    handlers:{sales:async(_payload,context)=>{
+      signal=context.signal;startedResolve();
+      await new Promise(resolve=>context.signal.addEventListener("abort",resolve,{once:true}));
+      return{mustNotPersist:true};
+    }}
+  });
+  const pending=dispatch({departmentId:"sales",title:"Long sales task",dedupeKey:"sales-lease-lost",ownerConversation:"conversation-1",workerId:"worker-a"});
+  await started;
+  const result=await pending;
+  assert.equal(signal.aborted,true);
+  assert.equal(result.leaseLost,true);
+  assert.equal(result.status,"lease_lost");
+  assert.equal(registry.tasks.get(result.task.taskId).status,"in_progress");
+  assert.equal(registry.releases.length,0,"stale owner must not release a newer owner's lease");
 });
