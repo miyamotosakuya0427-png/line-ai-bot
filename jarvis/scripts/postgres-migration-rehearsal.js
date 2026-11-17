@@ -54,7 +54,7 @@ async function rehearseFixtureImport({pool,jobs,approvals,failAfter=null}={}){
    inserted++;
    if(Number.isInteger(failAfter)&&inserted>=failAfter)throw new Error("Injected fixture failure for rollback verification");
   }
-  const read=await client.query("SELECT aggregate_type,aggregate_id,payload FROM (SELECT DISTINCT ON (aggregate_type,aggregate_id) aggregate_type,aggregate_id,payload FROM jarvis.events WHERE aggregate_type IN ('job','approval') AND aggregate_id=ANY($1::text[]) ORDER BY aggregate_type,aggregate_id,aggregate_version DESC) latest ORDER BY aggregate_type,aggregate_id");
+  const read=await client.query("SELECT aggregate_type,aggregate_id,payload FROM (SELECT DISTINCT ON (aggregate_type,aggregate_id) aggregate_type,aggregate_id,payload FROM jarvis.events WHERE aggregate_type IN ('job','approval') AND aggregate_id=ANY($1::text[]) ORDER BY aggregate_type,aggregate_id,aggregate_version DESC) latest ORDER BY aggregate_type,aggregate_id",[all.map(x=>x.record.id)]);
   const dbJobs=read.rows.filter(r=>r.aggregate_type==="job").map(r=>r.payload);
   const dbApprovals=read.rows.filter(r=>r.aggregate_type==="approval").map(r=>r.payload);
   const after={jobs:logicalChecksum(dbJobs),approvals:logicalChecksum(dbApprovals),jobCount:dbJobs.length,approvalCount:dbApprovals.length};
