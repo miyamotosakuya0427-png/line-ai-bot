@@ -69,6 +69,16 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
     }
     for(const dependencyId of dependencies)visit(dependencyId);
   }
+  async function assertDependenciesCompleted(c,task){
+    const ids=task.dependencyTaskIds||[];
+    if(!ids.length)return;
+    const r=await c.query(
+      "SELECT DISTINCT ON (aggregate_id) aggregate_id,payload->>'status' AS status FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=ANY($1::text[]) ORDER BY aggregate_id,aggregate_version DESC",
+      [ids]
+    );
+    const states=new Map(r.rows.map(row=>[row.aggregate_id,row.status]));
+    if(ids.some(id=>states.get(id)!=="completed"))throw new Error("Task dependencies are not completed");
+  }
   function validateLeaseInput({resourceKey,ownerId,leaseMs}){
     if(!text(resourceKey,240)||!text(ownerId,MAX_OWNER)||!Number.isInteger(leaseMs)||leaseMs<5000||leaseMs>3600000)throw new Error("Invalid lease request");
   }
@@ -178,6 +188,8 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         if(!lease)return null;
         const current=await latest(c,taskId);
         if(!current)throw new Error("Task does not exist");
+        await lock(c,"task-dependency-graph");
+        await assertDependenciesCompleted(c,current.task);
         const now=clock();
         const reclaimable=current.task.status==="claimed"||current.task.status==="in_progress";
         if(current.task.status!=="ready"&&!reclaimable)throw new Error("Task is not claimable");
