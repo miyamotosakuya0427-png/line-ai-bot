@@ -36,7 +36,7 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson,rateL
     if(!Array.isArray(projectIds)||projectIds.length<1||projectIds.length>50||projectIds.some(x=>typeof x!=="string"||!/^[A-Za-z0-9._:-]{1,128}$/.test(x))||new Set(projectIds).size!==projectIds.length)return {error:"forbidden"};
     if(!Array.isArray(resourcePrefixes)||resourcePrefixes.length>100||resourcePrefixes.some(x=>typeof x!=="string"||! /^(branch|path|database|migration|deployment|external|media|publication):[A-Za-z0-9._-]{1,128}:$/.test(x)))return {error:"forbidden"};
     let quota;
-    try{quota=await rateLimiter.consume(principal.agentId);}catch{return {error:"unavailable"};}
+    try{quota=await rateLimiter.consume(principal.agentId,{projectIds,conversationId:principal.conversationId||"agent:"+principal.agentId,workerId:principal.workerId||principal.agentId,operation:action});}catch{return {error:"unavailable"};}
     if(!quota||quota.allowed!==true)return {error:"rate_limited",retryAfter:Number.isInteger(quota?.retryAfter)?Math.max(1,quota.retryAfter):60};
     return {principal:{...principal,projectIds,resourcePrefixes}};
   }
