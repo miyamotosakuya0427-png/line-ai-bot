@@ -32,6 +32,9 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     assert.equal(created.created,true);
     assert.equal(duplicate.created,false);
     assert.equal(duplicate.task.taskId,created.task.taskId);
+    const sameKeyOtherAgent=await b.createTask({title:"Same key, different owner",dedupeKey:dedupe,status:"ready",ownerAgent:"different-agent",ownerConversation:"different-conversation"});
+    assert.equal(sameKeyOtherAgent.created,true,"idempotency keys are isolated by agent and conversation ownership");
+    assert.notEqual(sameKeyOtherAgent.task.taskId,created.task.taskId);
 
     await assert.rejects(
       a.createTask({title:"Missing dependency",dedupeKey:"missing-dependency:"+cryptoRandom(),dependencyTaskIds:["missing-task-id"]}),
