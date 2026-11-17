@@ -66,7 +66,7 @@ function validateApproval(a,line,issues) {
 }
 
 async function inspectFile(filePath, kind) {
-  const report={kind,path:path.resolve(filePath),exists:false,bytes:0,rawSha256:null,canonicalLatestSha256:null,lines:0,validEvents:0,latestRecords:0,invalidLines:[],duplicateIds:[],duplicateIdempotencyKeys:[],issues:[]};
+  const report={kind,fileName:path.basename(filePath),exists:false,bytes:0,rawSha256:null,canonicalLatestSha256:null,lines:0,validEvents:0,latestRecords:0,invalidLines:[],duplicateIds:[],duplicateIdempotencyKeys:[],issues:[]};
   let handle;
   try { handle=await fs.open(filePath,"r"); }
   catch(error) {
@@ -102,13 +102,13 @@ async function inspectFile(filePath, kind) {
       if(!firstSeen.has(id)) firstSeen.set(id,i+1);
       else if((kind==="job" && record.status==="queued" && record.attempts===0 && latest.get(id)?.status==="queued" && latest.get(id)?.attempts===0) ||
               (kind==="approval" && record.status==="pending" && latest.get(id)?.status==="pending")) {
-        report.duplicateIds.push({id,firstLine:firstSeen.get(id),duplicateLine:i+1,detail:"Repeated initial snapshot for the same aggregate"});
+        report.duplicateIds.push({aggregateIdSha256:sha256(id),firstLine:firstSeen.get(id),duplicateLine:i+1,detail:"Repeated initial snapshot for the same aggregate"});
       }
       latest.set(id,record);
       const key=record.idempotencyKey;
       if(key) {
         if(!idempotency.has(key)) idempotency.set(key,{id,line:i+1});
-        else if(idempotency.get(key).id!==id) report.duplicateIdempotencyKeys.push({key,firstId:idempotency.get(key).id,duplicateId:id,line:i+1});
+        else if(idempotency.get(key).id!==id) report.duplicateIdempotencyKeys.push({keySha256:sha256(key),firstAggregateSha256:sha256(idempotency.get(key).id),duplicateAggregateSha256:sha256(id),line:i+1});
       }
     }
     const latestRecords=[...latest.values()].sort((a,b)=>String(a.id).localeCompare(String(b.id)));
