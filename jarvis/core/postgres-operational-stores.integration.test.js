@@ -12,7 +12,8 @@ test("real PostgreSQL multi-connection claims and approval integrity", {skip:!en
  const {Pool}=require("pg");
  const parsed=new URL(connectionString);
  const database=decodeURIComponent(parsed.pathname.replace(/^\//,""));
- if(!/(^|[_-])test([_-]|$)/i.test(database))throw new Error("JARVIS_TEST_DATABASE_URL must point to a dedicated database whose name includes test");
+ if(!["localhost","127.0.0.1","::1"].includes(parsed.hostname))throw new Error("Integration tests are restricted to a local PostgreSQL server; Neon and remote databases are prohibited");
+ if(!/(^|[_-])test([_-]|$)/i.test(database))throw new Error("JARVIS_TEST_DATABASE_URL must point to a disposable local database whose name includes test");
  const pool=new Pool({connectionString,max:8,ssl:parsed.searchParams.get("sslmode")==="disable"?false:{rejectUnauthorized:true}});
  try{
   await pool.query("DROP SCHEMA IF EXISTS jarvis CASCADE");
