@@ -119,7 +119,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
       const task={taskId:id,dedupeKey,projectId,title,scope,acceptanceCriteria:[...acceptanceCriteria],ownerConversation,ownerAgent,priority,status,dependencyTaskIds:[...new Set(dependencyTaskIds)],branch:null,baseBranch:null,headSha:null,pullRequest:null,createdAt:now,updatedAt:now,startedAt:null,completedAt:null,leaseOwner:null,leaseTokenHash:null,leaseExpiresAt:null,fencingToken:0,changedPaths:[],testRunIds:[],verificationSummary:null,blockerIds:[],nextAction:null};
       return tx(async c=>{
         await lock(c,"task-dedupe:"+dedupeKey);
-        const existing=await c.query("SELECT aggregate_id,payload FROM jarvis.events WHERE aggregate_type='task' AND event_type='created' AND payload->>'dedupeKey'=$1 LIMIT 1",[dedupeKey]);
+        const existing=await c.query("SELECT aggregate_id,payload FROM jarvis.events WHERE aggregate_type='task' AND event_type='created' AND payload->>'dedupeKey'=$1 AND payload->>'ownerAgent'=$2 AND payload->>'ownerConversation'=$3 AND payload->>'projectId'=$4 LIMIT 1",[dedupeKey,ownerAgent,ownerConversation,projectId]);
         if(existing.rows[0])return {task:clone(existing.rows[0].payload),created:false,version:1};
         await lock(c,"task-dependency-graph");
         await validateDependencies(c,id,task.dependencyTaskIds);
