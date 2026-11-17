@@ -43,3 +43,12 @@ The migration sequence is 0001 (schema and event table), 0002 (operational index
 The integration test uses only an ephemeral PostgreSQL 16 service and a disposable database whose name includes `test`. It verifies INSERT and SELECT using a restricted runtime test role, checks that the role has no UPDATE/DELETE/TRUNCATE grants, and verifies that even the table owner is rejected by the row and statement triggers for UPDATE, DELETE, and TRUNCATE.
 
 The current application connection still performs initialization using the configured `DATABASE_URL`; production must not be considered hardened until migration ownership is separated from the runtime role, least-privilege grants are applied deliberately, and privileged DDL is monitored. A superuser or schema/table owner can alter or disable triggers. No live Neon database has been migrated by this change.
+
+
+## Worker retry and lease recovery policy
+
+Worker retries are bounded by `maxAttempts` and use exponential delays (default 1 second base, capped at 60 seconds). A handler error is retried only when it sets both `retryable: true` and `retrySafe: true`; this is an explicit assertion that the provider confirmed no effect or the operation is protected by a stable idempotency key. A retryable error without `retrySafe` is recorded as `outcomeUnknown` and is not automatically replayed.
+
+An expired PostgreSQL lease is recorded as failed with `outcomeUnknown: true`; it is not automatically reclaimed by another worker. The previous lease owner cannot heartbeat or change the job after expiry. A job can be requeued only after explicit reconciliation. The JSONL worker follows the same fail-closed rule for interrupted running jobs, and an incomplete final journal fragment is preserved in a restricted quarantine file before recovery continues.
+
+These policies reduce duplicate external effects but do not replace provider-side idempotency keys or operator review. External publishing handlers remain disabled until an approval-aware execution adapter is separately implemented and reviewed.
