@@ -48,8 +48,14 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     assert.equal(await a.releaseLease({lease:rootLease}),true);
     const rootClaim=await a.claimTask({taskId:root.task.taskId,ownerId:"dependency-root-worker",leaseMs:10000});
     const rootRunning=await a.transitionTask({taskId:root.task.taskId,expectedVersion:rootClaim.version,lease:rootClaim.lease,status:"in_progress"});
-    const rootCompleted=await a.transitionTask({taskId:root.task.taskId,expectedVersion:rootRunning.version,lease:rootClaim.lease,status:"completed"});
+    const rootReview=await a.transitionTask({taskId:root.task.taskId,expectedVersion:rootRunning.version,lease:rootClaim.lease,status:"review"});
+    const rootVerified=await a.transitionTask({taskId:root.task.taskId,expectedVersion:rootReview.version,lease:rootClaim.lease,status:"verified"});
+    const rootCompleted=await a.transitionTask({taskId:root.task.taskId,expectedVersion:rootVerified.version,lease:rootClaim.lease,status:"completed"});
     assert.equal(rootCompleted.task.status,"completed");
+    await assert.rejects(
+      a.transitionTask({taskId:root.task.taskId,expectedVersion:rootCompleted.version,lease:rootClaim.lease,status:"completed"}),
+      /Invalid task state transition/
+    );
     const childClaim=await a.claimTask({taskId:child.task.taskId,ownerId:"dependency-child-worker",leaseMs:10000});
     assert.ok(childClaim,"dependent task becomes claimable only after dependency completion");
     assert.equal(await a.releaseLease({lease:childClaim.lease}),true);
