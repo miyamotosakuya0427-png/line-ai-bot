@@ -50,23 +50,37 @@ function createWorker({ store, handlers = {}, maxAttempts = 3, leaseMs = 60000, 
         const failed = await transition("failed", { error: "No handler registered for job type: " + running.type });
         return { processed: true, job: failed };
       }
-      let heartbeat = null, leaseLost = false, heartbeatBusy = false;
+      let heartbeat = null, leaseLost = false, heartbeatBusy = false, heartbeatPromise = null;
+      const abortController = new AbortController();
+      const stopHeartbeat = async () => {
+        if (heartbeat) clearInterval(heartbeat);
+        heartbeat = null;
+        // A heartbeat already in flight must settle before a completion or retry
+        // decision. Otherwise a late heartbeat rejection could race a stale write.
+        if (heartbeatPromise) await heartbeatPromise;
+      };
       if (leaseOwner && typeof store.heartbeat === "function") {
-        heartbeat = setInterval(async () => {
+        heartbeat = setInterval(() => {
           if (heartbeatBusy || leaseLost) return;
           heartbeatBusy = true;
-          try { await store.heartbeat(running.id, { workerId, leaseMs }); }
-          catch { leaseLost = true; }
-          finally { heartbeatBusy = false; }
+          heartbeatPromise = (async () => {
+            try { await store.heartbeat(running.id, { workerId, leaseMs }); }
+            catch {
+              leaseLost = true;
+              abortController.abort(new Error("Worker lease lost; handler must stop before external writes"));
+            } finally { heartbeatBusy = false; }
+          })();
         }, heartbeatMs);
         heartbeat.unref?.();
       }
       try {
-        const result = await handler(running.payload, { jobId: running.id, attempt: running.attempts, workerId });
+        const result = await handler(running.payload, { jobId: running.id, attempt: running.attempts, workerId, signal: abortController.signal });
+        await stopHeartbeat();
         if (leaseLost) return { processed: true, job: null, leaseLost: true };
         const succeeded = await transition("succeeded", { result: result === undefined ? undefined : (result && typeof result === "object" && !Array.isArray(result) ? result : { value: String(result).slice(0, 8000) }) });
         return { processed: true, job: succeeded };
       } catch (error) {
+        await stopHeartbeat();
         if (leaseLost) return { processed: true, job: null, leaseLost: true };
         const message = error && typeof error.message === "string" ? error.message : "Job failed";
         if (error?.retryable === true && error?.retrySafe === true && running.attempts < maxAttempts) {
@@ -82,7 +96,7 @@ function createWorker({ store, handlers = {}, maxAttempts = 3, leaseMs = 60000, 
           outcomeUnknown: error?.outcomeUnknown === true || (error?.retryable === true && error?.retrySafe !== true)
         });
         return { processed: true, job: failed, retryScheduled: false, outcomeUnknown: Boolean(failed?.outcomeUnknown) };
-      } finally { if (heartbeat) clearInterval(heartbeat); }
+      } finally { await stopHeartbeat(); }
     });
     active = operation.catch(() => {});
     return operation;
