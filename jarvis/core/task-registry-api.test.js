@@ -18,7 +18,7 @@ function fixture({configured=true,authorize=true}={}){
   const scopes=["tasks:read","tasks:write","tasks:dispatch","tasks:claim","tasks:lease","tasks:transition","resources:lease"];
   const server=createServer({
     taskRegistry:configured?registry:null,
-    authorizeTaskRegistry:authorize?async(req)=>req.headers.authorization==="Bearer agent-a"?{agentId:"agent-a",conversationId:"opaque-conversation",scopes}:req.headers.authorization==="Bearer agent-b"?{agentId:"agent-b",scopes}:req.headers.authorization==="Bearer agent-a-other"?{agentId:"agent-a",conversationId:"other-conversation",scopes}:null:null
+    authorizeTaskRegistry:authorize?async(req)=>req.headers.authorization==="Bearer agent-a"?{agentId:"agent-a",conversationId:"opaque-conversation",scopes}:req.headers.authorization==="Bearer agent-b"?{agentId:"agent-b",scopes}:req.headers.authorization==="Bearer agent-a-other"?{agentId:"agent-a",conversationId:"other-conversation",scopes}:req.headers.authorization==="Bearer agent-a-unbound"?{agentId:"agent-a",scopes}:null:null
   });
   return{server,registry,tasks};
 }
@@ -58,6 +58,7 @@ test("Task Registry API creates, claims, heartbeats, transitions and releases un
   assert.deepEqual((await otherAgentList.json()).tasks,[],"task listing is scoped to the authenticated agent");
   const otherConversationList=await fetch(root+"/v1/tasks",{headers:{Authorization:"Bearer agent-a-other"}});
   assert.deepEqual((await otherConversationList.json()).tasks,[],"task listing is scoped to the authenticated conversation");
+  assert.equal((await fetch(root+"/v1/tasks/"+id,{headers:{Authorization:"Bearer agent-a-unbound"}})).status,404,"an agent token without a conversation binding cannot read another conversation's task");
   const claimed=await post(root,"/v1/tasks/"+id+"/claim",{leaseMs:10000});
   assert.equal(claimed.status,200);const claim=await claimed.json();
   assert.equal(claim.lease.ownerId,"agent-a");
