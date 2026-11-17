@@ -67,6 +67,24 @@ function createPostgresExecutionKernel({pool,clock=()=>new Date().toISOString(),
         return r.rows[0];
       });
     },
+    async recoverExpiredWorker({workerId}={}){
+      await init();
+      if(!validId(workerId))throw new Error("Invalid worker ID");
+      return tx(async c=>{
+        const r=await c.query("SELECT status,current_task_id,lease_resource_key,fencing_token FROM jarvis.worker_registry WHERE worker_id=$1 FOR UPDATE",[workerId]);
+        const worker=r.rows[0];
+        if(!worker)return null;
+        if(!worker.lease_resource_key||!worker.current_task_id)return {recovered:false,reason:"worker has no active task lease"};
+        const lease=await c.query("SELECT expires_at,fencing_token FROM jarvis.coordination_leases WHERE resource_key=$1 FOR UPDATE",[worker.lease_resource_key]);
+        if(!lease.rows[0])throw new Error("Worker lease record is missing; quarantine required");
+        if(Date.parse(lease.rows[0].expires_at)>Date.parse(clock()))return {recovered:false,reason:"lease is still active"};
+        if(Number(lease.rows[0].fencing_token)!==Number(worker.fencing_token))throw new Error("Worker fencing token does not match expired lease; quarantine required");
+        const now=clock();
+        const updated=await c.query("UPDATE jarvis.worker_registry SET status='recovering',current_task_id=NULL,lease_resource_key=NULL,fencing_token=NULL,stopped_at=$1,version=version+1,updated_at=$1 WHERE worker_id=$2 AND version=(SELECT version FROM jarvis.worker_registry WHERE worker_id=$2) RETURNING *",[now,workerId]);
+        if(!updated.rows[0])throw new Error("Worker recovery lost an optimistic concurrency race");
+        return {recovered:true,worker:updated.rows[0],expiredTaskId:worker.current_task_id,expiredFencingToken:Number(worker.fencing_token)};
+      });
+    },
     async transitionWorker({workerId,expectedVersion,status}={}){
       await init();
       if(!validId(workerId)||!Number.isSafeInteger(expectedVersion)||!WORKER_STATES.has(status))throw new Error("Invalid worker transition");
