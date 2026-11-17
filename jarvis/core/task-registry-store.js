@@ -52,7 +52,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
     return version;
   }
   function normalizedPath(value){
-    if(typeof value!=="string"||!value.trim()||value.length>500||value.startsWith("/")||value.includes("\\\\"))throw new Error("Invalid task path");
+    if(typeof value!=="string"||!value.trim()||value.length>500||value.startsWith("/")||value.includes("\\"))throw new Error("Invalid task path");
     const parts=value.split("/");
     if(parts.some(part=>!part||part==="."||part===".."))throw new Error("Invalid task path");
     return parts.join("/");
@@ -129,6 +129,12 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
   async function transitionInTx(c,{taskId,expectedVersion,lease,status,patch={},resourceLeases=[]}){
     if(!TASK_STATES.has(status))throw new Error("Invalid task status");
     if(!patch||typeof patch!=="object"||Array.isArray(patch)||Object.keys(patch).some(key=>!PATCH_FIELDS.has(key)))throw new Error("Invalid task patch");
+    for(const field of ["branch","baseBranch"]){
+      if(Object.prototype.hasOwnProperty.call(patch,field)&&patch[field]!==null&&
+        (typeof patch[field]!=="string"||patch[field].length>240||! /^[A-Za-z0-9._/-]+$/.test(patch[field])||patch[field].startsWith("/")||patch[field].endsWith("/")||patch[field].includes("..")))throw new Error("Invalid task branch");
+    }
+    if(Object.prototype.hasOwnProperty.call(patch,"headSha")&&patch.headSha!==null&&
+      (typeof patch.headSha!=="string"||! /^[a-f0-9]{7,64}$/i.test(patch.headSha)))throw new Error("Invalid task head SHA");
     await assertLease(c,lease);
     if(lease.resourceKey!=="task:"+taskId)throw new Error("Task lease resource does not match task");
     await lock(c,"task:"+taskId);
