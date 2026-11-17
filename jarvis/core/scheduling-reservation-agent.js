@@ -29,7 +29,7 @@ function createSchedulingReservationAgent({calendar,booking,store,taskRegistry,a
     const availability=await booking.searchAvailability({provider,start,end,partySize,service:input.service||null});
     const proposal={title,provider,start,end,partySize,service:input.service||null,availability,calendarConflictCount:conflicts.length};
     const operationHash=digest(proposal),id=crypto.randomUUID(),now=clock();
-    const record={id,type:"reservation",state:"proposed",proposal,operationHash,idempotencyKey:"jarvis-reservation-"+operationHash,createdAt:now,updatedAt:now,requiresApproval:true,calendarConflicts:conflicts.map(e=>({id:e.id||null,start:e.start,end:e.end,title:e.title||""}))};
+    const record={id,type:"reservation",state:"proposed",proposal,operationHash,idempotencyKey:"jarvis-reservation-"+operationHash,createdAt:now,updatedAt:now,requiresApproval:true,createdBy:input.ownerAgent||"scheduling",calendarConflicts:conflicts.map(e=>({id:e.id||null,start:e.start,end:e.end,title:e.title||""}))};
     await store.create(record);
     const task=await taskRegistry.createTask({title:"予約候補の確認："+title,scope:"予約提案を確認し、候補日時・競合・料金・取消条件を確認する。外部予約は承認まで実行禁止。",dedupeKey:"schedule-proposal:"+operationHash,projectId:input.projectId||"one-jarvis",ownerAgent:input.ownerAgent||"scheduling",ownerConversation:input.ownerConversation||"scheduling",priority:"P2",status:"proposed"});
     return {record,task,canConfirm:conflicts.length===0&&Array.isArray(availability)&&availability.length>0};
@@ -41,15 +41,15 @@ function createSchedulingReservationAgent({calendar,booking,store,taskRegistry,a
     if(record.state==="outcome_unknown")return {record,requiresReconciliation:true};
     if(record.state!=="proposed"&&record.state!=="approval_pending")throw new Error("Reservation is not confirmable");
     const verified=await authorizeApproval(approval,{action:"reservation.create",resourceId:record.id,operationHash:record.operationHash});
-    if(!verified||verified.approved!==true||verified.operationHash!==record.operationHash||!verified.approvalId)throw new Error("A matching explicit approval is required");
+    if(!verified||verified.approved!==true||verified.operationHash!==record.operationHash||!verified.approvalId||typeof verified.approverId!=="string"||!verified.approverId.trim())throw new Error("A matching explicit approval with approver identity is required");
     if(booking.supportsIdempotency!==true||typeof booking.createReservation!=="function")throw new Error("Booking adapter lacks a verified idempotent create contract; fail closed");
     const before=await calendar.listEvents({start:record.proposal.start,end:record.proposal.end});
     if(before.some(e=>Date.parse(e.start)<Date.parse(record.proposal.end)&&Date.parse(e.end)>Date.parse(record.proposal.start)))throw new Error("Calendar conflict appeared after proposal; re-propose");
-    await store.update(id,{state:"approval_pending",approvalId:verified.approvalId,updatedAt:clock()});
+    await store.update(id,{state:"approval_pending",approvalId:verified.approvalId,approvedBy:verified.approverId,updatedAt:clock()});
     try{
       const result=await booking.createReservation({...record.proposal,idempotencyKey:record.idempotencyKey,approvalId:verified.approvalId});
       if(!result||result.confirmed!==true||!result.reservationId)throw Object.assign(new Error("Booking outcome not confirmed"),{outcomeUnknown:true});
-      const confirmed={...record,state:"confirmed",reservationId:result.reservationId,providerConfirmation:result.confirmation||null,confirmedAt:clock(),updatedAt:clock(),approvalId:verified.approvalId};
+      const confirmed={...record,state:"confirmed",reservationId:result.reservationId,providerConfirmation:result.confirmation||null,confirmedAt:clock(),updatedAt:clock(),approvalId:verified.approvalId,approvedBy:verified.approverId};
       await store.update(id,confirmed);
       return {record:confirmed,duplicate:false};
     }catch(error){
