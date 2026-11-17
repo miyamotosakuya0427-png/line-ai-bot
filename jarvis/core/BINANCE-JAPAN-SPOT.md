@@ -20,7 +20,7 @@ Use an API key with Spot read and Spot trading permissions only. Disable withdra
 ## Supported adapter operations
 
 - Public: exchange information, ticker price, klines
-- Signed read: account balances, open orders
+- Signed read: account balances, open orders, recent trades, API-key permission audit
 - Order: GTC limit orders only; no market orders, margin, futures, withdrawals, or transfers
 - Reconciliation: query an order by its client order ID after an ambiguous network outcome
 
@@ -42,7 +42,7 @@ A live order is bound to a specific approval resource and immutable payload. The
 - `JARVIS_OWNER_TOKEN` — separate owner-only token required for account, open-order, and order execution routes
 - `JARVIS_BINANCE_MAX_ORDER_JPY` — maximum notional per order (default 5000)
 
-Account balances and open orders require the separate owner token. The risk callback checks the available JPY balance for buys and base-asset balance for sells. There is not yet a production-grade daily realized-loss ledger or exchange reconciliation monitor, so the validation flag must remain false until those controls and a full demo rehearsal are independently completed.
+Account balances, open orders, trade history, and API-key permission audits require the separate owner token. The live risk gate independently checks Binance API restrictions and rejects keys that permit withdrawals, transfers, margin, futures, or options. The risk callback checks the available JPY balance for buys and base-asset balance for sells. There is not yet a production-grade daily realized-loss ledger or exchange reconciliation monitor, so the validation flag must remain false until those controls and a full demo rehearsal are independently completed.
 
 Never set the live-order flag until the read-only account test, market-data freshness checks, risk-policy review, approval identity checks, and end-to-end testnet/demo rehearsal have passed. Do not assume a global Binance MCP endpoint is available to a Binance Japan account; verify account eligibility and product support separately.
 
