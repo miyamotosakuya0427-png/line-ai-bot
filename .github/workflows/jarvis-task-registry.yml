@@ -14,6 +14,9 @@ on:
       - "jarvis/server.js"
       - "jarvis/migrations/0004_task_registry.sql"
       - "jarvis/migrations/0005_task_registry_scoped_dedupe.sql"
+      - "jarvis/migrations/0006_scheduling_reservation_store.sql"
+      - "jarvis/core/postgres-scheduling-store.js"
+      - "jarvis/core/postgres-scheduling-store.integration.test.js"
       - ".github/workflows/jarvis-task-registry.yml"
   push:
     branches:
@@ -37,6 +40,19 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready -U postgres -d jarvis_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      postgres-scheduling:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: jarvis_scheduling_test
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d jarvis_scheduling_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
@@ -66,5 +82,6 @@ jobs:
         env:
           JARVIS_TASK_REGISTRY_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jarvis_test
           JARVIS_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5433/jarvis_operational_test?sslmode=disable
+          JARVIS_SCHEDULING_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5434/jarvis_scheduling_test?sslmode=disable
           JARVIS_ALLOW_TEST_SCHEMA_RESET: "yes"
         run: npm test
