@@ -67,7 +67,7 @@ test("approved order claims once and sends a limit order; ambiguous dispatch is 
 test("definitive exchange rejection finalizes approval as failed",async()=>{
  let outcome;
  const payload={symbol:"BTCJPY",side:"BUY",type:"LIMIT",timeInForce:"GTC",quantity:"0.0001",price:"10000000",clientOrderId:"OJ1234567890abcdef1234567890"};
- const approval={id:"a",status:"approved",actionClass:"financial",resourceId:RESOURCE_ID,operationPayload:payload,executionStatus:"not_started"};
+ const approval={id:"a",status:"approved",departmentId:"trader",actionClass:"financial",resourceId:RESOURCE_ID,operationPayload:payload,executionStatus:"not_started"};
  const claim={...approval,executionClaim:{id:"claim",actor:ACTOR}};
  const store={get:async()=>approval,claimExecution:async()=>claim,finishExecution:async(_id,value)=>{outcome=value.outcome;}};
  const error=Object.assign(new Error("rejected"),{definitive:true,code:-1013});
