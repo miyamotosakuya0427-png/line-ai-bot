@@ -49,7 +49,7 @@ async function handleBinanceApi({req,res,url,client=null,executor=null,approvalS
     const symbol=String(d.symbol||"").toUpperCase();
     const info=await client.exchangeInfo(symbol);
     const order=validateLimitOrder({symbol,side:d.side,price:d.price,quantity:d.quantity},info,{maxNotional:String(maxNotionalYen)});
-    const clientOrderId="OJ"+crypto.randomBytes(16).toString("hex");
+    if(typeof d.idempotencyKey!=="string"||d.idempotencyKey.trim().length<8||d.idempotencyKey.length>128)return json(res,400,{ok:false,error:"A unique idempotencyKey of 8-128 characters is required"});\n    const clientOrderId="OJ"+crypto.createHash("sha256").update(d.idempotencyKey.trim()).digest("hex").slice(0,32);
     const operationPayload={...order,clientOrderId};
     const expiresAt=new Date(now().getTime()+15*60*1000).toISOString();
     const result=await approvalStore.create({
