@@ -77,7 +77,7 @@ function createPostgresEventStore({ pool, clock = () => new Date().toISOString()
         }
         await client.query("REVOKE ALL ON SCHEMA jarvis FROM PUBLIC");
         await client.query("REVOKE ALL ON ALL TABLES IN SCHEMA jarvis FROM PUBLIC");
-        await client.query("CREATE OR REPLACE FUNCTION jarvis.reject_event_mutation() RETURNS trigger LANGUAGE plpgsql AS $ BEGIN RAISE EXCEPTION 'jarvis.events is append-only' USING ERRCODE = '55000'; END; $");
+        await client.query("CREATE OR REPLACE FUNCTION jarvis.reject_event_mutation() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'jarvis.events is append-only' USING ERRCODE = '55000'; END; $$");
         await client.query("DROP TRIGGER IF EXISTS jarvis_events_append_only_row ON jarvis.events");
         await client.query("CREATE TRIGGER jarvis_events_append_only_row BEFORE UPDATE OR DELETE ON jarvis.events FOR EACH ROW EXECUTE FUNCTION jarvis.reject_event_mutation()");
         await client.query("DROP TRIGGER IF EXISTS jarvis_events_append_only_truncate ON jarvis.events");
