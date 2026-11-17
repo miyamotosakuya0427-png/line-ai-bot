@@ -36,6 +36,18 @@ test("PostgreSQL 16 execution kernel fences stale workers at the resource write 
   const loserId=winnerId==="worker-a"?"worker-b":"worker-a";
   assert.equal((await kernel.getWorker(winnerId)).status,"running");
   assert.equal((await kernel.getWorker(loserId)).status,"idle");
+  // Force a failure after the Task Lease upsert but before Worker binding.
+  // The transaction must roll back both the lease row and any Task event.
+  const rollbackTask=await makeTask("rollback",loserId);
+  let loser=await kernel.getWorker(loserId);
+  loser=await kernel.transitionWorker({workerId:loserId,expectedVersion:Number(loser.version),status:"stopped"});
+  await assert.rejects(registry.claimTaskForWorker({taskId:rollbackTask.task.taskId,workerId:loserId,leaseMs:5000}),/Worker is not available/);
+  const rolledBackLease=await pool.query("SELECT resource_key FROM jarvis.coordination_leases WHERE resource_key=$1",["task:"+rollbackTask.task.taskId]);
+  assert.equal(rolledBackLease.rowCount,0,"failed Worker binding must roll back the newly acquired Task Lease");
+  const rolledBackTask=await registry.getTask(rollbackTask.task.taskId);
+  assert.equal(rolledBackTask.task.status,"ready","failed Worker binding must roll back the Task claim event");
+  loser=await kernel.transitionWorker({workerId:loserId,expectedVersion:Number(loser.version),status:"recovering"});
+  await kernel.transitionWorker({workerId:loserId,expectedVersion:Number(loser.version),status:"idle"});
   const resourceAttempts=await Promise.all([
    registry.acquireLease({resourceKey:"resource:race",ownerId:"worker-a",leaseMs:5000}),
    registry.acquireLease({resourceKey:"resource:race",ownerId:"worker-b",leaseMs:5000})
