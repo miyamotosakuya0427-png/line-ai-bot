@@ -64,7 +64,7 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson}={}){
         const limit=Number(url.searchParams.get("limit")||50);
         const offset=Number(url.searchParams.get("offset")||0);
         if((status!==null&&!TASK_STATES.has(status))||!Number.isInteger(limit)||limit<1||limit>200||!Number.isInteger(offset)||offset<0||offset>1000000)return json(res,400,{ok:false,error:"Invalid task list parameters"});
-        const tasks=await registry.listTasks({status,limit,offset});
+        const tasks=await registry.listTasks({status,limit,offset,ownerAgent:auth.principal.agentId,ownerConversation:auth.principal.conversationId||null});
         json(res,200,{ok:true,tasks});return true;
       }
       if(req.method==="POST"&&path==="/v1/tasks"){
@@ -86,7 +86,7 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson}={}){
       if(operation==="get"&&req.method==="GET"){
         const auth=await principalFor(req,"get",taskId);
         if(authResponse(res,auth))return true;
-        const result=await registry.getTask(taskId);
+        const result=await registry.getTask(taskId,{ownerAgent:auth.principal.agentId,ownerConversation:auth.principal.conversationId||null});
         if(!result)return json(res,404,{ok:false,error:"Task not found"});
         json(res,200,{ok:true,...result});return true;
       }
@@ -95,6 +95,8 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson}={}){
         if(authResponse(res,auth))return true;
         if(!req.headers?.["content-type"]?.toLowerCase().startsWith("application/json"))return json(res,415,{ok:false,error:"Content-Type must be application/json"});
         const d=await readJson(req);
+        const owned=await registry.getTask(taskId,{ownerAgent:auth.principal.agentId,ownerConversation:auth.principal.conversationId||null});
+        if(!owned)return json(res,404,{ok:false,error:"Task not found"});
         const result=await registry.claimTask({taskId,ownerId:auth.principal.agentId,leaseMs:d.leaseMs===undefined?60000:d.leaseMs});
         if(!result)return json(res,409,{ok:false,error:"Task is leased or not claimable"});
         json(res,200,{ok:true,...result});return true;
@@ -105,6 +107,8 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson}={}){
         if(!req.headers?.["content-type"]?.toLowerCase().startsWith("application/json"))return json(res,415,{ok:false,error:"Content-Type must be application/json"});
         const d=await readJson(req),agentId=auth.principal.agentId;
         if(!validLease(d.lease,taskId,agentId))return json(res,403,{ok:false,error:"Lease owner does not match authenticated agent"});
+        const owned=await registry.getTask(taskId,{ownerAgent:agentId,ownerConversation:auth.principal.conversationId||null});
+        if(!owned)return json(res,404,{ok:false,error:"Task not found"});
         if(operation==="heartbeat"){
           const lease=await registry.heartbeatLease({lease:d.lease,leaseMs:d.leaseMs===undefined?60000:d.leaseMs});
           json(res,200,{ok:true,lease});return true;
