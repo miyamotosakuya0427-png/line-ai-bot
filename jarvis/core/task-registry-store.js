@@ -187,7 +187,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         if(!lease)return null;
         const worker=await c.query("SELECT status,current_task_id FROM jarvis.worker_registry WHERE worker_id=$1 FOR UPDATE",[workerId]);
         if(!worker.rows[0])throw new Error("Worker is not registered");
-        if(worker.rows[0].status!=="idle"||worker.rows[0].current_task_id)throw new Error("Worker is not idle");
+        if(!["idle","recovering"].includes(worker.rows[0].status)||worker.rows[0].current_task_id)throw new Error("Worker is not available for task claim");
         const current=await latest(c,taskId);
         if(!current)throw new Error("Task does not exist");
         const now=clock();
