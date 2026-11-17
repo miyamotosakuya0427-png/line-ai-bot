@@ -39,12 +39,20 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     const root=await a.createTask({title:"Dependency root",dedupeKey:"dependency-root:"+cryptoRandom(),status:"ready"});
     const child=await b.createTask({title:"Dependency child",dedupeKey:"dependency-child:"+cryptoRandom(),status:"ready",dependencyTaskIds:[root.task.taskId]});
     assert.deepEqual(child.task.dependencyTaskIds,[root.task.taskId]);
+    assert.equal(await a.claimTask({taskId:child.task.taskId,ownerId:"dependency-child-worker",leaseMs:10000}),null,"dependent task must wait until its dependency is completed");
     const rootLease=await a.acquireLease({resourceKey:"task:"+root.task.taskId,ownerId:"dependency-check",leaseMs:10000});
     await assert.rejects(
       a.transitionTask({taskId:root.task.taskId,expectedVersion:root.version,lease:rootLease,status:"blocked",patch:{dependencyTaskIds:[child.task.taskId]}}),
       /Task dependency cycle detected/
     );
     assert.equal(await a.releaseLease({lease:rootLease}),true);
+    const rootClaim=await a.claimTask({taskId:root.task.taskId,ownerId:"dependency-root-worker",leaseMs:10000});
+    const rootRunning=await a.transitionTask({taskId:root.task.taskId,expectedVersion:rootClaim.version,lease:rootClaim.lease,status:"in_progress"});
+    const rootCompleted=await a.transitionTask({taskId:root.task.taskId,expectedVersion:rootRunning.version,lease:rootClaim.lease,status:"completed"});
+    assert.equal(rootCompleted.task.status,"completed");
+    const childClaim=await a.claimTask({taskId:child.task.taskId,ownerId:"dependency-child-worker",leaseMs:10000});
+    assert.ok(childClaim,"dependent task becomes claimable only after dependency completion");
+    assert.equal(await a.releaseLease({lease:childClaim.lease}),true);
 
     const firstPage=await a.listTasks({status:"ready",limit:1,offset:0});
     const secondPage=await b.listTasks({status:"ready",limit:1,offset:1});
