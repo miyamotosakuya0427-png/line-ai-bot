@@ -156,6 +156,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         if(reclaimable){
           const previousExpiry=Date.parse(current.task.leaseExpiresAt||"");
           if(!Number.isFinite(previousExpiry)||previousExpiry>Date.parse(now))throw new Error("Task lease recovery requires an expired recorded lease");
+          await appendCoordinationEvent(c,lease.resourceKey,"lease_reclaimed",{resourceKey:lease.resourceKey,ownerId,previousOwnerId:current.task.leaseOwner||null,previousFencingToken:current.task.fencingToken,recoveredFromStatus:current.task.status,recoveredAt:now,fencingToken:lease.fencingToken});
         }else if(!NEXT[current.task.status]?.has("claimed")){
           throw new Error("Task is not claimable");
         }
