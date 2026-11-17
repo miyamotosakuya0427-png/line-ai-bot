@@ -3,8 +3,8 @@ const test=require("node:test");
 const assert=require("node:assert/strict");
 const {fork}=require("node:child_process");
 const path=require("node:path");
-async function runWorkerProcess(mode,workerId,taskId=""){
- const child=fork(path.join(__dirname,"postgres-execution-worker-child.js"),[],{env:{...process.env,JARVIS_EXECUTION_CHILD_MODE:mode,JARVIS_EXECUTION_CHILD_WORKER_ID:workerId,JARVIS_EXECUTION_CHILD_TASK_ID:taskId},stdio:["ignore","ignore","inherit","ipc"]});
+async function runWorkerProcess(mode,workerId,taskId="",extraEnv={}){
+ const child=fork(path.join(__dirname,"postgres-execution-worker-child.js"),[],{env:{...process.env,JARVIS_EXECUTION_CHILD_MODE:mode,JARVIS_EXECUTION_CHILD_WORKER_ID:workerId,JARVIS_EXECUTION_CHILD_TASK_ID:taskId,...extraEnv},stdio:["ignore","ignore","inherit","ipc"]});
  let message;
  child.on("message",value=>{message=value;});
  await new Promise((resolve,reject)=>{child.once("error",reject);child.once("exit",code=>code===0?resolve():reject(new Error("Worker child exited "+code+" without a successful result: "+JSON.stringify(message))));});
@@ -82,6 +82,11 @@ test("PostgreSQL 16 execution kernel fences stale workers at the resource write 
   const replay=await kernel.writeResource({resourceId:"shared-doc",projectId:"one-jarvis",workerId:winnerId,taskId:first.task.taskId,taskLease:claimedA.lease,lease:resourceLeaseA,operationId:"op-a1",idempotencyKey:"idem-a1",operationScope:"resource.update",payload:{value:1},expectedVersion:0});
   assert.equal(replay.replayed,true);
   assert.equal(replay.version,1);
+  const idempotentLease=await registry.acquireLease({resourceKey:"resource:idempotent-doc",ownerId:winnerId,leaseMs:5000});
+  const concurrentWriteInput={resourceId:"idempotent-doc",projectId:"one-jarvis",workerId:winnerId,taskId:first.task.taskId,taskLease:claimedA.lease,lease:idempotentLease,operationId:"op-idempotent-shared",idempotencyKey:"idem-idempotent-shared",operationScope:"resource.update",payload:{same:true},expectedVersion:0};
+  const concurrentWrites=await Promise.all(Array.from({length:10},()=>runWorkerProcess("idempotency",winnerId,first.task.taskId,{JARVIS_EXECUTION_CHILD_WRITE_INPUT:JSON.stringify(concurrentWriteInput)})));
+  assert.equal(concurrentWrites.filter(x=>x.replayed===false).length,1,"one process commits the idempotent operation");
+  assert.equal(concurrentWrites.filter(x=>x.replayed===true).length,9,"the other nine processes receive the committed replay result");
   const prematureRecovery=await kernel.recoverExpiredWorker({workerId:winnerId});
   assert.equal(prematureRecovery.recovered,false,"a live lease must never be recovered");
   now+=6000;
