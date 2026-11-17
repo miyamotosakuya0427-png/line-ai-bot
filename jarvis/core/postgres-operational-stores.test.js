@@ -92,9 +92,9 @@ test("PostgreSQL approvals bind immutable target, payload, expiry, and authorize
  const decided=await approvals.decide(created.approval.id,"approved",{actor:"owner-api"});
  assert.equal(decided.decidedBy,"owner-api");
  await assert.rejects(approvals.verifyExecutionRequest(decided.id,{resourceId:"V206",operationPayload:payload}),/integrity/);
- assert.equal((await approvals.verifyExecutionRequest(decided.id,{resourceId:"V205",operationPayload:payload})).ok,true);
+ assert.equal((await approvals.verifyExecutionRequest(decided.id,{resourceId:"V205",operationPayload:{operation:"publish",destination:"youtube",videoId:"V205"}})).ok,true);
  await assert.rejects(approvals.claimExecution(decided.id,{resourceId:"V205",operationPayload:payload,actor:"guest"}),/not authorized/);
- const claimed=await approvals.claimExecution(decided.id,{resourceId:"V205",operationPayload:payload,actor:"owner-api"});
+ const claimed=await approvals.claimExecution(decided.id,{resourceId:"V205",operationPayload:{operation:"publish",destination:"youtube",videoId:"V205"},actor:"owner-api"});
  assert.equal(claimed.executionStatus,"claimed");
  assert.equal((await approvals.validateExecutionClaim(decided.id,{claimId:claimed.executionClaim.id,resourceId:"V205",operationPayload:payload,actor:"owner-api"})).ok,true);
  await assert.rejects(approvals.validateExecutionClaim(decided.id,{claimId:claimed.executionClaim.id,resourceId:"V206",operationPayload:payload,actor:"owner-api"}),/integrity/);
