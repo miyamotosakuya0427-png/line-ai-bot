@@ -190,3 +190,35 @@ test("worker processes queued jobs in FIFO order", async () => {
     worker.stop();
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
+
+test("worker aborts its handler and never commits after the lease heartbeat is lost", async () => {
+  let handlerStarted;
+  const started = new Promise(resolve => { handlerStarted = resolve; });
+  let handlerSignal;
+  let transitions = 0;
+  const job = { id: "lease-job-1", type: "task.lease", payload: {}, attempts: 1 };
+  const store = {
+    async init() {},
+    async list() { return []; },
+    async claimNext() { return job; },
+    async heartbeat() { throw new Error("stale fencing token"); },
+    async transition() { transitions += 1; throw new Error("stale worker must not transition"); }
+  };
+  const worker = createWorker({
+    store, workerId: "worker-a", leaseMs: 5000, heartbeatMs: 1000,
+    handlers: { "task.lease": async (_payload, context) => {
+      handlerSignal = context.signal;
+      handlerStarted();
+      await new Promise(resolve => context.signal.addEventListener("abort", resolve, { once: true }));
+      return { mustNotCommit: true };
+    } }
+  });
+  await worker.start();
+  const pending = worker.runNext();
+  await started;
+  const result = await pending;
+  assert.equal(handlerSignal.aborted, true);
+  assert.equal(result.leaseLost, true);
+  assert.equal(result.job, null);
+  assert.equal(transitions, 0, "a worker that lost its lease must not write a terminal state");
+});
