@@ -34,6 +34,12 @@ async function handleBinanceApi({req,res,url,client=null,executor=null,approvalS
     const balances=(account.balances||[]).filter(x=>Number(x.free||0)>0||Number(x.locked||0)>0).map(x=>({asset:x.asset,free:x.free,locked:x.locked}));
     return json(res,200,{ok:true,account:{accountType:account.accountType,canTrade:account.canTrade,canWithdraw:account.canWithdraw,canDeposit:account.canDeposit,balances},safety:{withdrawalActionsExposed:false}});
   }
+  if(req.method==="GET"&&url.pathname==="/v1/binance/permissions"){
+    if(!isAuthorized(req,ownerToken))return bearer(res,json,ownerToken?401:503,ownerToken?"Owner authentication required":"Owner authentication is not configured");
+    if(!client.configured)return json(res,503,{ok:false,error:"Binance read-only API credentials are not configured"});
+    const permissions=await client.apiRestrictions();
+    return json(res,200,{ok:true,permissions:{ipRestrict:permissions.ipRestrict,enableReading:permissions.enableReading,enableSpotAndMarginTrading:permissions.enableSpotAndMarginTrading,enableWithdrawals:permissions.enableWithdrawals,enableInternalTransfer:permissions.enableInternalTransfer,permitsUniversalTransfer:permissions.permitsUniversalTransfer,enableMargin:permissions.enableMargin,enableFutures:permissions.enableFutures,enableVanillaOptions:permissions.enableVanillaOptions},safety:{withdrawalsDisabled:permissions.enableWithdrawals===false,transfersDisabled:permissions.enableInternalTransfer===false&&permissions.permitsUniversalTransfer===false,derivativesDisabled:permissions.enableMargin===false&&permissions.enableFutures===false&&permissions.enableVanillaOptions===false}});
+  }
   if(req.method==="GET"&&url.pathname==="/v1/binance/trades"){
     if(!isAuthorized(req,ownerToken))return bearer(res,json,ownerToken?401:503,ownerToken?"Owner authentication required":"Owner authentication is not configured");
     if(!client.configured)return json(res,503,{ok:false,error:"Binance read-only API credentials are not configured"});
