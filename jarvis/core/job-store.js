@@ -48,16 +48,44 @@ function createJobStore({ filePath, pool, clock = () => new Date().toISOString()
     return serialize(async () => {
       if (initialized) return;
       await fs.mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
-      let raw = "";
-      try { raw = await fs.readFile(filePath, "utf8"); }
+      let rawBuffer = Buffer.alloc(0);
+      try { rawBuffer = await fs.readFile(filePath); }
       catch (error) { if (error.code !== "ENOENT") throw error; }
+      if (rawBuffer.length && rawBuffer[rawBuffer.length - 1] !== 0x0a) {
+        const lastNewline = rawBuffer.lastIndexOf(0x0a);
+        const validPrefixBytes = lastNewline + 1;
+        const tail = rawBuffer.subarray(validPrefixBytes);
+        let completeJson = false;
+        try { JSON.parse(tail.toString("utf8")); completeJson = true; } catch {}
+        if (completeJson) {
+          const handle = await fs.open(filePath, "a", 0o600);
+          try { await handle.writeFile("\n", "utf8"); await handle.sync(); }
+          finally { await handle.close(); }
+          rawBuffer = Buffer.concat([rawBuffer, Buffer.from("\n")]);
+        } else {
+          const quarantinePath = filePath + ".recovery-" + crypto.randomUUID() + ".tail";
+          const quarantine = await fs.open(quarantinePath, "wx", 0o600);
+          try { await quarantine.writeFile(tail); await quarantine.sync(); }
+          finally { await quarantine.close(); }
+          const journal = await fs.open(filePath, "r+");
+          try { await journal.truncate(validPrefixBytes); await journal.sync(); }
+          finally { await journal.close(); }
+          rawBuffer = rawBuffer.subarray(0, validPrefixBytes);
+        }
+      }
+      const raw = rawBuffer.toString("utf8");
       const recovered = new Map();
       for (const [index,line] of raw.split("\n").entries()) {
         if (!line) continue;
         let event;
         try { event = JSON.parse(line); }
         catch { throw new Error("JARVIS job journal is corrupt at line " + (index + 1)); }
-        if (!event || event.type !== "job" || !event.job || typeof event.job.id !== "string" || !STATES.has(event.job.status)) {
+        if (!event || event.type !== "job" || !event.job || typeof event.job.id !== "string" || !STATES.has(event.job.status) ||
+            (event.job.retryAt !== undefined && event.job.retryAt !== null &&
+              (typeof event.job.retryAt !== "string" || !Number.isFinite(Date.parse(event.job.retryAt)))) ||
+            (event.job.lastError !== undefined && event.job.lastError !== null &&
+              (typeof event.job.lastError !== "string" || event.job.lastError.length > 500)) ||
+            (event.job.outcomeUnknown !== undefined && typeof event.job.outcomeUnknown !== "boolean")) {
           throw new Error("JARVIS job journal contains an invalid event at line " + (index + 1));
         }
         recovered.set(event.job.id, event.job);
@@ -84,7 +112,7 @@ function createJobStore({ filePath, pool, clock = () => new Date().toISOString()
         }
         if (jobs.size >= MAX_JOBS) throw new Error("Job store capacity reached");
         const now = clock();
-        const job = { id: crypto.randomUUID(), type, payload: clone(payload), status: "queued", attempts: 0, idempotencyKey, createdAt: now, updatedAt: now, error: null, result: null };
+        const job = { id: crypto.randomUUID(), type, payload: clone(payload), status: "queued", attempts: 0, idempotencyKey, createdAt: now, updatedAt: now, error: null, lastError: null, retryAt: null, outcomeUnknown: false, result: null };
         await append({ type: "job", job });
         jobs.set(job.id, job);
         return { job: publicJob(job), created: true };
@@ -108,7 +136,8 @@ function createJobStore({ filePath, pool, clock = () => new Date().toISOString()
       return [...jobs.values()].filter(job => !status || job.status === status)
         .sort((a,b) => b.createdAt.localeCompare(a.createdAt)).slice(0,limit).map(publicJob);
     },
-    async transition(id, nextStatus, { error = null, result = undefined } = {}) {
+    async transition(id, nextStatus, options = {}) {
+      const { error = null, result = undefined } = options;
       await ready();
       return serialize(async () => {
         const current = jobs.get(id);
@@ -116,7 +145,17 @@ function createJobStore({ filePath, pool, clock = () => new Date().toISOString()
         if (!STATES.has(nextStatus) || !NEXT[current.status].has(nextStatus)) throw new Error("Invalid job state transition");
         if (error !== null && (typeof error !== "string" || error.length > 500)) throw new Error("Invalid job error");
         if (result !== undefined && !validPayload(result)) throw new Error("Invalid job result");
+        const retryAt = options.retryAt;
+        const lastError = options.lastError;
+        const outcomeUnknown = options.outcomeUnknown;
+        if (retryAt !== undefined && retryAt !== null &&
+            (typeof retryAt !== "string" || !Number.isFinite(Date.parse(retryAt)))) throw new Error("Invalid retry time");
+        if (lastError !== undefined && lastError !== null && (typeof lastError !== "string" || lastError.length > 500)) throw new Error("Invalid last error");
+        if (outcomeUnknown !== undefined && typeof outcomeUnknown !== "boolean") throw new Error("Invalid outcome-unknown flag");
         const next = { ...current, status: nextStatus, updatedAt: clock(), error: nextStatus === "failed" ? (error || "Job failed") : null,
+          lastError: lastError === undefined ? (nextStatus === "queued" ? current.lastError || null : null) : lastError,
+          retryAt: nextStatus === "queued" ? (retryAt || null) : null,
+          outcomeUnknown: nextStatus === "failed" ? (outcomeUnknown === undefined ? Boolean(current.outcomeUnknown) : outcomeUnknown) : false,
           result: nextStatus === "succeeded" ? (result === undefined ? current.result : clone(result)) : null };
         if (nextStatus === "running") next.attempts += 1;
         await append({ type: "job", job: next });

@@ -61,11 +61,18 @@ test("real PostgreSQL multi-connection claims and approval integrity", {skip:!en
   assert.equal(first.length,1,"only one concurrent connection may claim a queued job");
   const owner=first[0].lease.owner;
   now="2026-11-17T00:00:06.000Z";
-  const reclaimed=await jobs.claimNext({workerId:"integration-recovery",leaseMs:5000});
-  assert.equal(reclaimed.id,job.id);
-  assert.equal(reclaimed.attempts,2);
-  await assert.rejects(jobs.transition(job.id,"succeeded",{leaseOwner:owner}),/lease/);
-  const completed=await jobs.transition(job.id,"succeeded",{leaseOwner:"integration-recovery",result:{ok:true}});
+  assert.equal(await jobs.claimNext({workerId:"integration-recovery",leaseMs:5000}),null,"expired execution must not be automatically rerun");
+  const expired=await jobs.get(job.id);
+  assert.equal(expired.status,"failed");
+  assert.equal(expired.outcomeUnknown,true);
+  assert.match(expired.error,/outcome unknown/);
+  await assert.rejects(jobs.heartbeat(job.id,{workerId:owner,leaseMs:5000}),/lease/);
+  await assert.rejects(jobs.transition(job.id,"succeeded",{leaseOwner:owner}),/transition/);
+  await jobs.transition(job.id,"queued");
+  const manuallyRequeued=await jobs.claimNext({workerId:"integration-manual-recovery",leaseMs:5000});
+  assert.equal(manuallyRequeued.id,job.id);
+  assert.equal(manuallyRequeued.attempts,2);
+  const completed=await jobs.transition(job.id,"succeeded",{leaseOwner:"integration-manual-recovery",result:{ok:true}});
   assert.equal(completed.status,"succeeded");
 
   const payload={resourceId:"R-1",operation:"publish",version:1};
