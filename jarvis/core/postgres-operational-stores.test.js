@@ -8,7 +8,8 @@ function fakePool(){
  async function query(sql,p=[]){
   state.queries.push(sql);
   if(sql==="COMMIT"||sql==="ROLLBACK"){state.rowLocks.clear();return{rows:[]};}
-  if(sql.includes("FOR UPDATE SKIP LOCKED")){const now=Date.parse(p[0]);const latest=new Map();for(const e of state.events.filter(x=>x.aggregate_type==="job")){const old=latest.get(e.aggregate_id);if(!old||old.aggregate_version<e.aggregate_version)latest.set(e.aggregate_id,e);}const candidate=[...latest.values()].filter(e=>(e.payload.status==="queued"||(e.payload.status==="running"&&Date.parse(e.payload.lease?.expiresAt||0)<=now))&&!state.rowLocks.has(e.aggregate_id)).sort((a,b)=>a.payload.createdAt.localeCompare(b.payload.createdAt))[0];if(!candidate)return{rows:[]};state.rowLocks.add(candidate.aggregate_id);return{rows:[{aggregate_id:candidate.aggregate_id,payload:candidate.payload}]};}
+  if(sql.includes("FOR UPDATE SKIP LOCKED")&&sql.includes("e.payload->>'status'='running'")){const now=Date.parse(p[0]);const latest=new Map();for(const e of state.events.filter(x=>x.aggregate_type==="job")){const old=latest.get(e.aggregate_id);if(!old||old.aggregate_version<e.aggregate_version)latest.set(e.aggregate_id,e);}const candidate=[...latest.values()].filter(e=>e.payload.status==="running"&&Date.parse(e.payload.lease?.expiresAt||0)<=now&&!state.rowLocks.has(e.aggregate_id)).sort((a,b)=>a.payload.createdAt.localeCompare(b.payload.createdAt))[0];if(!candidate)return{rows:[]};state.rowLocks.add(candidate.aggregate_id);return{rows:[{aggregate_id:candidate.aggregate_id,payload:candidate.payload}]};}
+  if(sql.includes("FOR UPDATE SKIP LOCKED")&&sql.includes("e.payload->>'status'='queued'")){const now=Date.parse(p[0]);const latest=new Map();for(const e of state.events.filter(x=>x.aggregate_type==="job")){const old=latest.get(e.aggregate_id);if(!old||old.aggregate_version<e.aggregate_version)latest.set(e.aggregate_id,e);}const candidate=[...latest.values()].filter(e=>e.payload.status==="queued"&&(!e.payload.retryAt||Date.parse(e.payload.retryAt)<=now)&&!state.rowLocks.has(e.aggregate_id)).sort((a,b)=>a.payload.createdAt.localeCompare(b.payload.createdAt))[0];if(!candidate)return{rows:[]};state.rowLocks.add(candidate.aggregate_id);return{rows:[{aggregate_id:candidate.aggregate_id,payload:candidate.payload}]};}
   if(sql.includes("COALESCE(MAX(aggregate_version)")){const a=state.events.filter(x=>x.aggregate_type===p[0]&&x.aggregate_id===p[1]);return{rows:[{v:a.reduce((n,x)=>Math.max(n,x.aggregate_version),0)}]};}
   if(sql.includes("count(DISTINCT aggregate_id)")){return{rows:[{n:new Set(state.events.filter(x=>x.aggregate_type===p[0]).map(x=>x.aggregate_id)).size}]};}
   if(sql.includes("aggregate_type='job' AND aggregate_id=(SELECT aggregate_id")){const first=state.events.find(x=>x.aggregate_type==="job"&&x.payload.idempotencyKey===p[0]);const x=first?state.events.filter(y=>y.aggregate_type==="job"&&y.aggregate_id===first.aggregate_id).at(-1):null;return{rows:x?[{payload:x.payload}]:[]};}
@@ -78,7 +79,7 @@ test("PostgreSQL approval store rejects malformed requests",async()=>{
  await assert.rejects(approvals.create({departmentId:"content",actionClass:"invalid",summary:"x"}),/action/);
 });
 
-test("PostgreSQL job claims are exclusive, renewable, and reclaimable after lease expiry",async()=>{
+test("PostgreSQL job claims are exclusive and expired leases require manual reconciliation",async()=>{
  let now="2026-11-17T00:00:00.000Z";const pool=fakePool(),{jobs}=createPostgresOperationalStores({pool,clock:()=>now});
  const {job}=await jobs.create({type:"task.claim",payload:{}});
  const claims=await Promise.all([jobs.claimNext({workerId:"worker-a",leaseMs:5000}),jobs.claimNext({workerId:"worker-b",leaseMs:5000})]);
@@ -88,12 +89,18 @@ test("PostgreSQL job claims are exclusive, renewable, and reclaimable after leas
  const renewed=await jobs.heartbeat(job.id,{workerId:owner,leaseMs:5000});
  assert.equal(renewed.lease.owner,owner);
  now="2026-11-17T00:00:06.000Z";
- const reclaimed=await jobs.claimNext({workerId:"worker-c",leaseMs:5000});
- assert.equal(reclaimed.id,job.id);assert.equal(reclaimed.attempts,2);assert.equal(reclaimed.lease.owner,"worker-c");
+ assert.equal(await jobs.claimNext({workerId:"worker-c",leaseMs:5000}),null);
+ const expired=await jobs.get(job.id);
+ assert.equal(expired.status,"failed");
+ assert.equal(expired.outcomeUnknown,true);
+ assert.match(expired.error,/outcome unknown/);
  await assert.rejects(jobs.heartbeat(job.id,{workerId:owner,leaseMs:5000}),/lease/);
- await assert.rejects(jobs.transition(job.id,"succeeded",{leaseOwner:owner}),/lease/);
- const retry=await jobs.transition(job.id,"queued",{leaseOwner:"worker-c"});assert.equal(retry.status,"queued");
- const retried=await jobs.claimNext({workerId:"worker-d",leaseMs:5000});assert.equal(retried.attempts,3);
+ await assert.rejects(jobs.transition(job.id,"succeeded",{leaseOwner:owner}),/transition/);
+ const retry=await jobs.transition(job.id,"queued");
+ assert.equal(retry.status,"queued");
+ assert.equal(retry.outcomeUnknown,false);
+ const retried=await jobs.claimNext({workerId:"worker-d",leaseMs:5000});
+ assert.equal(retried.attempts,2);
  const completed=await jobs.transition(job.id,"succeeded",{leaseOwner:"worker-d",result:{ok:true}});
  assert.equal(completed.status,"succeeded");assert.equal(completed.lease,undefined);
 });
