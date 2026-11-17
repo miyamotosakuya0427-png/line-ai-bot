@@ -31,6 +31,19 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
+      postgres-operational:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: jarvis_operational_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d jarvis_operational_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -43,4 +56,6 @@ jobs:
         working-directory: jarvis
         env:
           JARVIS_TASK_REGISTRY_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/jarvis_test
+          JARVIS_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5433/jarvis_operational_test
+          JARVIS_ALLOW_TEST_SCHEMA_RESET: "yes"
         run: npm test
