@@ -12,7 +12,8 @@ function clone(value){return JSON.parse(JSON.stringify(value));}
 function bytes(value){try{return Buffer.byteLength(JSON.stringify(value),"utf8");}catch{return Infinity;}}
 function validText(value,max,required=false){return typeof value==="string"&&value.length<=max&&(!required||Boolean(value.trim()));}
 function publicApproval(item){return clone(item);}
-function digest(value){return crypto.createHash("sha256").update(JSON.stringify(value)).digest("hex");}
+function canonicalJson(value){const normalized=JSON.parse(JSON.stringify(value));function sort(v){if(Array.isArray(v))return v.map(sort);if(v&&typeof v==="object"){const out={};for(const key of Object.keys(v).sort())out[key]=sort(v[key]);return out;}return v;}return JSON.stringify(sort(normalized));}
+function digest(value){return crypto.createHash("sha256").update(canonicalJson(value)).digest("hex");}
 function approvalRequestDigest(a){if(a.digestVersion!==2)return digest({departmentId:a.departmentId,actionClass:a.actionClass,summary:a.summary,details:a.details});return digest({departmentId:a.departmentId,actionClass:a.actionClass,summary:a.summary,details:a.details,resourceId:a.resourceId||null,operationPayload:a.operationPayload??null,expiresAt:a.expiresAt||null});}
 
 function createApprovalStore({filePath,pool,clock=()=>new Date().toISOString(),authorizeActor=null}={}){
