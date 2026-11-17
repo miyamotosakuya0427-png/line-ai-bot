@@ -822,12 +822,15 @@ if (require.main===module) {
       enabled:process.env.JARVIS_BINANCE_LIVE_ORDERS_ENABLED==="true"&&process.env.JARVIS_BINANCE_RISK_GATE_ENABLED==="true"&&process.env.JARVIS_BINANCE_VALIDATION_PASSED==="true"&&binanceClient.configured,
       ownerAuthReady:Buffer.byteLength(process.env.JARVIS_OWNER_TOKEN||"","utf8")>=32,
       maxNotionalYen:binanceMaxNotionalYen,
-      authorizeRisk:async({notionalYen})=>{
-        if(process.env.JARVIS_BINANCE_RISK_GATE_ENABLED!=="true")return{allowed:false,reason:"RISK_GATE_DISABLED"};
+      authorizeRisk:async({notionalYen,payload})=>{
+        if(process.env.JARVIS_BINANCE_RISK_GATE_ENABLED!=="true"||process.env.JARVIS_BINANCE_VALIDATION_PASSED!=="true")return{allowed:false,reason:"RISK_GATE_OR_VALIDATION_DISABLED"};
         const account=await binanceClient.account();
-        const yen=(account.balances||[]).find(item=>item.asset==="JPY");
-        const free=Number(yen?.free||0);
-        return{allowed:Number.isFinite(free)&&free>=notionalYen*1.01,availableJpy:free,requiredJpy:Math.ceil(notionalYen*1.01)};
+        if(account.canTrade!==true)return{allowed:false,reason:"ACCOUNT_TRADING_PERMISSION_DISABLED"};
+        const asset=payload.side==="BUY"?"JPY":payload.symbol.slice(0,-3);
+        const balance=(account.balances||[]).find(item=>item.asset===asset);
+        const free=Number(balance?.free||0);
+        const required=payload.side==="BUY"?notionalYen*1.01:Number(payload.quantity)*1.001;
+        return{allowed:Number.isFinite(free)&&free>=required,asset,available:free,required};
       }
     }):null;
     if(influenceEventStore)await influenceEventStore.init();
