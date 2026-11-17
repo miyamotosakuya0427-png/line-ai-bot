@@ -15,7 +15,7 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
   const pool=new Pool({connectionString:databaseUrl,max:8});
   let now=Date.now();
   const clock=()=>new Date(now).toISOString();
-  const migrations=["0001_neon_event_store.sql","0002_job_approval_stores.sql","0003_append_only_event_ledger.sql","0004_task_registry.sql"];
+  const migrations=["0001_neon_event_store.sql","0002_job_approval_stores.sql","0003_append_only_event_ledger.sql","0004_task_registry.sql","0005_task_registry_scoped_dedupe.sql"];
   try{
     for(const file of migrations){
       const sql=fs.readFileSync(path.join(__dirname,"..","migrations",file),"utf8");
