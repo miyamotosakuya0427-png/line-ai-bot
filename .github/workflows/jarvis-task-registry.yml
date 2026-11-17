@@ -4,6 +4,11 @@ on:
     paths:
       - "jarvis/core/task-registry-store.js"
       - "jarvis/core/task-registry-store*.test.js"
+      - "jarvis/core/task-registry-api.js"
+      - "jarvis/core/task-registry-api.test.js"
+      - "jarvis/core/task-registry-auth.js"
+      - "jarvis/core/task-registry-auth.test.js"
+      - "jarvis/server.js"
       - "jarvis/migrations/0004_task_registry.sql"
       - ".github/workflows/jarvis-task-registry.yml"
   push:
@@ -13,6 +18,11 @@ on:
     paths:
       - "jarvis/core/task-registry-store.js"
       - "jarvis/core/task-registry-store*.test.js"
+      - "jarvis/core/task-registry-api.js"
+      - "jarvis/core/task-registry-api.test.js"
+      - "jarvis/core/task-registry-auth.js"
+      - "jarvis/core/task-registry-auth.test.js"
+      - "jarvis/server.js"
       - "jarvis/migrations/0004_task_registry.sql"
       - ".github/workflows/jarvis-task-registry.yml"
 jobs:
