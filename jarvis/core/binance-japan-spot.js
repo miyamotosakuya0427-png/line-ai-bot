@@ -91,6 +91,7 @@ function createBinanceJapanSpotClient({apiKey="",secret="",baseUrl="https://api.
       return request("GET","/api/v3/klines",{symbol:normalized,interval,limit});
     },
     async account(){return request("GET","/api/v3/account",{omitZeroBalances:"true"},true);},
+    async apiRestrictions(){return request("GET","/sapi/v1/account/apiRestrictions",{},true);},
     async myTrades(symbol,{limit=100}={}){if(!SYMBOL.test(String(symbol||"").toUpperCase())||!Number.isInteger(limit)||limit<1||limit>1000)throw new Error("Invalid trade history request");return request("GET","/api/v3/myTrades",{symbol:String(symbol).toUpperCase(),limit},true);},
     async openOrders(symbol){if(symbol&&!SYMBOL.test(String(symbol).toUpperCase()))throw new Error("Invalid symbol");return request("GET","/api/v3/openOrders",symbol?{symbol:String(symbol).toUpperCase()}: {},true);},
     async orderByClientId(symbol,clientOrderId){
