@@ -9,6 +9,7 @@ const JOB_NEXT = {
   succeeded: new Set(), failed: new Set(["queued", "cancelled"]), cancelled: new Set()
 };
 const MAX_JOBS=10000, MAX_APPROVALS=5000, MAX_JOB_PAYLOAD=16*1024, MAX_DETAILS=8000;
+const JOB_PRIORITIES=new Set(["P0","P1","P2","P3"]);
 function clone(v){return JSON.parse(JSON.stringify(v));}
 function bytes(v){try{return Buffer.byteLength(JSON.stringify(v),"utf8");}catch{return Infinity;}}
 function validJobPayload(v){return !!v&&typeof v==="object"&&!Array.isArray(v)&&bytes(v)<=MAX_JOB_PAYLOAD;}
@@ -71,18 +72,18 @@ function createPostgresOperationalStores({pool,clock=()=>new Date().toISOString(
     await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",["job:"+id]);
     const current=await latest(c,"job",id);
     if(current?.status==="running"&&current.lease&&Date.parse(current.lease.expiresAt)<=Date.parse(now)){
-     const failed={...current,status:"failed",updatedAt:now,error:"Lease expired; external outcome unknown; manual reconciliation required",outcomeUnknown:true,retryAt:null};
+     const failed={...current,status:"failed",updatedAt:now,error:"Lease expired; external outcome unknown; manual reconciliation required",outcomeUnknown:true,deadLettered:true,retryAt:null};
      delete failed.lease;
      await append(c,"job",id,"lease_expired_unknown",failed);
     }
    }
-   const selected=await c.query("SELECT e.aggregate_id,e.payload FROM jarvis.events e WHERE e.aggregate_type='job' AND e.aggregate_version=(SELECT MAX(x.aggregate_version) FROM jarvis.events x WHERE x.aggregate_type='job' AND x.aggregate_id=e.aggregate_id) AND e.payload->>'status'='queued' AND (NULLIF(e.payload->>'retryAt','') IS NULL OR NULLIF(e.payload->>'retryAt','')::timestamptz <= $1::timestamptz) ORDER BY e.payload->>'createdAt' ASC LIMIT 1 FOR UPDATE SKIP LOCKED",[now]);
+   const selected=await c.query("SELECT e.aggregate_id,e.payload FROM jarvis.events e WHERE e.aggregate_type='job' AND e.aggregate_version=(SELECT MAX(x.aggregate_version) FROM jarvis.events x WHERE x.aggregate_type='job' AND x.aggregate_id=e.aggregate_id) AND e.payload->>'status'='queued' AND (NULLIF(e.payload->>'retryAt','') IS NULL OR NULLIF(e.payload->>'retryAt','')::timestamptz <= $1::timestamptz) ORDER BY CASE COALESCE(e.payload->>'priority','P2') WHEN 'P0' THEN 0 WHEN 'P1' THEN 1 WHEN 'P2' THEN 2 ELSE 3 END ASC,e.payload->>'createdAt' ASC LIMIT 1 FOR UPDATE SKIP LOCKED",[now]);
    if(!selected.rows[0])return null;
    const id=selected.rows[0].aggregate_id;
    await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",["job:"+id]);
    const latestJob=await latest(c,"job",id);
    if(!latestJob||latestJob.status!=="queued"||(latestJob.retryAt&&Date.parse(latestJob.retryAt)>Date.parse(now)))return null;
-   const next={...latestJob,status:"running",attempts:(latestJob.attempts||0)+1,updatedAt:now,retryAt:null,outcomeUnknown:false,lease:{owner:workerId,heartbeatAt:now,expiresAt:new Date(Date.parse(now)+leaseMs).toISOString()}};
+   const next={...latestJob,status:"running",attempts:(latestJob.attempts||0)+1,updatedAt:now,retryAt:null,outcomeUnknown:false,deadLettered:false,lease:{owner:workerId,heartbeatAt:now,expiresAt:new Date(Date.parse(now)+leaseMs).toISOString()}};
    await append(c,"job",next.id,"claimed",next);
    return clone(next);
   });
@@ -101,17 +102,18 @@ function createPostgresOperationalStores({pool,clock=()=>new Date().toISOString(
  }
  const jobs={
   async init(){await init();const r=await pool.query("SELECT count(*)::int AS n FROM (SELECT DISTINCT ON (aggregate_id) aggregate_id FROM jarvis.events WHERE aggregate_type='job' ORDER BY aggregate_id,aggregate_version DESC) q");if(r.rows[0].n>MAX_JOBS)throw new Error("Job store capacity reached");return{ok:true,count:r.rows[0].n};},
-  async create({type,payload,idempotencyKey=""}={}){
+  async create({type,payload,idempotencyKey="",priority="P2"}={}){
    await init();
    if(typeof type!=="string"||!/^[a-z][a-z0-9._-]{1,63}$/.test(type))throw new Error("Invalid job type");
    if(!validJobPayload(payload))throw new Error("Job payload must be an object no larger than 16 KB");
    if(idempotencyKey&&(typeof idempotencyKey!=="string"||idempotencyKey.length>128))throw new Error("Invalid idempotency key");
+   if(!JOB_PRIORITIES.has(priority))throw new Error("Invalid job priority");
    return tx(async c=>{
     if(idempotencyKey)await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",["job-idempotency:"+idempotencyKey]);
     if(idempotencyKey){const old=await c.query("SELECT payload FROM jarvis.events WHERE aggregate_type='job' AND aggregate_id=(SELECT aggregate_id FROM jarvis.events WHERE aggregate_type='job' AND payload->>'idempotencyKey'=$1 ORDER BY event_id ASC LIMIT 1) ORDER BY aggregate_version DESC LIMIT 1",[idempotencyKey]);if(old.rows[0])return{job:clone(old.rows[0].payload),created:false};}
     const count=await c.query("SELECT count(DISTINCT aggregate_id)::int AS n FROM jarvis.events WHERE aggregate_type='job'");
     if(count.rows[0].n>=MAX_JOBS)throw new Error("Job store capacity reached");
-    const now=clock(),job={id:crypto.randomUUID(),type,payload:clone(payload),status:"queued",attempts:0,idempotencyKey,createdAt:now,updatedAt:now,error:null,lastError:null,retryAt:null,outcomeUnknown:false,result:null};
+    const now=clock(),job={id:crypto.randomUUID(),type,payload:clone(payload),priority,status:"queued",attempts:0,idempotencyKey,createdAt:now,updatedAt:now,error:null,lastError:null,retryAt:null,outcomeUnknown:false,deadLettered:false,result:null};
     await append(c,"job",job.id,"created",job,idempotencyKey||null);return{job:clone(job),created:true};
    });
   },
@@ -127,7 +129,8 @@ function createPostgresOperationalStores({pool,clock=()=>new Date().toISOString(
     if(current.lease&&(current.status==="running")&&(!leaseOwner||current.lease.owner!==leaseOwner||Date.parse(current.lease.expiresAt)<=Date.parse(clock())))throw new Error("Job lease is no longer owned by this worker");
     if(error!==null&&(typeof error!=="string"||error.length>500))throw new Error("Invalid job error");
     if(result!==undefined&&!validJobPayload(result))throw new Error("Invalid job result");
-    const retryAt=options.retryAt,lastError=options.lastError,outcomeUnknown=options.outcomeUnknown;
+    const retryAt=options.retryAt,lastError=options.lastError,outcomeUnknown=options.outcomeUnknown,deadLettered=options.deadLettered;
+    if(deadLettered!==undefined&&typeof deadLettered!=="boolean")throw new Error("Invalid dead-letter flag");
     if(retryAt!==undefined&&retryAt!==null&&(typeof retryAt!=="string"||!Number.isFinite(Date.parse(retryAt))))throw new Error("Invalid retry time");
     if(lastError!==undefined&&lastError!==null&&(typeof lastError!=="string"||lastError.length>500))throw new Error("Invalid last error");
     if(outcomeUnknown!==undefined&&typeof outcomeUnknown!=="boolean")throw new Error("Invalid outcome-unknown flag");
@@ -135,6 +138,7 @@ function createPostgresOperationalStores({pool,clock=()=>new Date().toISOString(
       lastError:lastError===undefined?(nextStatus==="queued"?current.lastError||null:null):lastError,
       retryAt:nextStatus==="queued"?(retryAt||null):null,
       outcomeUnknown:nextStatus==="failed"?(outcomeUnknown===undefined?Boolean(current.outcomeUnknown):outcomeUnknown):false,
+      deadLettered:nextStatus==="failed"?(deadLettered===undefined?Boolean(current.deadLettered):deadLettered):false,
       result:nextStatus==="succeeded"?(result===undefined?current.result:clone(result)):null};
     if(nextStatus!=="running")delete next.lease;
     if(nextStatus==="running")next.attempts+=1;
