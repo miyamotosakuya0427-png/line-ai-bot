@@ -52,6 +52,36 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     assert.equal(secondPage.length,1);
     assert.notEqual(firstPage[0].task.taskId,secondPage[0].task.taskId,"SQL pagination must return distinct pages");
 
+    const protectedTask=await a.createTask({title:"Resource-locked task",dedupeKey:"resource-lock:"+cryptoRandom(),status:"ready"});
+    const protectedClaim=await a.claimTask({taskId:protectedTask.task.taskId,ownerId:"resource-worker",leaseMs:60000});
+    const branchKey="branch:one-jarvis:feature/resource-lock-test";
+    const pathKey="path:one-jarvis:jarvis/core/resource-lock-test.js";
+    await assert.rejects(
+      a.transitionTask({taskId:protectedTask.task.taskId,expectedVersion:protectedClaim.version,lease:protectedClaim.lease,status:"in_progress",patch:{branch:"feature/resource-lock-test",changedPaths:["jarvis/core/resource-lock-test.js"]}}),
+      /Current resource lease is required/
+    );
+    const wrongBranchLease=await b.acquireLease({resourceKey:branchKey,ownerId:"different-worker",leaseMs:10000});
+    await assert.rejects(
+      a.transitionTask({taskId:protectedTask.task.taskId,expectedVersion:protectedClaim.version,lease:protectedClaim.lease,status:"in_progress",patch:{branch:"feature/resource-lock-test"},resourceLeases:[wrongBranchLease]}),
+      /Current resource lease is required/
+    );
+    assert.equal(await b.releaseLease({lease:wrongBranchLease}),true);
+    const branchLease=await a.acquireLease({resourceKey:branchKey,ownerId:"resource-worker",leaseMs:10000});
+    const pathLease=await b.acquireLease({resourceKey:pathKey,ownerId:"resource-worker",leaseMs:10000});
+    const protectedMoved=await a.transitionTask({
+      taskId:protectedTask.task.taskId,expectedVersion:protectedClaim.version,lease:protectedClaim.lease,status:"in_progress",
+      patch:{branch:"feature/resource-lock-test",changedPaths:["jarvis/core/resource-lock-test.js"]},
+      resourceLeases:[branchLease,pathLease]
+    });
+    assert.equal(protectedMoved.task.branch,"feature/resource-lock-test");
+    assert.deepEqual(protectedMoved.task.changedPaths,["jarvis/core/resource-lock-test.js"]);
+    await assert.rejects(
+      a.transitionTask({taskId:protectedTask.task.taskId,expectedVersion:protectedMoved.version,lease:protectedClaim.lease,status:"review",patch:{changedPaths:["../escape.js"]},resourceLeases:[branchLease,pathLease]}),
+      /Invalid task path/
+    );
+    assert.equal(await a.releaseLease({lease:branchLease}),true);
+    assert.equal(await b.releaseLease({lease:pathLease}),true);
+
     const resourceKey="integration-resource:"+cryptoRandom();
     const claims=await Promise.all([
       a.acquireLease({resourceKey,ownerId:"worker-a",leaseMs:5000}),
