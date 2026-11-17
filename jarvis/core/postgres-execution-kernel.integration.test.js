@@ -43,6 +43,9 @@ test("PostgreSQL 16 execution kernel fences stale workers at the resource write 
   assert.equal(processClaims.filter(x=>x.acquired).length,1,"exactly one of ten independent OS processes may claim the same Task");
   const processResourceLeases=await Promise.all(processWorkers.map(workerId=>runWorkerProcess("resource",workerId)));
   assert.equal(processResourceLeases.filter(x=>x.acquired).length,1,"exactly one of ten independent OS processes may lease the same Resource");
+  const sharedQuota=await Promise.all(processWorkers.map(workerId=>runWorkerProcess("rate-limit",workerId)));
+  assert.equal(sharedQuota.filter(x=>x.acquired).length,5,"PostgreSQL shared Agent quota must allow exactly five of ten concurrent processes");
+  assert.ok(sharedQuota.filter(x=>!x.acquired).every(x=>x.retryAfter>0),"shared rate limit must return Retry-After for rejected calls");
   const claimRace=await Promise.all([
    registry.claimTaskForWorker({taskId:first.task.taskId,workerId:"worker-a",leaseMs:5000}),
    registry.claimTaskForWorker({taskId:first.task.taskId,workerId:"worker-b",leaseMs:5000})
