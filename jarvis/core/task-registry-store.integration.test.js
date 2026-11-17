@@ -60,6 +60,8 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     assert.ok(childClaim,"dependent task becomes claimable only after dependency completion");
     assert.equal(await a.releaseLease({lease:childClaim.lease}),true);
 
+    await a.createTask({title:"Pagination fixture one",dedupeKey:"pagination-one:"+cryptoRandom(),status:"ready"});
+    await b.createTask({title:"Pagination fixture two",dedupeKey:"pagination-two:"+cryptoRandom(),status:"ready"});
     const firstPage=await a.listTasks({status:"ready",limit:1,offset:0});
     const secondPage=await b.listTasks({status:"ready",limit:1,offset:1});
     assert.equal(firstPage.length,1);
