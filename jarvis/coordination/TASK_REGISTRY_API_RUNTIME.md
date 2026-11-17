@@ -39,4 +39,6 @@ Scopes:
 - `tasks:transition`
 - `resources:lease`
 
+The API applies a default in-memory limit of 120 authenticated requests per agent per 60-second window and returns HTTP 429 with Retry-After when exceeded. This default is process-local; multi-instance deployments must inject a shared rate-limiter implementation through the server's `taskRegistryRateLimiter` option to enforce a cluster-wide quota.
+
 This is bearer-token authentication for service agents, not end-user authentication. Rotate a compromised token by revoking its old entry and issuing a new high-entropy token hash with a bounded expiry. Resource prefixes use the form `resource-type:project-id:` and must be narrowly scoped.
