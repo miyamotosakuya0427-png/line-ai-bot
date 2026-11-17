@@ -1,6 +1,16 @@
 "use strict";
 const test=require("node:test");
 const assert=require("node:assert/strict");
+const {fork}=require("node:child_process");
+const path=require("node:path");
+async function runWorkerProcess(mode,workerId,taskId=""){
+ const child=fork(path.join(__dirname,"postgres-execution-worker-child.js"),[],{env:{...process.env,JARVIS_EXECUTION_CHILD_MODE:mode,JARVIS_EXECUTION_CHILD_WORKER_ID:workerId,JARVIS_EXECUTION_CHILD_TASK_ID:taskId},stdio:["ignore","ignore","inherit","ipc"]});
+ let message;
+ child.on("message",value=>{message=value;});
+ await new Promise((resolve,reject)=>{child.once("error",reject);child.once("exit",code=>code===0?resolve():reject(new Error("Worker child exited "+code+" without a successful result: "+JSON.stringify(message))));});
+ if(!message?.ok)throw new Error("Worker child failed: "+JSON.stringify(message));
+ return message;
+}
 const {createTaskRegistry}=require("./task-registry-store");
 const {createPostgresExecutionKernel}=require("./postgres-execution-kernel");
 const url=process.env.JARVIS_EXECUTION_TEST_DATABASE_URL||"";
@@ -25,6 +35,14 @@ test("PostgreSQL 16 execution kernel fences stale workers at the resource write 
   const first=await makeTask("one","worker-a");
   await kernel.registerWorker({workerId:"worker-a",agentId:"agent-a",departmentId:"engineering",instanceId:"instance-a",processId:"100"});
   await kernel.registerWorker({workerId:"worker-b",agentId:"agent-b",departmentId:"engineering",instanceId:"instance-b",processId:"200"});
+  // Exercise real OS processes with independent PostgreSQL pools.
+  const processTask=await makeTask("ten-process-claim","process-worker-0");
+  const processWorkers=Array.from({length:10},(_,i)=>"process-worker-"+i);
+  for(let i=0;i<processWorkers.length;i++)await kernel.registerWorker({workerId:processWorkers[i],agentId:"agent-process-"+i,departmentId:"engineering",instanceId:"process-instance-"+i,processId:String(1000+i)});
+  const processClaims=await Promise.all(processWorkers.map(workerId=>runWorkerProcess("claim",workerId,processTask.task.taskId)));
+  assert.equal(processClaims.filter(x=>x.acquired).length,1,"exactly one of ten independent OS processes may claim the same Task");
+  const processResourceLeases=await Promise.all(processWorkers.map(workerId=>runWorkerProcess("resource",workerId)));
+  assert.equal(processResourceLeases.filter(x=>x.acquired).length,1,"exactly one of ten independent OS processes may lease the same Resource");
   const claimRace=await Promise.all([
    registry.claimTaskForWorker({taskId:first.task.taskId,workerId:"worker-a",leaseMs:5000}),
    registry.claimTaskForWorker({taskId:first.task.taskId,workerId:"worker-b",leaseMs:5000})
