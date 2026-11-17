@@ -4,7 +4,7 @@ const TASK_STATES=new Set(["proposed","ready","claimed","in_progress","blocked",
 const SAFE_ID=/^[A-Za-z0-9._:-]{1,80}$/;
 const ACTIONS=Object.freeze({
   list:"tasks:read",get:"tasks:read",create:"tasks:write",claim:"tasks:claim",
-  heartbeat:"tasks:lease",release:"tasks:lease",transition:"tasks:transition"
+  heartbeat:"tasks:lease",release:"tasks:lease",transition:"tasks:transition",resourceLease:"resources:lease"
 });
 
 function createTaskRegistryApi({registry=null,authorize=null,json,readJson}={}){
@@ -34,9 +34,30 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson}={}){
     return json(res,503,{ok:false,error:"Task Registry operation failed"});
   }
   return async function handleTaskRegistryRequest(req,res,url){
-    if(!url||!url.pathname.startsWith("/v1/tasks"))return false;
+    if(!url||(!url.pathname.startsWith("/v1/tasks")&&!url.pathname.startsWith("/v1/resources/leases")))return false;
     const path=url.pathname;
     try{
+      const resourceMatch=/^\\/v1\\/resources\\/leases(?:\\/(heartbeat|release))?$/.exec(path);
+      if(resourceMatch){
+        if(req.method!=="POST")return json(res,405,{ok:false,error:"Method not allowed"});
+        const auth=await principalFor(req,"resourceLease");
+        if(authResponse(res,auth))return true;
+        if(!req.headers?.["content-type"]?.toLowerCase().startsWith("application/json"))return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+        const d=await readJson(req),agentId=auth.principal.agentId,operation=resourceMatch[1]||"acquire";
+        if(operation==="acquire"){
+          if(typeof d.resourceKey!=="string"||! /^(branch|path|database|external):[A-Za-z0-9._:/-]{1,220}$/.test(d.resourceKey))return json(res,400,{ok:false,error:"Invalid resource key"});
+          const lease=await registry.acquireLease({resourceKey:d.resourceKey,ownerId:agentId,leaseMs:d.leaseMs===undefined?60000:d.leaseMs});
+          if(!lease)return json(res,409,{ok:false,error:"Resource is already leased"});
+          json(res,201,{ok:true,lease});return true;
+        }
+        if(!d.lease||! /^(branch|path|database|external):/.test(d.lease.resourceKey||"")||d.lease.ownerId!==agentId||typeof d.lease.token!=="string"||!Number.isSafeInteger(d.lease.fencingToken))return json(res,403,{ok:false,error:"Lease owner does not match authenticated agent"});
+        if(operation==="heartbeat"){
+          const lease=await registry.heartbeatLease({lease:d.lease,leaseMs:d.leaseMs===undefined?60000:d.leaseMs});
+          json(res,200,{ok:true,lease});return true;
+        }
+        const released=await registry.releaseLease({lease:d.lease});
+        json(res,200,{ok:true,released});return true;
+      }
       if(req.method==="GET"&&path==="/v1/tasks"){
         const auth=await principalFor(req,"list");
         if(authResponse(res,auth))return true;
@@ -55,7 +76,8 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson}={}){
         const result=await registry.createTask({
           title:d.title,scope:d.scope||"",acceptanceCriteria:d.acceptanceCriteria||[],dedupeKey:d.dedupeKey,
           projectId:d.projectId||"one-jarvis",priority:d.priority||"P2",status:"proposed",
-          dependencyTaskIds:d.dependencyTaskIds||[],ownerConversation:auth.principal.conversationId||"agent:"+agentId,ownerAgent:agentId
+          dependencyTaskIds:d.dependencyTaskIds||[],ownerConversation:auth.principal.conversationId||"agent:"+agentId,ownerAgent:agentId,
+          ...(d.status==="ready"&&auth.principal.scopes.includes("tasks:dispatch")?{status:"ready"}:{status:"proposed"})
         });
         json(res,result.created?201:200,{ok:true,...result});return true;
       }
