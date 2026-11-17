@@ -82,10 +82,15 @@ test("PostgreSQL 16 execution kernel fences stale workers at the resource write 
   const prematureRecovery=await kernel.recoverExpiredWorker({workerId:winnerId});
   assert.equal(prematureRecovery.recovered,false,"a live lease must never be recovered");
   now+=6000;
+  const candidates=await kernel.listExpiredWorkers({limit:20});
+  assert.ok(candidates.some(x=>x.worker_id===winnerId),"expired Worker must be discoverable by the recovery scanner");
   const recovery=await kernel.recoverExpiredWorker({workerId:winnerId});
   assert.equal(recovery.recovered,true,"an expired lease permits Worker recovery");
   assert.equal(recovery.expiredTaskId,first.task.taskId);
   assert.equal((await kernel.getWorker(winnerId)).status,"recovering");
+  const recoveryAudit=await pool.query("SELECT event_type,payload FROM jarvis.events WHERE aggregate_type='worker' AND aggregate_id=$1 ORDER BY aggregate_version DESC LIMIT 1",[winnerId]);
+  assert.equal(recoveryAudit.rows[0]?.event_type,"worker_recovered","recovery must append an audit event");
+  assert.equal(recoveryAudit.rows[0]?.payload.expiredTaskId,first.task.taskId);
   const claimedB=await registry.claimTaskForWorker({taskId:first.task.taskId,workerId:loserId,leaseMs:60000});
   const resourceLeaseB=await registry.acquireLease({resourceKey:"resource:shared-doc",ownerId:loserId,leaseMs:60000});
   assert.ok(resourceLeaseB);
