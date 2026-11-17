@@ -136,6 +136,15 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     await assert.rejects(pool.query("DELETE FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1",[created.task.taskId]),/append-only/);
     await assert.rejects(pool.query("TRUNCATE jarvis.events"),/append-only/);
 
+    const heartbeatTask=await a.createTask({title:"Task lease heartbeat sync",dedupeKey:"task-heartbeat:"+cryptoRandom(),status:"ready"});
+    const heartbeatClaim=await a.claimTask({taskId:heartbeatTask.task.taskId,ownerId:"heartbeat-worker",leaseMs:10000});
+    now+=1000;
+    const taskHeartbeat=await a.heartbeatLease({lease:heartbeatClaim.lease,leaseMs:15000});
+    const heartbeatState=await a.getTask(heartbeatTask.task.taskId);
+    assert.equal(heartbeatState.task.leaseExpiresAt,taskHeartbeat.expiresAt,"task aggregate expiry must match renewed coordination lease");
+    assert.equal(heartbeatState.version,heartbeatClaim.version+1,"task heartbeat must append an aggregate event");
+    assert.equal(await a.releaseLease({lease:taskHeartbeat}),true);
+
     const voluntarilyReleasedTask=await a.createTask({title:"Voluntary task lease release",dedupeKey:"voluntary-release:"+cryptoRandom(),status:"ready"});
     const voluntaryClaim=await a.claimTask({taskId:voluntarilyReleasedTask.task.taskId,ownerId:"voluntary-worker-a",leaseMs:10000});
     assert.ok(voluntaryClaim);
