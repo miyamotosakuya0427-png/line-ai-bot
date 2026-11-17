@@ -16,8 +16,8 @@ Scope: read-only audit of connected GitHub, Render, and media-service connectors
 | GitHub repository | verified_live | Branch and file APIs worked. |
 | PR #49 base | verified_live | Compared exact SHA `56dde9b1f8b0b7913d093ba90d3868c7e49c7036` with `reliability/jarvis-worker-safe-retry-v2`; identical at branch creation. |
 | PR #50 | verified_live | Draft PR opened from isolated branch; not merged. |
-| Render `one-jarvis` | verified_live | Service exists; branch `one-jarvis-foundation`; auto-deploy off; Free plan; Singapore; latest observed successful deploy 2026-11-15; app logs show process started 2026-11-17. |
-| Render `line-ai-bot-4` | verified_live | Service exists; branch `main`; auto-deploy on; Free plan; Oregon; latest observed successful deploy 2026-11-15; app logs report server running. |
+| Render `one-jarvis` | verified_live | Service exists; branch `one-jarvis-foundation`; auto-deploy off; Free plan; Singapore; latest observed successful deploy 2026-11-15. Initial `/health` probe returned 503 while the Free instance was waking; Render logs then showed startup at 2026-11-17T02:05:25Z, and a repeat `/health` probe returned `{ok:true,service:"ONE JARVIS",status:"running"}`. |
+| Render `line-ai-bot-4` | verified_live | Service exists; branch `main`; auto-deploy on; Free plan; Oregon; latest observed successful deploy 2026-11-15; `/health` probe returned HTTP success and `株式会社One LINE AI Bot is running`. Webhook message round-trip was not tested. |
 | Other Render services | verified_live | Additional legacy services `line-ai-bot`, `line-ai-bot-1`, `line-ai-bot-2`, `line-ai-bot-3` exist. Some have auto-deploy enabled. `line-ai-bot-2` and `line-ai-bot` show Ruby runtime/build configuration but Node start command; review before future changes. |
 | Render-hosted Postgres | verified_live | Render account returned no Postgres instances. This says nothing about external Neon. |
 | Neon production | not_connected_or_unavailable | No direct Neon SQL connector is installed/available in this audit. Do not infer schema or migration status. |
