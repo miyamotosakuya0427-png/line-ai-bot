@@ -16,7 +16,7 @@ const {createPostgresExecutionKernel}=require("./postgres-execution-kernel");
 const url=process.env.JARVIS_EXECUTION_TEST_DATABASE_URL||"";
 const enabled=Boolean(url)&&process.env.JARVIS_ALLOW_TEST_SCHEMA_RESET==="yes";
 
-test("PostgreSQL 16 execution kernel fences stale workers at the resource write transaction",{skip:!enabled},async()=>{
+test("PostgreSQL 16 execution kernel preserves fencing across multi-process claims recovery and idempotent writes",{skip:!enabled},async()=>{
  const {Pool}=require("pg");
  const parsed=new URL(url),database=decodeURIComponent(parsed.pathname.replace(/^\//,""));
  if(!["localhost","127.0.0.1","::1"].includes(parsed.hostname))throw new Error("Execution kernel tests require loopback PostgreSQL; remote databases are prohibited");
