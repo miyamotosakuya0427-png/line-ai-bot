@@ -6,7 +6,7 @@ const {dashboardPage}=require("./dashboard");
 
 test("dashboard approval controls render and embedded JavaScript parses",()=>{
  const html=dashboardPage();
- assert.match(html,/id="approvals-panel"/);
+ assert.match(html,/id="approvals-panel"/);\n assert.match(html,/id="voice-panel"/);\n assert.match(html,/SpeechRecognition/);\n assert.match(html,/webkitSpeechRecognition/);\n assert.match(html,/speakAnswer/);\n assert.match(html,/常時録音・ウェイクワード待機は行いません/);\n assert.match(html,/内容を確認して「依頼を送信」/);
  assert.match(html,/id="approval-form"/);
  assert.match(html,/外部処理は実行されません/);
  assert.match(html,/AIに企画・台本下書きを依頼/);
