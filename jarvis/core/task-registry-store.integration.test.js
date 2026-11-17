@@ -141,7 +141,9 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     assert.ok(released);
     const renewed=await a.heartbeatLease({lease:released,leaseMs:10000});
     assert.ok(Date.parse(renewed.expiresAt)>Date.parse(released.expiresAt),"heartbeat extends lease");
+    assert.equal(await a.assertLeaseCurrent({lease:renewed}),true,"adapter boundary can verify an active PostgreSQL lease");
     assert.equal(await a.releaseLease({lease:renewed}),true);
+    await assert.rejects(a.assertLeaseCurrent({lease:renewed}),/expired, stale, or not owned/,"released leases cannot pass the adapter boundary");
     const afterRelease=await b.acquireLease({resourceKey:releaseKey,ownerId:"release-b",leaseMs:5000});
     assert.ok(afterRelease.fencingToken>released.fencingToken,"release/reacquire must not reset fencing token");
     const lifecycle=await pool.query("SELECT event_type FROM jarvis.events WHERE aggregate_type='coordination_lease' AND aggregate_id=$1 ORDER BY aggregate_version",[releaseKey]);
