@@ -50,3 +50,15 @@ CREATE INDEX IF NOT EXISTS fenced_operations_resource
 INSERT INTO jarvis.schema_migrations(version)
 VALUES ('0007_execution_kernel_fencing')
 ON CONFLICT (version) DO NOTHING;
+
+-- Shared, cross-process API quotas. Keys are hashed by the application.
+CREATE TABLE IF NOT EXISTS jarvis.api_rate_limit_buckets (
+  scope_type text NOT NULL CHECK (scope_type IN ('agent','project','conversation','worker','operation')),
+  scope_key text NOT NULL,
+  window_started_at timestamptz NOT NULL,
+  request_count integer NOT NULL CHECK (request_count >= 1),
+  updated_at timestamptz NOT NULL,
+  PRIMARY KEY (scope_type, scope_key)
+);
+CREATE INDEX IF NOT EXISTS api_rate_limit_buckets_updated
+  ON jarvis.api_rate_limit_buckets(updated_at);
