@@ -136,6 +136,34 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     await assert.rejects(pool.query("DELETE FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1",[created.task.taskId]),/append-only/);
     await assert.rejects(pool.query("TRUNCATE jarvis.events"),/append-only/);
 
+    const voluntarilyReleasedTask=await a.createTask({title:"Voluntary task lease release",dedupeKey:"voluntary-release:"+cryptoRandom(),status:"ready"});
+    const voluntaryClaim=await a.claimTask({taskId:voluntarilyReleasedTask.task.taskId,ownerId:"voluntary-worker-a",leaseMs:10000});
+    assert.ok(voluntaryClaim);
+    assert.equal(await a.releaseLease({lease:voluntaryClaim.lease}),true);
+    const afterVoluntaryRelease=await a.getTask(voluntarilyReleasedTask.task.taskId);
+    assert.equal(afterVoluntaryRelease.task.status,"ready","releasing an unstarted task returns it to ready");
+    assert.equal(afterVoluntaryRelease.task.leaseOwner,null);
+    const voluntaryReclaim=await b.claimTask({taskId:voluntarilyReleasedTask.task.taskId,ownerId:"voluntary-worker-b",leaseMs:10000});
+    assert.ok(voluntaryReclaim,"a released task lease can be acquired immediately");
+    assert.ok(voluntaryReclaim.lease.fencingToken>voluntaryClaim.lease.fencingToken);
+    await assert.rejects(
+      a.transitionTask({taskId:voluntarilyReleasedTask.task.taskId,expectedVersion:voluntaryClaim.version,lease:voluntaryClaim.lease,status:"in_progress"}),
+      /expired, stale, or not owned/
+    );
+
+    const yieldedTask=await a.createTask({title:"In-progress task lease release",dedupeKey:"yielded-release:"+cryptoRandom(),status:"ready"});
+    const yieldedClaim=await a.claimTask({taskId:yieldedTask.task.taskId,ownerId:"yield-worker-a",leaseMs:10000});
+    const yieldedRunning=await a.transitionTask({taskId:yieldedTask.task.taskId,expectedVersion:yieldedClaim.version,lease:yieldedClaim.lease,status:"in_progress"});
+    assert.equal(await a.releaseLease({lease:yieldedClaim.lease}),true);
+    const afterYield=await a.getTask(yieldedTask.task.taskId);
+    assert.equal(afterYield.task.status,"in_progress","releasing a running task preserves its progress");
+    assert.ok(Date.parse(afterYield.task.leaseExpiresAt)<=now,"released in-progress task is immediately recoverable");
+    const yieldedRecovery=await b.claimTask({taskId:yieldedTask.task.taskId,ownerId:"yield-worker-b",leaseMs:10000});
+    assert.ok(yieldedRecovery,"a released in-progress task can be reclaimed without waiting for old TTL");
+    assert.ok(yieldedRecovery.lease.fencingToken>yieldedClaim.lease.fencingToken);
+    const yieldedAudit=await pool.query("SELECT event_type FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1 ORDER BY aggregate_version",[yieldedTask.task.taskId]);
+    assert.ok(yieldedAudit.rows.some(x=>x.event_type==="lease_released"));
+
     const releaseKey="integration-release:"+cryptoRandom();
     const released=await a.acquireLease({resourceKey:releaseKey,ownerId:"release-a",leaseMs:5000});
     assert.ok(released);
