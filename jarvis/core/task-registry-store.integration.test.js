@@ -46,6 +46,23 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     );
     assert.equal(await a.releaseLease({lease:rootLease}),true);
 
+    await assert.rejects(
+      a.claimTask({taskId:child.task.taskId,ownerId:"dependency-worker",leaseMs:10000}),
+      /Task dependencies are not completed/
+    );
+    const completionLease=await a.acquireLease({resourceKey:"task:"+root.task.taskId,ownerId:"dependency-completer",leaseMs:60000});
+    let rootVersion=root.version;
+    for(const status of ["claimed","in_progress","review","verified","completed"]){
+      const moved=await a.transitionTask({taskId:root.task.taskId,expectedVersion:rootVersion,lease:completionLease,status});
+      assert.ok(moved);
+      rootVersion=moved.version;
+    }
+    const eligibleChild=await b.claimTask({taskId:child.task.taskId,ownerId:"dependency-worker",leaseMs:10000});
+    assert.ok(eligibleChild,"dependency task becomes claimable after its prerequisite completes");
+    assert.equal(eligibleChild.task.status,"claimed");
+    assert.equal(await b.releaseLease({lease:eligibleChild.lease}),true);
+    assert.equal(await a.releaseLease({lease:completionLease}),true);
+
     const firstPage=await a.listTasks({status:"ready",limit:1,offset:0});
     const secondPage=await b.listTasks({status:"ready",limit:1,offset:1});
     assert.equal(firstPage.length,1);
