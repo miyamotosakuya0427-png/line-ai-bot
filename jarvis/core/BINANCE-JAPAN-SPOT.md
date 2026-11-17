@@ -34,7 +34,7 @@ A live order is bound to a specific approval resource and immutable payload. The
 - `JARVIS_BINANCE_API_KEY` — API key (secret)
 - `JARVIS_BINANCE_API_SECRET` — API secret (secret)
 - `JARVIS_BINANCE_BASE_URL` — optional, allowlisted Binance API host only
-- `JARVIS_BINANCE_LIVE_ORDERS_ENABLED` — explicit live order kill switch (default false)
+- `JARVIS_BINANCE_LIVE_ORDERS_ENABLED` — explicit live order kill switch (default false)\n- `JARVIS_BINANCE_RISK_GATE_ENABLED` — explicit JPY-balance risk gate (default false)\n- `JARVIS_OWNER_TOKEN` — separate owner-only token required for account, open-order, and order execution routes
 - `JARVIS_BINANCE_MAX_ORDER_JPY` — maximum notional per order (default 5000)
 
 Never set the live-order flag until the read-only account test, market-data freshness checks, risk-policy review, approval identity checks, and end-to-end testnet/demo rehearsal have passed. Do not assume a global Binance MCP endpoint is available to a Binance Japan account; verify account eligibility and product support separately.
