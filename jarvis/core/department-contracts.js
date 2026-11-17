@@ -19,7 +19,7 @@ const CONTRACTS=[
  {id:"analytics",name:"データ分析",agent:"ONE ANALYTICS",mission:"業務・財務・動画・Workerデータを分析し異常と傾向を検出する",inputs:["許可された集計データ","CI結果","業務イベント"],outputs:["KPI","傾向・異常検知","再現可能な計算","データ品質指摘"],scopes:["analytics:read","tasks:write"],tools:["analytics","sql_readonly","task_registry"],handlerId:null,audit:["query_scope","row_limits","calculation_version","privacy_filter"]},
  {id:"engineering",name:"システム開発",agent:"ONE ENGINEERING",mission:"コード・テスト・CI・障害修正を専用ブランチで実装する",inputs:["Issue・Task ID","仕様","コード","テストログ"],outputs:["差分","テスト結果","Draft PR","引き継ぎ記録"],scopes:["github:read","github:branch_write","tasks:read","tasks:write"],tools:["github","local_tests","task_registry"],handlerId:null,audit:["branch_owner","changed_paths","commit_sha","test_counts","no_merge_or_deploy"]},
  {id:"audit",name:"監査・セキュリティ",agent:"ONE AUDIT",mission:"権限・秘密情報・監査イベント・テスト証跡を独立確認する",inputs:["設定スナップショット","監査イベント","CIログ","権限一覧"],outputs:["リスク評価","証跡一覧","是正タスク","未検証事項"],scopes:["audit:read","tasks:write"],tools:["github_read","render_read","log_read","task_registry"],handlerId:null,audit:["read_only_scope","evidence_sha","secret_redaction","findings_severity","owner_escalation"]}
-].map(item=>Object.freeze({...item,inputs:Object.freeze(item.inputs),outputs:Object.freeze(item.outputs),scopes:Object.freeze(item.scopes),tools:Object.freeze(item.tools),audit:Object.freeze(item.audit)})));
+].map(item=>Object.freeze({...item,inputs:Object.freeze(item.inputs),outputs:Object.freeze(item.outputs),scopes:Object.freeze(item.scopes),tools:Object.freeze(item.tools),audit:Object.freeze(item.audit)}));
 
 const BY_ID=new Map(CONTRACTS.map(item=>[item.id,item]));
 function getDepartmentContract(id){return BY_ID.get(id)||null;}
