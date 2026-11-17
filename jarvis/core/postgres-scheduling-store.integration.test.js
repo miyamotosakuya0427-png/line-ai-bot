@@ -3,7 +3,7 @@ const test=require("node:test");
 const assert=require("node:assert/strict");
 const {createPostgresSchedulingStore}=require("./postgres-scheduling-store");
 
-const url=process.env.JARVIS_TEST_DATABASE_URL||"";
+const url=process.env.JARVIS_SCHEDULING_TEST_DATABASE_URL||"";
 const enabled=Boolean(url)&&process.env.JARVIS_ALLOW_TEST_SCHEMA_RESET==="yes";
 
 test("real PostgreSQL reservation store persists state and append-only audit with concurrent transition fencing",{skip:!enabled},async()=>{
