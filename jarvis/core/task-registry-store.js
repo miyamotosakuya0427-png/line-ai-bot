@@ -2,6 +2,7 @@
 const crypto = require("node:crypto");
 
 const TASK_STATES = new Set(["proposed","ready","claimed","in_progress","blocked","review","verified","completed","cancelled"]);
+const PATCH_FIELDS = new Set(["scope","ownerConversation","ownerAgent","priority","branch","baseBranch","headSha","pullRequest","dependencyTaskIds","changedPaths","testRunIds","verificationSummary","blockerIds","nextAction","startedAt","completedAt"]);
 const NEXT = {
   proposed: new Set(["ready","blocked","cancelled"]),
   ready: new Set(["claimed","blocked","cancelled"]),
@@ -60,11 +61,12 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
   }
   async function assertLease(c,lease){
     if(!lease||!text(lease.resourceKey,240)||!text(lease.ownerId,MAX_OWNER)||!text(lease.token,256)||!Number.isSafeInteger(lease.fencingToken))throw new Error("Current lease is required");
-    const r=await c.query("SELECT 1 FROM jarvis.coordination_leases WHERE resource_key=$1 AND owner_id=$2 AND token_hash=$3 AND fencing_token=$4 AND expires_at > $5::timestamptz",[lease.resourceKey,lease.ownerId,hash(lease.token),lease.fencingToken,clock()]);
+    const r=await c.query("SELECT 1 FROM jarvis.coordination_leases WHERE resource_key=$1 AND owner_id=$2 AND token_hash=$3 AND fencing_token=$4 AND expires_at > $5::timestamptz FOR UPDATE",[lease.resourceKey,lease.ownerId,hash(lease.token),lease.fencingToken,clock()]);
     if(!r.rows[0])throw new Error("Lease is expired, stale, or not owned by this caller");
   }
   async function transitionInTx(c,{taskId,expectedVersion,lease,status,patch={}}){
     if(!TASK_STATES.has(status))throw new Error("Invalid task status");
+    if(!patch||typeof patch!=="object"||Array.isArray(patch)||Object.keys(patch).some(key=>!PATCH_FIELDS.has(key)))throw new Error("Invalid task patch");
     await assertLease(c,lease);
     if(lease.resourceKey!=="task:"+taskId)throw new Error("Task lease resource does not match task");
     await lock(c,"task:"+taskId);
@@ -123,7 +125,8 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
       await init();
       return tx(async c=>{
         await assertLease(c,lease);
-        const r=await c.query("DELETE FROM jarvis.coordination_leases WHERE resource_key=$1 AND owner_id=$2 AND token_hash=$3 AND fencing_token=$4 RETURNING resource_key",[lease.resourceKey,lease.ownerId,hash(lease.token),lease.fencingToken]);
+        const now=clock();
+        const r=await c.query("UPDATE jarvis.coordination_leases SET expires_at=$1,updated_at=$1 WHERE resource_key=$2 AND owner_id=$3 AND token_hash=$4 AND fencing_token=$5 RETURNING resource_key",[now,lease.resourceKey,lease.ownerId,hash(lease.token),lease.fencingToken]);
         return r.rowCount===1;
       });
     },
