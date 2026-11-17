@@ -3,7 +3,7 @@ const test=require("node:test");
 const assert=require("node:assert/strict");
 const {createServer}=require("../server");
 
-function fixture({configured=true,authorize=true}={}){
+function fixture({configured=true,authorize=true,rateLimiter=null}={}){
   const tasks=new Map();let sequence=0;
   const registry={
     async listTasks({status=null,limit=50,offset=0,ownerAgent=null,ownerConversation=null,projectId=null}={}){return [...tasks.values()].filter(x=>(status===null||x.task.status===status)&&(ownerAgent===null||x.task.ownerAgent===ownerAgent)&&(ownerConversation===null||x.task.ownerConversation===ownerConversation)&&(projectId===null||x.task.projectId===projectId)).slice(offset,offset+limit);},
@@ -18,7 +18,8 @@ function fixture({configured=true,authorize=true}={}){
   const scopes=["tasks:read","tasks:write","tasks:dispatch","tasks:claim","tasks:lease","tasks:transition","resources:lease"];
   const server=createServer({
     taskRegistry:configured?registry:null,
-    authorizeTaskRegistry:authorize?async(req)=>req.headers.authorization==="Bearer agent-a"?{agentId:"agent-a",conversationId:"opaque-conversation",scopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]}:req.headers.authorization==="Bearer agent-b"?{agentId:"agent-b",scopes,projectIds:["other-project"],resourcePrefixes:["path:other-project:"]}:req.headers.authorization==="Bearer agent-a-other"?{agentId:"agent-a",conversationId:"other-conversation",scopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]}:req.headers.authorization==="Bearer agent-a-unbound"?{agentId:"agent-a",scopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]}:null:null
+    authorizeTaskRegistry:authorize?async(req)=>req.headers.authorization==="Bearer agent-a"?{agentId:"agent-a",conversationId:"opaque-conversation",scopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]}:req.headers.authorization==="Bearer agent-b"?{agentId:"agent-b",scopes,projectIds:["other-project"],resourcePrefixes:["path:other-project:"]}:req.headers.authorization==="Bearer agent-a-other"?{agentId:"agent-a",conversationId:"other-conversation",scopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]}:req.headers.authorization==="Bearer agent-a-unbound"?{agentId:"agent-a",scopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]}:null:null,
+    taskRegistryRateLimiter:rateLimiter
   });
   return{server,registry,tasks};
 }
@@ -94,4 +95,17 @@ test("agent cannot acquire or release resources outside its explicit resource pr
   const root=await listen(server);
   assert.equal((await post(root,"/v1/resources/leases",{resourceKey:"path:other-project:secret.txt"})).status,403);
   assert.equal((await post(root,"/v1/resources/leases",{resourceKey:"path:one-jarvis:jarvis/server.js"})).status,201);
+});
+
+test("Task Registry API applies a per-agent rate limit and returns Retry-After",async t=>{
+  let count=0;
+  const rateLimiter={async consume(agentId){assert.equal(agentId,"agent-a");count++;return count===1?{allowed:true}:{allowed:false,retryAfter:23};}};
+  const {server}=fixture({rateLimiter});t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const root=await listen(server);
+  const first=await fetch(root+"/v1/tasks",{headers:{Authorization:"Bearer agent-a"}});
+  assert.equal(first.status,200);
+  const second=await fetch(root+"/v1/tasks",{headers:{Authorization:"Bearer agent-a"}});
+  assert.equal(second.status,429);
+  assert.equal(second.headers.get("retry-after"),"23");
+  assert.equal((await second.json()).error,"Task Registry rate limit exceeded");
 });
