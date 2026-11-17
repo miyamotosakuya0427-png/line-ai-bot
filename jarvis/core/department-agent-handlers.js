@@ -24,7 +24,7 @@ function createDepartmentHandlers(options={}) {
  const {researchFetchImpl=fetch,store=null,contextLoader=null,...openAIOptions}=options;
  const handlers={};
  for(const department of DEPARTMENTS) {
-  const instructions=INSTRUCTIONS[department.id]+(["jarvis","management","tax","invest","trader"].includes(department.id)?"\\n\\n"+FINANCE_TAX_SYSTEM_PROMPT:"");
+  const instructions=INSTRUCTIONS[department.id]+(["jarvis","management","tax","invest","trader"].includes(department.id)?"\n\n"+FINANCE_TAX_SYSTEM_PROMPT:"");
   if(!instructions) throw new Error("Missing department agent instructions: "+department.id);
   const baseHandler=createOpenAIHandler({...openAIOptions,instructions});
   handlers["department."+department.id]=async(payload,meta)=>{
