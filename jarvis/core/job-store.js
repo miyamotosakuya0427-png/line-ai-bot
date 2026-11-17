@@ -13,6 +13,7 @@ const NEXT = {
 };
 const MAX_PAYLOAD_BYTES = 16 * 1024;
 const MAX_JOBS = 10000;
+const PRIORITIES = new Set(["P0","P1","P2","P3"]);
 
 function clone(value) { return JSON.parse(JSON.stringify(value)); }
 function validPayload(value) {
@@ -100,19 +101,20 @@ function createJobStore({ filePath, pool, clock = () => new Date().toISOString()
   }
   return {
     async init() { await ready(); return { ok: true, count: jobs.size }; },
-    async create({ type, payload, idempotencyKey = "" } = {}) {
+    async create({ type, payload, idempotencyKey = "", priority = "P2" } = {}) {
       await ready();
       return serialize(async () => {
         if (typeof type !== "string" || !/^[a-z][a-z0-9._-]{1,63}$/.test(type)) throw new Error("Invalid job type");
         if (!validPayload(payload)) throw new Error("Job payload must be an object no larger than 16 KB");
         if (idempotencyKey && (typeof idempotencyKey !== "string" || idempotencyKey.length > 128)) throw new Error("Invalid idempotency key");
+        if (!PRIORITIES.has(priority)) throw new Error("Invalid job priority");
         if (idempotencyKey) {
           const existing = [...jobs.values()].find(job => job.idempotencyKey === idempotencyKey);
           if (existing) return { job: publicJob(existing), created: false };
         }
         if (jobs.size >= MAX_JOBS) throw new Error("Job store capacity reached");
         const now = clock();
-        const job = { id: crypto.randomUUID(), type, payload: clone(payload), status: "queued", attempts: 0, idempotencyKey, createdAt: now, updatedAt: now, error: null, lastError: null, retryAt: null, outcomeUnknown: false, result: null };
+        const job = { id: crypto.randomUUID(), type, payload: clone(payload), priority, status: "queued", attempts: 0, idempotencyKey, createdAt: now, updatedAt: now, error: null, lastError: null, retryAt: null, outcomeUnknown: false, deadLettered: false, result: null };
         await append({ type: "job", job });
         jobs.set(job.id, job);
         return { job: publicJob(job), created: true };
@@ -148,6 +150,8 @@ function createJobStore({ filePath, pool, clock = () => new Date().toISOString()
         const retryAt = options.retryAt;
         const lastError = options.lastError;
         const outcomeUnknown = options.outcomeUnknown;
+        const deadLettered = options.deadLettered;
+        if (deadLettered !== undefined && typeof deadLettered !== "boolean") throw new Error("Invalid dead-letter flag");
         if (retryAt !== undefined && retryAt !== null &&
             (typeof retryAt !== "string" || !Number.isFinite(Date.parse(retryAt)))) throw new Error("Invalid retry time");
         if (lastError !== undefined && lastError !== null && (typeof lastError !== "string" || lastError.length > 500)) throw new Error("Invalid last error");
@@ -156,6 +160,7 @@ function createJobStore({ filePath, pool, clock = () => new Date().toISOString()
           lastError: lastError === undefined ? (nextStatus === "queued" ? current.lastError || null : null) : lastError,
           retryAt: nextStatus === "queued" ? (retryAt || null) : null,
           outcomeUnknown: nextStatus === "failed" ? (outcomeUnknown === undefined ? Boolean(current.outcomeUnknown) : outcomeUnknown) : false,
+          deadLettered: nextStatus === "failed" ? (deadLettered === undefined ? Boolean(current.deadLettered) : deadLettered) : false,
           result: nextStatus === "succeeded" ? (result === undefined ? current.result : clone(result)) : null };
         if (nextStatus === "running") next.attempts += 1;
         await append({ type: "job", job: next });
