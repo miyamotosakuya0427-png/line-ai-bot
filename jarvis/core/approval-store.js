@@ -87,6 +87,26 @@ function createApprovalStore({filePath,pool,clock=()=>new Date().toISOString(),a
     const next={...current,executionStatus:"claimed",executionClaim:{id:crypto.randomUUID(),actor:actor.trim(),claimedAt:clock(),requestDigest:current.requestDigest},updatedAt:clock()};
     await append({type:"approval",approval:next});items.set(id,next);return publicApproval(next);
    });
+  },
+  async finishExecution(id,{claimId,actor,outcome,reason=""}={}){
+   await ready();return serialize(async()=>{
+    const current=items.get(id);if(!current)return null;
+    if(current.status!=="approved"||current.executionStatus!=="claimed"||!current.executionClaim)throw new Error("Approval execution claim is not active");
+    if(current.executionClaim.id!==claimId||current.executionClaim.actor!==actor)throw new Error("Approval execution claim integrity check failed");
+    if(!["succeeded","failed"].includes(outcome)||!validText(reason,1000))throw new Error("Invalid approval execution result");
+    if(!current.expiresAt||Date.parse(current.expiresAt)<=Date.parse(clock()))throw new Error("Approval has expired");
+    const next={...current,executionStatus:outcome,executionFinishedAt:clock(),executionReason:reason.trim(),updatedAt:clock()};
+    await append({type:"approval",approval:next});items.set(id,next);return publicApproval(next);
+   });
+  },
+  async expireExecution(id){
+   await ready();return serialize(async()=>{
+    const current=items.get(id);if(!current)return null;
+    if(current.status!=="approved"||!current.expiresAt||Date.parse(current.expiresAt)>Date.parse(clock()))throw new Error("Approval has not expired");
+    if(!["not_started","claimed"].includes(current.executionStatus))throw new Error("Approval execution is already finalized");
+    const next={...current,executionStatus:"expired",executionFinishedAt:clock(),updatedAt:clock()};
+    await append({type:"approval",approval:next});items.set(id,next);return publicApproval(next);
+   });
   }
  };
 }
