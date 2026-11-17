@@ -34,8 +34,8 @@ test("agent authorization rejects malformed conversation identities",()=>{
 
 test("resource lease capability requires explicit resource prefixes",()=>{
   const token="z".repeat(40);
-  assert.throws(()=>createTaskRegistryAuthorizer({config:JSON.stringify({"worker-a":{tokenHash:hash(token),scopes:["resources:lease"]}})}),/requires explicit resource prefixes/);
-  assert.throws(()=>createTaskRegistryAuthorizer({config:JSON.stringify({"worker-a":{tokenHash:hash(token),scopes:["tasks:read"],resourcePrefixes:["path:other-project"]}})}),/resource scope is invalid/);
+  assert.throws(()=>createTaskRegistryAuthorizer({config:JSON.stringify({"worker-a":{tokenHash:hash(token),expiresAt:"2099-01-01T00:00:00.000Z",scopes:["resources:lease"]}})}),/requires explicit resource prefixes/);
+  assert.throws(()=>createTaskRegistryAuthorizer({config:JSON.stringify({"worker-a":{tokenHash:hash(token),expiresAt:"2099-01-01T00:00:00.000Z",scopes:["tasks:read"],resourcePrefixes:["path:other-project"]}})}),/resource scope is invalid/);
 });
 
 test("expired and revoked bearer tokens are rejected at request time",async()=>{
