@@ -8,7 +8,7 @@ function fixture({conflict=false,bookingOverride={}}={}){
  const calendar={async listEvents(){return conflict?[{id:"busy",start:"2026-11-18T10:00:00+09:00",end:"2026-11-18T11:00:00+09:00"}]:[];}};
  const booking={supportsIdempotency:true,async searchAvailability(){return[{start:"2026-11-18T10:00:00+09:00"}];},async createReservation(){creates++;return{confirmed:true,reservationId:"R-1"};},...bookingOverride};
  const taskRegistry={async createTask(input){return{created:true,task:{title:input.title}};}};
- const authorizeApproval=async(a,ctx)=>a?.operationHash===ctx.operationHash?{approved:true,approvalId:"approval-1",operationHash:ctx.operationHash}:null;
+ const authorizeApproval=async(a,ctx)=>a?.operationHash===ctx.operationHash?{approved:true,approvalId:"approval-1",approverId:"owner-1",operationHash:ctx.operationHash}:null;
  return{agent:createSchedulingReservationAgent({calendar,booking,store,taskRegistry,authorizeApproval}),records,booking,store,get creates(){return creates;}};
 }
 const input={title:"打合せ予約",provider:"Example Provider",start:"2026-11-18T10:00:00+09:00",end:"2026-11-18T11:00:00+09:00",partySize:2};
