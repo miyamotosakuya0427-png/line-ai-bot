@@ -49,7 +49,13 @@ test("PostgreSQL 16 execution kernel fences stale workers at the resource write 
   const replay=await kernel.writeResource({resourceId:"shared-doc",projectId:"one-jarvis",workerId:winnerId,taskId:first.task.taskId,taskLease:claimedA.lease,lease:resourceLeaseA,operationId:"op-a1",idempotencyKey:"idem-a1",operationScope:"resource.update",payload:{value:1},expectedVersion:0});
   assert.equal(replay.replayed,true);
   assert.equal(replay.version,1);
+  const prematureRecovery=await kernel.recoverExpiredWorker({workerId:winnerId});
+  assert.equal(prematureRecovery.recovered,false,"a live lease must never be recovered");
   now+=6000;
+  const recovery=await kernel.recoverExpiredWorker({workerId:winnerId});
+  assert.equal(recovery.recovered,true,"an expired lease permits Worker recovery");
+  assert.equal(recovery.expiredTaskId,first.task.taskId);
+  assert.equal((await kernel.getWorker(winnerId)).status,"recovering");
   const second=await makeTask("two","worker-b");
   const claimedB=await registry.claimTaskForWorker({taskId:second.task.taskId,workerId:loserId,leaseMs:60000});
   const resourceLeaseB=await registry.acquireLease({resourceKey:"resource:shared-doc",ownerId:loserId,leaseMs:60000});
