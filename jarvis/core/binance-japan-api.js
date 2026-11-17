@@ -34,6 +34,14 @@ async function handleBinanceApi({req,res,url,client=null,executor=null,approvalS
     const balances=(account.balances||[]).filter(x=>Number(x.free||0)>0||Number(x.locked||0)>0).map(x=>({asset:x.asset,free:x.free,locked:x.locked}));
     return json(res,200,{ok:true,account:{accountType:account.accountType,canTrade:account.canTrade,canWithdraw:account.canWithdraw,canDeposit:account.canDeposit,balances},safety:{withdrawalActionsExposed:false}});
   }
+  if(req.method==="GET"&&url.pathname==="/v1/binance/trades"){
+    if(!isAuthorized(req,ownerToken))return bearer(res,json,ownerToken?401:503,ownerToken?"Owner authentication required":"Owner authentication is not configured");
+    if(!client.configured)return json(res,503,{ok:false,error:"Binance read-only API credentials are not configured"});
+    const symbol=(url.searchParams.get("symbol")||"").toUpperCase(),limit=Number(url.searchParams.get("limit")||100);
+    if(!/^[A-Z0-9]{5,20}$/.test(symbol)||!Number.isInteger(limit)||limit<1||limit>1000)return json(res,400,{ok:false,error:"A valid symbol and trade limit are required"});
+    const trades=await client.myTrades(symbol,{limit});
+    return json(res,200,{ok:true,trades:trades.map(x=>({symbol:x.symbol,id:x.id,orderId:x.orderId,price:x.price,qty:x.qty,quoteQty:x.quoteQty,commission:x.commission,commissionAsset:x.commissionAsset,time:x.time,isBuyer:x.isBuyer,isMaker:x.isMaker}))});
+  }
   if(req.method==="GET"&&url.pathname==="/v1/binance/open-orders"){
     if(!isAuthorized(req,ownerToken))return bearer(res,json,ownerToken?401:503,ownerToken?"Owner authentication required":"Owner authentication is not configured");
     if(!client.configured)return json(res,503,{ok:false,error:"Binance read-only API credentials are not configured"});
