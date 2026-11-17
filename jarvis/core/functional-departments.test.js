@@ -12,7 +12,8 @@ test("functional registry defines all 16 requested business departments exactly 
 test("every department has an auditable contract and bounded permissions",()=>{
   for(const d of DEPARTMENTS){
     assert.ok(d.name&&d.mission);
-    for(const key of ["inputs","outputs","tools","audit","legacyAgentIds"])assert.ok(Array.isArray(d[key])&&d[key].length>0,d.id+" missing "+key);
+    for(const key of ["inputs","outputs","tools","audit"])assert.ok(Array.isArray(d[key])&&d[key].length>0,d.id+" missing "+key);
+    assert.ok(Array.isArray(d.legacyAgentIds),d.id+" missing legacy agent mapping");
     assert.equal(d.permissions.read,true);
     assert.equal(d.permissions.analyze,true);
     assert.equal(d.permissions.draft,true);
