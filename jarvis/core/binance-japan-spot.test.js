@@ -31,17 +31,17 @@ test("public market endpoints work without account credentials",async()=>{
  await assert.rejects(client.account(),/credentials/);
 });
 
-test("rejects untrusted base URLs and invalid intervals",()=>{
+test("rejects untrusted base URLs and invalid intervals",async()=>{
  assert.throws(()=>createBinanceJapanSpotClient({baseUrl:"https://evil.example"}),/not allowlisted/);
  const client=createBinanceJapanSpotClient({fetchImpl:async()=>response([])});
- assert.rejects(client.klines({symbol:"BTCJPY",interval:"2m"}),/Invalid kline/);
+ await assert.rejects(client.klines({symbol:"BTCJPY",interval:"2m"}),/Invalid kline/);
 });
 
 test("validates JPY spot limit orders against Binance filters and hard notional cap",()=>{
  const valid=validateLimitOrder({symbol:"BTCJPY",side:"BUY",price:"10000000",quantity:"0.0001"},exchangeInfo,{maxNotional:"5000"});
  assert.deepEqual(valid,{symbol:"BTCJPY",side:"BUY",type:"LIMIT",timeInForce:"GTC",quantity:"0.0001",price:"10000000"});
  assert.throws(()=>validateLimitOrder({symbol:"BTCJPY",side:"BUY",price:"10000000.5",quantity:"0.0001"},exchangeInfo),/PRICE_FILTER/);
- assert.throws(()=>validateLimitOrder({symbol:"BTCJPY",side:"BUY",price:"10000000",quantity:"0.00001"},exchangeInfo),/minimum notional/);
+ assert.throws(()=>validateLimitOrder({symbol:"BTCJPY",side:"BUY",price:"5000000",quantity:"0.00001"},exchangeInfo),/minimum notional/);
  assert.throws(()=>validateLimitOrder({symbol:"BTCUSDT",side:"BUY",price:"100",quantity:"1"},exchangeInfo),/JPY spot/);
  assert.throws(()=>validateLimitOrder({symbol:"BTCJPY",side:"BUY",price:"10000000",quantity:"0.001"},exchangeInfo,{maxNotional:"5000"}),/notional limit/);
 });
