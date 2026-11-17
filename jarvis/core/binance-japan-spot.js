@@ -25,7 +25,7 @@ function decimalParts(value,name) {
 function align(a,b){const scale=Math.max(a.scale,b.scale);return [a.n*10n**BigInt(scale-a.scale),b.n*10n**BigInt(scale-b.scale)];}
 function decimalMultiple(value,step){const [v,s]=align(decimalParts(value,"value"),decimalParts(step,"step"));return s>0n&&v%s===0n;}
 function decimalCompare(a,b){const [x,y]=align(decimalParts(a,"value"),decimalParts(b,"bound"));return x<y?-1:x>y?1:0;}
-function decimalProductAtLeast(a,b,min){const x=decimalParts(a,"price"),y=decimalParts(b,"quantity"),z=decimalParts(min,"minimum notional");const n=x.n*y.n;const scale=x.scale+y.scale;const [left,right]=align({n,scale},z);return left>=right;}
+function decimalProductCompare(a,b,bound){const x=decimalParts(a,"price"),y=decimalParts(b,"quantity"),z=decimalParts(bound,"notional bound");const n=x.n*y.n;const scale=x.scale+y.scale;const [left,right]=align({n,scale},z);return left<right?-1:left>right?1:0;}
 function validateLimitOrder(order,exchangeInfo,{maxNotional="5000"}={}) {
   if(!order||typeof order!=="object"||Array.isArray(order))throw new Error("Invalid order");
   const symbol=String(order.symbol||"").toUpperCase(),side=String(order.side||"").toUpperCase();
@@ -76,7 +76,7 @@ function createBinanceJapanSpotClient({apiKey="",secret="",baseUrl="https://api.
     try{data=await response.json();}catch{throw new BinanceApiError("Binance returned an unreadable response",{statusCode:502,definitive:false});}
     if(!response.ok) {
       const code=Number.isInteger(data?.code)?data.code:null;
-      const definitive=response.status>=400&&response.status<500&&code!==null&&![-1006,-1007,-1008].includes(code);
+      const definitive=response.status>=400&&response.status<500&&code!==null&&![-1000,-1001,-1006,-1007,-1008].includes(code);
       throw new BinanceApiError("Binance API request failed",{statusCode:response.status>=500?502:response.status,code,definitive});
     }
     return data;
@@ -98,10 +98,10 @@ function createBinanceJapanSpotClient({apiKey="",secret="",baseUrl="https://api.
       return request("GET","/api/v3/order",{symbol:String(symbol).toUpperCase(),origClientOrderId:clientOrderId},true);
     },
     async placeLimitOrder(order){
-      if(!order||order.type!=="LIMIT"||order.timeInForce!=="GTC")throw new Error("Only GTC limit orders are supported");
+      if(!order||order.type!=="LIMIT"||order.timeInForce!=="GTC"||typeof order.newClientOrderId!=="string"||!/^OJ[A-Za-z0-9]{8,34}$/.test(order.newClientOrderId))throw new Error("Only identified GTC limit orders are supported");
       return request("POST","/api/v3/order",{symbol:order.symbol,side:order.side,type:"LIMIT",timeInForce:"GTC",quantity:order.quantity,price:order.price,newClientOrderId:order.newClientOrderId},true);
     }
   });
 }
 
-module.exports={ALLOWED_BASE_URLS,INTERVALS,BinanceApiError,createBinanceJapanSpotClient,validateLimitOrder,decimalMultiple};
+module.exports={ALLOWED_BASE_URLS,INTERVALS,BinanceApiError,createBinanceJapanSpotClient,validateLimitOrder,decimalMultiple,decimalProductCompare};
