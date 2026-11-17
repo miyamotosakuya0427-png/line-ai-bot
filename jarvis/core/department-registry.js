@@ -32,10 +32,11 @@ function getUnifiedDepartment(id){
   const contract=getDepartmentContract(contractId);
   return functional&&contract?{id:canonicalId,functional,contract}:null;
 }
-function createDepartmentDispatcher({registry,handlers={}}={}){
-  for(const method of ["createTask","claimTask","transitionTask","releaseLease"]){
+function createDepartmentDispatcher({registry,handlers={},leaseMs=60000,heartbeatMs=20000}={}){
+  for(const method of ["createTask","claimTask","transitionTask","heartbeatLease","releaseLease"]){
     if(typeof registry?.[method]!=="function")throw new Error("Task Registry method is required: "+method);
   }
+  if(!Number.isInteger(leaseMs)||leaseMs<5000||leaseMs>3600000||!Number.isInteger(heartbeatMs)||heartbeatMs<1000||heartbeatMs>=leaseMs)throw new Error("Invalid department lease settings");
   if(!handlers||typeof handlers!=="object"||Array.isArray(handlers))throw new Error("Department handlers must be an object");
   const handlerMap=new Map(Object.entries(handlers));
   for(const [id,handler] of handlerMap)if(!CANONICAL_IDS.includes(id)||typeof handler!=="function")throw new Error("Invalid department handler: "+id);
@@ -57,23 +58,42 @@ function createDepartmentDispatcher({registry,handlers={}}={}){
       priority,status:"ready",acceptanceCriteria:[department.functional.mission]
     });
     if(!created?.created)return {created:false,duplicate:true,task:created?.task||null,version:created?.version||null};
-    const claim=await registry.claimTask({taskId:created.task.taskId,ownerId:workerId,leaseMs:60000});
+    const claim=await registry.claimTask({taskId:created.task.taskId,ownerId:workerId,leaseMs});
     if(!claim)return {created:true,dispatched:false,reason:"TASK_CLAIM_CONFLICT",task:created.task};
     let active={task:claim.task,version:claim.version};
+    let heartbeat=null,heartbeatBusy=false,heartbeatPromise=null,leaseLost=false;
+    const abortController=new AbortController();
+    const stopHeartbeat=async()=>{
+      if(heartbeat)clearInterval(heartbeat);
+      heartbeat=null;
+      if(heartbeatPromise)await heartbeatPromise;
+    };
     try{
       active=await registry.transitionTask({
         taskId:created.task.taskId,expectedVersion:active.version,lease:claim.lease,
         status:"in_progress",patch:{nextAction:"Department handler executing"}
       });
+      heartbeat=setInterval(()=>{
+        if(heartbeatBusy||leaseLost)return;
+        heartbeatBusy=true;
+        heartbeatPromise=(async()=>{
+          try{await registry.heartbeatLease({lease:claim.lease,leaseMs});}
+          catch{leaseLost=true;abortController.abort(new Error("Department task lease lost; stop external writes"));}
+          finally{heartbeatBusy=false;}
+        })();
+      },heartbeatMs);
+      heartbeat.unref?.();
       let result;
       try{
         result=await handler(payload,{
           department:department.functional,contract:department.contract,
-          task:active.task,lease:claim.lease,workerId,
+          task:active.task,lease:claim.lease,workerId,signal:abortController.signal,
           permittedTools:department.contract.tools,
           allowedActions:["read","analyze","draft","internal_task","request_approval"]
         });
       }catch(error){
+        await stopHeartbeat();
+        if(leaseLost)return {created:true,dispatched:true,status:"lease_lost",leaseLost:true,task:active.task};
         const blocked=await registry.transitionTask({
           taskId:created.task.taskId,expectedVersion:active.version,lease:claim.lease,
           status:"blocked",patch:{nextAction:error?.outcomeUnknown===true?"Handler outcome unknown; reconcile before retry":"Handler failed; inspect audit evidence before retry"}
@@ -81,6 +101,8 @@ function createDepartmentDispatcher({registry,handlers={}}={}){
         active=blocked;
         return {created:true,dispatched:true,status:"blocked",task:blocked.task};
       }
+      await stopHeartbeat();
+      if(leaseLost)return {created:true,dispatched:true,status:"lease_lost",leaseLost:true,task:active.task};
       const serialized=JSON.stringify(result===undefined?null:result);
       if(typeof serialized!=="string"||serialized.length>12000)throw new Error("Department result exceeds the persistence limit");
       const reviewed=await registry.transitionTask({
@@ -90,7 +112,8 @@ function createDepartmentDispatcher({registry,handlers={}}={}){
       active=reviewed;
       return {created:true,dispatched:true,status:"review",task:reviewed.task,result:result===undefined?null:result};
     }finally{
-      await registry.releaseLease({lease:claim.lease});
+      await stopHeartbeat();
+      if(!leaseLost)await registry.releaseLease({lease:claim.lease});
     }
   };
 }
