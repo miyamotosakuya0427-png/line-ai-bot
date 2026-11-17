@@ -56,6 +56,16 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     assert.equal(moved.task.status,"in_progress");
     await assert.rejects(a.transitionTask({taskId:created.task.taskId,expectedVersion:claim.version,lease:claim.lease,status:"review"}),/Stale task version/);
     await assert.rejects(a.transitionTask({taskId:created.task.taskId,expectedVersion:moved.version,lease:claim.lease,status:"review",patch:{taskId:"tamper"}}),/Invalid task patch/);
+    now+=11000;
+    const recovered=await b.claimTask({taskId:created.task.taskId,ownerId:"worker-recovery",leaseMs:10000});
+    assert.ok(recovered,"expired in_progress task can be reclaimed");
+    assert.equal(recovered.task.status,"claimed");
+    assert.equal(recovered.task.recoveredFromStatus,"in_progress");
+    assert.ok(recovered.lease.fencingToken>claim.lease.fencingToken,"task recovery increments fencing token");
+    await assert.rejects(a.transitionTask({taskId:created.task.taskId,expectedVersion:moved.version,lease:claim.lease,status:"review"}),/expired, stale, or not owned/);
+    const leaseAudit=await pool.query("SELECT event_type,payload FROM jarvis.events WHERE aggregate_type='coordination_lease' AND aggregate_id=$1 ORDER BY aggregate_version",[ "task:"+created.task.taskId ]);
+    assert.ok(leaseAudit.rows.some(x=>x.event_type==="lease_acquired"));
+    assert.ok(leaseAudit.rows.some(x=>x.event_type==="lease_reclaimed"));
     await assert.rejects(pool.query("UPDATE jarvis.events SET event_type='tampered' WHERE aggregate_type='task' AND aggregate_id=$1",[created.task.taskId]),/append-only/);
     await assert.rejects(pool.query("DELETE FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1",[created.task.taskId]),/append-only/);
     await assert.rejects(pool.query("TRUNCATE jarvis.events"),/append-only/);
@@ -63,9 +73,13 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     const releaseKey="integration-release:"+cryptoRandom();
     const released=await a.acquireLease({resourceKey:releaseKey,ownerId:"release-a",leaseMs:5000});
     assert.ok(released);
-    assert.equal(await a.releaseLease({lease:released}),true);
+    const renewed=await a.heartbeatLease({lease:released,leaseMs:10000});
+    assert.ok(Date.parse(renewed.expiresAt)>Date.parse(released.expiresAt),"heartbeat extends lease");
+    assert.equal(await a.releaseLease({lease:renewed}),true);
     const afterRelease=await b.acquireLease({resourceKey:releaseKey,ownerId:"release-b",leaseMs:5000});
     assert.ok(afterRelease.fencingToken>released.fencingToken,"release/reacquire must not reset fencing token");
+    const lifecycle=await pool.query("SELECT event_type FROM jarvis.events WHERE aggregate_type='coordination_lease' AND aggregate_id=$1 ORDER BY aggregate_version",[releaseKey]);
+    assert.deepEqual(lifecycle.rows.map(x=>x.event_type),["lease_acquired","lease_heartbeat","lease_released","lease_acquired"]);
 
     const staleRace=await Promise.allSettled([
       a.acquireLease({resourceKey:"integration-race:"+cryptoRandom(),ownerId:"race-a",leaseMs:5000}),
