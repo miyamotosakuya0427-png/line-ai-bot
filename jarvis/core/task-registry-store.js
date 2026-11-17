@@ -123,7 +123,8 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         if(existing.rows[0])return {task:clone(existing.rows[0].payload),created:false,version:1};
         await lock(c,"task-dependency-graph");
         await validateDependencies(c,id,task.dependencyTaskIds);
-        await append(c,id,"created",task,dedupeKey);
+        const scopedIdempotencyKey=hash(JSON.stringify([projectId,ownerAgent,ownerConversation,dedupeKey]));
+        await append(c,id,"created",task,scopedIdempotencyKey);
         return {task:clone(task),created:true,version:1};
       });
     },
