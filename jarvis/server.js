@@ -819,7 +819,7 @@ if (require.main===module) {
     if(!Number.isSafeInteger(binanceMaxNotionalYen)||binanceMaxNotionalYen<1||binanceMaxNotionalYen>1000000)throw new Error("JARVIS_BINANCE_MAX_ORDER_JPY must be an integer between 1 and 1000000.");
     const binanceOrderExecutor=binanceClient&&approvalStore?createBinanceJapanOrderExecutor({
       client:binanceClient,approvalStore,
-      enabled:process.env.JARVIS_BINANCE_LIVE_ORDERS_ENABLED==="true"&&process.env.JARVIS_BINANCE_RISK_GATE_ENABLED==="true"&&binanceClient.configured,
+      enabled:process.env.JARVIS_BINANCE_LIVE_ORDERS_ENABLED==="true"&&process.env.JARVIS_BINANCE_RISK_GATE_ENABLED==="true"&&process.env.JARVIS_BINANCE_VALIDATION_PASSED==="true"&&binanceClient.configured,
       ownerAuthReady:Buffer.byteLength(process.env.JARVIS_OWNER_TOKEN||"","utf8")>=32,
       maxNotionalYen:binanceMaxNotionalYen,
       authorizeRisk:async({notionalYen})=>{
