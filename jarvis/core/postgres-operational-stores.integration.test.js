@@ -45,6 +45,7 @@ test("real PostgreSQL multi-connection claims and approval integrity", {skip:!en
   } finally {
    try { await runtime.query("RESET ROLE"); } finally { runtime.release(); }
   }
+  assert.ok(Number(eventId)>0,"least-privilege runtime role must insert an event");
   await assert.rejects(pool.query("UPDATE jarvis.events SET event_type='tampered' WHERE event_id=$1",[eventId]),/append-only/);
   await assert.rejects(pool.query("DELETE FROM jarvis.events WHERE event_id=$1",[eventId]),/append-only/);
   await assert.rejects(pool.query("TRUNCATE jarvis.events"),/append-only/);
