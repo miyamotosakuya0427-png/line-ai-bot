@@ -103,8 +103,14 @@ dailyForm.addEventListener("submit",async(event)=>{event.preventDefault();if(!id
 </script></body></html>`;
 }
 
-function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||"",sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,approvalStore=null,videoBatchStore=null,paperTradingStore=null,influenceEventStore=null,worker=null,departmentHandlers=null,departmentContextLoader=null,commandPlanner=null,taskRegistry=null,authorizeTaskRegistry=null,taskRegistryRateLimiter=null,now=()=>new Date()}={}) {
+function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||"",sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,approvalStore=null,videoBatchStore=null,paperTradingStore=null,influenceEventStore=null,worker=null,departmentHandlers=null,departmentContextLoader=null,commandPlanner=null,taskRegistry=null,authorizeTaskRegistry=null,taskRegistryRateLimiter=null,schedulingRuntime=null,now=()=>new Date()}={}) {
   const taskRegistryApi=createTaskRegistryApi({registry:taskRegistry,authorize:authorizeTaskRegistry,json,readJson,rateLimiter:taskRegistryRateLimiter||undefined});
+  let schedulingRuntimeInit=null;
+  async function ensureSchedulingRuntime(){
+    if(!schedulingRuntime||!schedulingRuntime.agent||typeof schedulingRuntime.init!=="function")throw Object.assign(new Error("Scheduling runtime is not configured"),{statusCode:503});
+    if(!schedulingRuntimeInit)schedulingRuntimeInit=Promise.resolve().then(()=>schedulingRuntime.init()).catch(error=>{schedulingRuntimeInit=null;throw error;});
+    await schedulingRuntimeInit;
+  }
   async function callSheets(action, fields={}) {
     if (!sheetsUrl || !sheetsToken) { const e=new Error("Google Sheets integration is not configured"); e.statusCode=503; throw e; }
     const u=new URL(sheetsUrl);
@@ -122,6 +128,34 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
   return http.createServer(async(req,res)=>{
     try {
       const url=new URL(req.url,"http://localhost");
+      if (url.pathname.startsWith("/v1/reservations/")) {
+        if (!isAuthorized(req,ownerToken)) return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Unauthorized":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
+        if (req.method!=="POST") return json(res,405,{ok:false,error:"Method Not Allowed"},{Allow:"POST"});
+        if (!req.headers["content-type"]?.toLowerCase().startsWith("application/json")) return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+        const d=await readJson(req);
+        const operation=url.pathname.slice("/v1/reservations/".length);
+        try {
+          await ensureSchedulingRuntime();
+          if(operation==="propose"){
+            const result=await schedulingRuntime.agent.propose(d);
+            return json(res,201,{ok:true,...result});
+          }
+          if(operation==="confirm"){
+            if(typeof d.id!=="string"||!d.id.trim()||!d.approval||typeof d.approval!=="object"||Array.isArray(d.approval))return json(res,400,{ok:false,error:"A reservation ID and explicit approval are required"});
+            const result=await schedulingRuntime.agent.confirmReservation({id:d.id,approval:d.approval});
+            return json(res,200,{ok:true,...result});
+          }
+          if(operation==="reconcile"){
+            if(typeof d.id!=="string"||!d.id.trim())return json(res,400,{ok:false,error:"A reservation ID is required"});
+            const result=await schedulingRuntime.agent.reconcileReservation({id:d.id});
+            return json(res,200,{ok:true,...result});
+          }
+          return json(res,404,{ok:false,error:"Not Found"});
+        } catch(error) {
+          const rejected=Number.isInteger(error?.statusCode)&&error.statusCode>=400&&error.statusCode<500;
+          return json(res,rejected?error.statusCode:503,{ok:false,error:rejected?"Reservation operation rejected":"Reservation service unavailable"});
+        }
+      }
       if (await taskRegistryApi(req,res,url)) return;
       if (req.method==="GET" && url.pathname==="/") {
         res.writeHead(200,{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store","Content-Security-Policy":"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'","X-Frame-Options":"DENY"});
