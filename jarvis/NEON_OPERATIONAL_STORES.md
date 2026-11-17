@@ -56,3 +56,5 @@ The production runtime is not activated by this PR. No connection string is incl
 - Approval execution claims can now be finalized as `succeeded` or `failed`, or marked `expired` after the approved expiry time. These methods only update the append-only approval journal; they do not execute external operations.
 - The real PostgreSQL integration test is restricted to loopback PostgreSQL hosts and a disposable database name containing `test`. It refuses Neon or any remote database because the test resets its isolated `jarvis` schema.
 - The CI integration test remains skipped unless explicitly enabled with a disposable local test database. A green CI run without that configuration is not evidence of real PostgreSQL concurrency validation.
+
+- CI now provisions an ephemeral PostgreSQL 16 service container and enables the real multi-connection integration test against that disposable local database. The test refuses non-loopback hosts, so it cannot connect to Neon.
