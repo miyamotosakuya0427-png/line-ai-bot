@@ -100,7 +100,7 @@ async function inspectFile(filePath, kind) {
       report.validEvents++;
       const id=record.id;
       if(!firstSeen.has(id)) firstSeen.set(id,i+1);
-      else if((kind==="job" && record.status==="queued" && latest.get(id)?.status==="queued") ||
+      else if((kind==="job" && record.status==="queued" && record.attempts===0 && latest.get(id)?.status==="queued" && latest.get(id)?.attempts===0) ||
               (kind==="approval" && record.status==="pending" && latest.get(id)?.status==="pending")) {
         report.duplicateIds.push({id,firstLine:firstSeen.get(id),duplicateLine:i+1,detail:"Repeated initial snapshot for the same aggregate"});
       }
@@ -111,9 +111,9 @@ async function inspectFile(filePath, kind) {
         else if(idempotency.get(key).id!==id) report.duplicateIdempotencyKeys.push({key,firstId:idempotency.get(key).id,duplicateId:id,line:i+1});
       }
     }
-    report.records=[...latest.values()].sort((a,b)=>String(a.id).localeCompare(String(b.id)));
-    report.latestRecords=report.records.length;
-    report.canonicalLatestSha256=sha256(report.records.map(canonicalJson).join("\n"));
+    const latestRecords=[...latest.values()].sort((a,b)=>String(a.id).localeCompare(String(b.id)));
+    report.latestRecords=latestRecords.length;
+    report.canonicalLatestSha256=sha256(latestRecords.map(canonicalJson).join("\n"));
     if(kind==="job" && report.latestRecords>10000) issue(report.issues,0,"capacity_exceeded","Job store supports at most 10000 jobs");
     if(kind==="approval" && report.latestRecords>5000) issue(report.issues,0,"capacity_exceeded","Approval store supports at most 5000 approvals");
   } catch(error) {
