@@ -1,11 +1,12 @@
 "use strict";
 const crypto = require("node:crypto");
 
-function createWorker({ store, handlers = {}, maxAttempts = 3, leaseMs = 60000, heartbeatMs = 20000, workerId = crypto.randomUUID() } = {}) {
+function createWorker({ store, handlers = {}, maxAttempts = 3, leaseMs = 60000, heartbeatMs = 20000, workerId = crypto.randomUUID(), clock = () => new Date().toISOString(), retryBaseMs = 1000, retryMaxMs = 60000 } = {}) {
   if (!store || typeof store.list !== "function" || typeof store.transition !== "function") throw new Error("A compatible durable job store is required");
   if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 10) throw new Error("Invalid max attempts");
   if (!Number.isInteger(leaseMs) || leaseMs < 5000 || leaseMs > 3600000 || !Number.isInteger(heartbeatMs) || heartbeatMs < 1000 || heartbeatMs >= leaseMs) throw new Error("Invalid worker lease settings");
   if (typeof workerId !== "string" || !workerId.trim() || workerId.length > 128) throw new Error("Invalid worker id");
+  if (typeof clock !== "function" || !Number.isInteger(retryBaseMs) || retryBaseMs < 250 || retryBaseMs > 60000 || !Number.isInteger(retryMaxMs) || retryMaxMs < retryBaseMs || retryMaxMs > 3600000) throw new Error("Invalid retry configuration");
   const registry = new Map(Object.entries(handlers));
   for (const [type, handler] of registry) if (!/^[a-z][a-z0-9._-]{1,63}$/.test(type) || typeof handler !== "function") throw new Error("Invalid job handler registration");
   let active = Promise.resolve(), started = false, poller = null, polling = false;
@@ -14,7 +15,13 @@ function createWorker({ store, handlers = {}, maxAttempts = 3, leaseMs = 60000, 
     let recovered = 0;
     while (true) {
       const interrupted = await store.list({ status: "running", limit: 200 });
-      for (const job of interrupted) { await store.transition(job.id, "queued"); recovered += 1; }
+      for (const job of interrupted) {
+        await store.transition(job.id, "failed", {
+          error: "Worker interrupted; external outcome unknown; manual reconciliation required",
+          outcomeUnknown: true
+        });
+        recovered += 1;
+      }
       if (interrupted.length < 200) break;
     }
     return recovered;
@@ -27,9 +34,12 @@ function createWorker({ store, handlers = {}, maxAttempts = 3, leaseMs = 60000, 
       if (typeof store.claimNext === "function") {
         running = await store.claimNext({ workerId, leaseMs });
       } else {
+        const now = Date.parse(clock());
+        if (!Number.isFinite(now)) throw new Error("Worker clock returned an invalid timestamp");
         const queued = await store.list({ status: "queued", limit: 200 });
-        if (!queued.length) return { processed: false, job: null };
-        const candidate = queued.sort((a,b) => a.createdAt.localeCompare(b.createdAt))[0];
+        const eligible = queued.filter(job => !job.retryAt || Date.parse(job.retryAt) <= now);
+        if (!eligible.length) return queued.length ? { processed: false, job: null, waiting: true } : { processed: false, job: null };
+        const candidate = eligible.sort((a,b) => a.createdAt.localeCompare(b.createdAt))[0];
         running = await store.transition(candidate.id, "running");
       }
       if (!running) return { processed: false, job: null };
@@ -59,12 +69,19 @@ function createWorker({ store, handlers = {}, maxAttempts = 3, leaseMs = 60000, 
       } catch (error) {
         if (leaseLost) return { processed: true, job: null, leaseLost: true };
         const message = error && typeof error.message === "string" ? error.message : "Job failed";
-        if (error?.retryable === true && running.attempts < maxAttempts) {
-          const queued = await transition("queued");
-          return { processed: true, job: queued, retryScheduled: true };
+        if (error?.retryable === true && error?.retrySafe === true && running.attempts < maxAttempts) {
+          const delay = Math.min(retryMaxMs, retryBaseMs * (2 ** Math.max(0, running.attempts - 1)));
+          const now = Date.parse(clock());
+          if (!Number.isFinite(now)) throw new Error("Worker clock returned an invalid timestamp");
+          const retryAt = new Date(now + delay).toISOString();
+          const queued = await transition("queued", { retryAt, lastError: message.slice(0, 500) });
+          return { processed: true, job: queued, retryScheduled: true, retryAt, retryDelayMs: delay };
         }
-        const failed = await transition("failed", { error: message.slice(0, 500) });
-        return { processed: true, job: failed, retryScheduled: false };
+        const failed = await transition("failed", {
+          error: message.slice(0, 500),
+          outcomeUnknown: error?.outcomeUnknown === true || error?.retryable === true
+        });
+        return { processed: true, job: failed, retryScheduled: false, outcomeUnknown: Boolean(failed?.outcomeUnknown) };
       } finally { if (heartbeat) clearInterval(heartbeat); }
     });
     active = operation.catch(() => {});
