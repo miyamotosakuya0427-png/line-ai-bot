@@ -34,3 +34,12 @@ Transient SQLSTATEs (serialization failures, deadlocks, temporary connection fai
 4. Test against a separate Neon branch/database before any production migration.
 5. Define dual-write, reconciliation, cutover, and rollback before switching any runtime.
 6. Only after explicit approval, set `DATABASE_URL` on the dedicated ONE JARVIS Render service. Do not deploy automatically.
+
+
+## Migration 0003 — append-only event ledger
+
+The migration sequence is 0001 (schema and event table), 0002 (operational indexes), then 0003 (row UPDATE/DELETE and table TRUNCATE rejection triggers). Operational-store initialization applies 0002 before installing 0003 and records each version idempotently. The standalone SQL file is also exercised twice in the isolated PostgreSQL integration test.
+
+The integration test uses only an ephemeral PostgreSQL 16 service and a disposable database whose name includes `test`. It verifies INSERT and SELECT using a restricted runtime test role, checks that the role has no UPDATE/DELETE/TRUNCATE grants, and verifies that even the table owner is rejected by the row and statement triggers for UPDATE, DELETE, and TRUNCATE.
+
+The current application connection still performs initialization using the configured `DATABASE_URL`; production must not be considered hardened until migration ownership is separated from the runtime role, least-privilege grants are applied deliberately, and privileged DDL is monitored. A superuser or schema/table owner can alter or disable triggers. No live Neon database has been migrated by this change.
