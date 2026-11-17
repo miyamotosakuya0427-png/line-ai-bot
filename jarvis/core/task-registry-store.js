@@ -177,6 +177,36 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         return true;
       });
     },
+    async claimTaskForWorker({taskId,workerId,leaseMs=60000}={}){
+      await init();
+      if(typeof taskId!=="string"||!taskId.trim()||typeof workerId!=="string"||!workerId.trim())throw new Error("Task and Worker IDs are required");
+      return tx(async c=>{
+        // Lock order is task lease -> worker row -> task event. Keep this order
+        // consistent with the fenced writer to minimize deadlock risk.
+        const lease=await acquireInTx(c,{resourceKey:"task:"+taskId,ownerId:workerId,leaseMs});
+        if(!lease)return null;
+        const worker=await c.query("SELECT status,current_task_id FROM jarvis.worker_registry WHERE worker_id=$1 FOR UPDATE",[workerId]);
+        if(!worker.rows[0])throw new Error("Worker is not registered");
+        if(worker.rows[0].status!=="idle"||worker.rows[0].current_task_id)throw new Error("Worker is not idle");
+        const current=await latest(c,taskId);
+        if(!current)throw new Error("Task does not exist");
+        const now=clock();
+        const reclaimable=current.task.status==="claimed"||current.task.status==="in_progress";
+        if(current.task.status!=="ready"&&!reclaimable)throw new Error("Task is not claimable");
+        if(reclaimable){
+          const previousExpiry=Date.parse(current.task.leaseExpiresAt||"");
+          if(!Number.isFinite(previousExpiry)||previousExpiry>Date.parse(now))throw new Error("Task lease recovery requires an expired recorded lease");
+          await appendCoordinationEvent(c,lease.resourceKey,"lease_reclaimed",{resourceKey:lease.resourceKey,ownerId:workerId,previousOwnerId:current.task.leaseOwner||null,previousFencingToken:current.task.fencingToken,recoveredFromStatus:current.task.status,recoveredAt:now,fencingToken:lease.fencingToken});
+        }else if(!NEXT[current.task.status]?.has("claimed")){
+          throw new Error("Task is not claimable");
+        }
+        const next={...current.task,status:"claimed",ownerAgent:workerId,updatedAt:now,startedAt:current.task.startedAt||now,leaseOwner:lease.ownerId,leaseTokenHash:hash(lease.token),leaseExpiresAt:lease.expiresAt,fencingToken:lease.fencingToken,...(reclaimable?{recoveredFromStatus:current.task.status,recoveredAt:now}:{})};
+        await append(c,taskId,reclaimable?"lease_reclaimed":"claimed",next);
+        const bound=await c.query("UPDATE jarvis.worker_registry SET current_task_id=$1,lease_resource_key=$2,fencing_token=$3,status='running',heartbeat_at=$4,version=version+1,updated_at=$4 WHERE worker_id=$5 AND status='idle' AND current_task_id IS NULL RETURNING *",[taskId,lease.resourceKey,lease.fencingToken,now,workerId]);
+        if(bound.rowCount!==1)throw new Error("Atomic Worker binding failed");
+        return {task:clone(next),version:current.version+1,lease,worker:bound.rows[0]};
+      });
+    },
     async claimTask({taskId,ownerId,leaseMs=60000}={}){
       await init();
       return tx(async c=>{
