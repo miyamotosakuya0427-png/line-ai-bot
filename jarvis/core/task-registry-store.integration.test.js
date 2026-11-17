@@ -5,6 +5,7 @@ const fs=require("node:fs");
 const path=require("node:path");
 const {createTaskRegistry}=require("./task-registry-store");
 const {createServer}=require("../server");
+const {createDepartmentDispatcher,CANONICAL_IDS}=require("./department-registry");
 
 const databaseUrl=process.env.JARVIS_TASK_REGISTRY_TEST_DATABASE_URL;
 test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!databaseUrl}, async()=>{
@@ -30,6 +31,27 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     const a=createTaskRegistry({pool,clock});
     const b=createTaskRegistry({pool,clock});
     await a.init();
+
+    const departmentHandlers=Object.fromEntries(CANONICAL_IDS.map(id=>[id,async(payload,context)=>({
+      departmentId:id,acceptedInput:payload,workerId:context.workerId
+    })]));
+    const dispatchDepartment=createDepartmentDispatcher({registry:a,handlers:departmentHandlers,leaseMs:10000,heartbeatMs:1000});
+    for(const departmentId of CANONICAL_IDS){
+      const dispatched=await dispatchDepartment({
+        departmentId,title:"PostgreSQL department "+departmentId,
+        dedupeKey:"department-pg:"+departmentId+":"+cryptoRandom(),
+        projectId:"one-jarvis",ownerConversation:"pg-department-integration",
+        workerId:"department-worker-"+departmentId,payload:{probe:departmentId}
+      });
+      assert.equal(dispatched.status,"review",departmentId+" must reach owner review");
+      assert.equal(dispatched.task.status,"review",departmentId);
+      assert.equal(JSON.parse(dispatched.task.verificationSummary).departmentId,departmentId);
+      const audit=await pool.query(
+        "SELECT event_type FROM jarvis.events WHERE aggregate_type='coordination_lease' AND aggregate_id=$1 ORDER BY aggregate_version",
+        ["task:"+dispatched.task.taskId]
+      );
+      assert.deepEqual(audit.rows.map(row=>row.event_type),["lease_acquired","lease_released"],departmentId+" lease audit");
+    }
     const dedupe="integration:"+cryptoRandom();
     const created=await a.createTask({title:"Integration task",scope:"ephemeral postgres test",dedupeKey:dedupe,status:"ready"});
     const duplicate=await b.createTask({title:"duplicate should not replace original",dedupeKey:dedupe,status:"ready"});
