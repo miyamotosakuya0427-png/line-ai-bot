@@ -12,6 +12,8 @@ on:
       - "jarvis/core/task-registry-auth.js"
       - "jarvis/core/task-registry-auth.test.js"
       - "jarvis/server.js"
+      - "jarvis/dashboard.js"
+      - "jarvis/dashboard.test.js"
       - "jarvis/migrations/0004_task_registry.sql"
       - "jarvis/migrations/0005_task_registry_scoped_dedupe.sql"
       - "jarvis/migrations/0006_scheduling_reservation_store.sql"
