@@ -56,19 +56,18 @@ test("PostgreSQL 16 execution kernel fences stale workers at the resource write 
   assert.equal(recovery.recovered,true,"an expired lease permits Worker recovery");
   assert.equal(recovery.expiredTaskId,first.task.taskId);
   assert.equal((await kernel.getWorker(winnerId)).status,"recovering");
-  const second=await makeTask("two","worker-b");
-  const claimedB=await registry.claimTaskForWorker({taskId:second.task.taskId,workerId:loserId,leaseMs:60000});
+  const claimedB=await registry.claimTaskForWorker({taskId:first.task.taskId,workerId:loserId,leaseMs:60000});
   const resourceLeaseB=await registry.acquireLease({resourceKey:"resource:shared-doc",ownerId:loserId,leaseMs:60000});
   assert.ok(resourceLeaseB);
   assert.ok(resourceLeaseB.fencingToken>resourceLeaseA.fencingToken);
   await assert.rejects(kernel.writeResource({resourceId:"shared-doc",projectId:"one-jarvis",workerId:winnerId,taskId:first.task.taskId,taskLease:claimedA.lease,lease:resourceLeaseA,operationId:"op-stale",idempotencyKey:"idem-stale",operationScope:"resource.update",payload:{value:"stale"},expectedVersion:1}),/expired, stale, or not owned/);
-  const fresh=await kernel.writeResource({resourceId:"shared-doc",projectId:"one-jarvis",workerId:loserId,taskId:second.task.taskId,taskLease:claimedB.lease,lease:resourceLeaseB,operationId:"op-b1",idempotencyKey:"idem-b1",operationScope:"resource.update",payload:{value:2},expectedVersion:1});
+  const fresh=await kernel.writeResource({resourceId:"shared-doc",projectId:"one-jarvis",workerId:loserId,taskId:first.task.taskId,taskLease:claimedB.lease,lease:resourceLeaseB,operationId:"op-b1",idempotencyKey:"idem-b1",operationScope:"resource.update",payload:{value:2},expectedVersion:1});
   assert.equal(fresh.version,2);
   const stored=await pool.query("SELECT payload,version,fencing_token FROM jarvis.fenced_resources WHERE resource_id='shared-doc'");
   assert.deepEqual(stored.rows[0].payload,{value:2});
   assert.equal(Number(stored.rows[0].version),2);
   assert.equal(Number(stored.rows[0].fencing_token),resourceLeaseB.fencingToken);
-  await assert.rejects(kernel.writeResource({resourceId:"shared-doc",projectId:"one-jarvis",workerId:loserId,taskId:second.task.taskId,taskLease:claimedB.lease,lease:resourceLeaseB,operationId:"op-cross-scope",idempotencyKey:"idem-cross-scope",operationScope:"resource.delete",payload:{value:3},expectedVersion:2}),/Invalid or unauthorized/);
+  await assert.rejects(kernel.writeResource({resourceId:"shared-doc",projectId:"one-jarvis",workerId:loserId,taskId:first.task.taskId,taskLease:claimedB.lease,lease:resourceLeaseB,operationId:"op-cross-scope",idempotencyKey:"idem-cross-scope",operationScope:"resource.delete",payload:{value:3},expectedVersion:2}),/Invalid or unauthorized/);
   const ops=await pool.query("SELECT count(*)::int AS count FROM jarvis.fenced_operations WHERE resource_id='shared-doc'");
   assert.equal(ops.rows[0].count,2,"only committed writes are journaled");
  } finally {try{await pool.query("DROP SCHEMA IF EXISTS jarvis CASCADE");}finally{await pool.end();}}
