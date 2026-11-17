@@ -79,7 +79,7 @@ function createWorker({ store, handlers = {}, maxAttempts = 3, leaseMs = 60000, 
         }
         const failed = await transition("failed", {
           error: message.slice(0, 500),
-          outcomeUnknown: error?.outcomeUnknown === true || error?.retryable === true
+          outcomeUnknown: error?.outcomeUnknown === true || (error?.retryable === true && error?.retrySafe !== true)
         });
         return { processed: true, job: failed, retryScheduled: false, outcomeUnknown: Boolean(failed?.outcomeUnknown) };
       } finally { if (heartbeat) clearInterval(heartbeat); }
