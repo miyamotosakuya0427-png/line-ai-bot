@@ -22,6 +22,9 @@ const { createVideoBatchStore } = require("./core/video-batch-store");
 const { createVideoBatchContentHandler } = require("./core/video-batch-runner");
 const { createScriptMetrics } = require("./core/script-metrics");
 const { createPaperTradingStore } = require("./core/paper-trading-store");
+const { createBinanceJapanSpotClient } = require("./core/binance-japan-spot");
+const { createBinanceJapanOrderExecutor, ACTOR: BINANCE_EXECUTOR_ACTOR } = require("./core/binance-japan-executor");
+const { handleBinanceApi } = require("./core/binance-japan-api");
 const { createInfluenceEventStore } = require("./core/influence-event-store");
 const { createCommandCenter } = require("./core/command-center");
 const { createCommandPlanner } = require("./core/command-center-planner");
@@ -103,7 +106,7 @@ dailyForm.addEventListener("submit",async(event)=>{event.preventDefault();if(!id
 </script></body></html>`;
 }
 
-function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||"",sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,approvalStore=null,videoBatchStore=null,paperTradingStore=null,influenceEventStore=null,worker=null,departmentHandlers=null,departmentContextLoader=null,commandPlanner=null,taskRegistry=null,authorizeTaskRegistry=null,now=()=>new Date()}={}) {
+function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||"",sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,approvalStore=null,videoBatchStore=null,paperTradingStore=null,influenceEventStore=null,binanceClient=null,binanceOrderExecutor=null,binanceMaxNotionalYen=5000,worker=null,departmentHandlers=null,departmentContextLoader=null,commandPlanner=null,taskRegistry=null,authorizeTaskRegistry=null,now=()=>new Date()}={}) {
   const taskRegistryApi=createTaskRegistryApi({registry:taskRegistry,authorize:authorizeTaskRegistry,json,readJson});
   async function callSheets(action, fields={}) {
     if (!sheetsUrl || !sheetsToken) { const e=new Error("Google Sheets integration is not configured"); e.statusCode=503; throw e; }
@@ -574,6 +577,7 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         }
         return json(res,404,{ok:false,error:"Not Found"});
       }
+      if (await handleBinanceApi({req,res,url,client:binanceClient,executor:binanceOrderExecutor,approvalStore,token,ownerToken,json,readJson,isAuthorized,now,maxNotionalYen:binanceMaxNotionalYen})) return;
       if (url.pathname.startsWith("/v1/trading/")) {
         if (!isAuthorized(req,token)) return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         if (!paperTradingStore) return json(res,503,{ok:false,error:"Persistent paper-trading storage is not configured"});
@@ -788,12 +792,13 @@ if (require.main===module) {
       postgresPool=createNeonPool({connectionString:process.env.DATABASE_URL});
       const eventStore=createPostgresEventStore({pool:postgresPool});
       await eventStore.migrate();
-      const operational=createPostgresOperationalStores({pool:postgresPool});
+      const authorizeBinanceActor=actor=>actor===BINANCE_EXECUTOR_ACTOR&&process.env.JARVIS_BINANCE_LIVE_ORDERS_ENABLED==="true"&&Buffer.byteLength(process.env.JARVIS_OWNER_TOKEN||"","utf8")>=32;
+      const operational=createPostgresOperationalStores({pool:postgresPool,authorizeActor:authorizeBinanceActor});
       jobStore=operational.jobs;approvalStore=operational.approvals;
       await jobStore.init();await approvalStore.init();
     }else{
       jobStore=JOB_STORE_PATH?createJobStore({filePath:JOB_STORE_PATH}):null;
-      approvalStore=APPROVAL_STORE_PATH?createApprovalStore({filePath:APPROVAL_STORE_PATH}):null;
+      approvalStore=APPROVAL_STORE_PATH?createApprovalStore({filePath:APPROVAL_STORE_PATH,authorizeActor:actor=>actor===BINANCE_EXECUTOR_ACTOR&&process.env.JARVIS_BINANCE_LIVE_ORDERS_ENABLED==="true"&&Buffer.byteLength(process.env.JARVIS_OWNER_TOKEN||"","utf8")>=32}):null;
     }
     let taskRegistry=null,authorizeTaskRegistry=null;
     if(process.env.JARVIS_TASK_REGISTRY_API_ENABLED==="true"){
@@ -808,6 +813,27 @@ if (require.main===module) {
     const paperTradingStore=JOB_STORE_PATH?createPaperTradingStore({filePath:JOB_STORE_PATH+".paper-trading.jsonl"}):null;
     if(paperTradingStore)await paperTradingStore.init();
     const influenceEventStore=JOB_STORE_PATH?createInfluenceEventStore({filePath:JOB_STORE_PATH+".influence-events.jsonl"}):null;
+    const binanceEnabled=process.env.JARVIS_BINANCE_ENABLED==="true";
+    const binanceClient=binanceEnabled?createBinanceJapanSpotClient({apiKey:process.env.JARVIS_BINANCE_API_KEY||"",secret:process.env.JARVIS_BINANCE_API_SECRET||"",baseUrl:process.env.JARVIS_BINANCE_BASE_URL||"https://api.binance.com"}):null;
+    const binanceMaxNotionalYen=Number(process.env.JARVIS_BINANCE_MAX_ORDER_JPY||5000);
+    if(!Number.isSafeInteger(binanceMaxNotionalYen)||binanceMaxNotionalYen<1||binanceMaxNotionalYen>1000000)throw new Error("JARVIS_BINANCE_MAX_ORDER_JPY must be an integer between 1 and 1000000.");
+    const binanceOrderExecutor=binanceClient&&approvalStore?createBinanceJapanOrderExecutor({
+      client:binanceClient,approvalStore,
+      enabled:process.env.JARVIS_BINANCE_LIVE_ORDERS_ENABLED==="true"&&process.env.JARVIS_BINANCE_RISK_GATE_ENABLED==="true"&&process.env.JARVIS_BINANCE_VALIDATION_PASSED==="true"&&binanceClient.configured,
+      ownerAuthReady:Buffer.byteLength(process.env.JARVIS_OWNER_TOKEN||"","utf8")>=32,
+      maxNotionalYen:binanceMaxNotionalYen,
+      authorizeRisk:async({notionalYen,payload})=>{
+        if(process.env.JARVIS_BINANCE_RISK_GATE_ENABLED!=="true"||process.env.JARVIS_BINANCE_VALIDATION_PASSED!=="true")return{allowed:false,reason:"RISK_GATE_OR_VALIDATION_DISABLED"};
+        const [account,permissions]=await Promise.all([binanceClient.account(),binanceClient.apiRestrictions()]);
+        if(account.canTrade!==true||permissions.enableSpotAndMarginTrading!==true)return{allowed:false,reason:"SPOT_TRADING_PERMISSION_DISABLED"};
+        if(permissions.enableWithdrawals!==false||permissions.enableInternalTransfer!==false||permissions.permitsUniversalTransfer!==false||permissions.enableMargin!==false||permissions.enableFutures!==false||permissions.enableVanillaOptions!==false)return{allowed:false,reason:"API_KEY_HAS_UNSAFE_PERMISSIONS"};
+        const asset=payload.side==="BUY"?"JPY":payload.symbol.slice(0,-3);
+        const balance=(account.balances||[]).find(item=>item.asset===asset);
+        const free=Number(balance?.free||0);
+        const required=payload.side==="BUY"?notionalYen*1.01:Number(payload.quantity)*1.001;
+        return{allowed:Number.isFinite(free)&&free>=required,asset,available:free,required};
+      }
+    }):null;
     if(influenceEventStore)await influenceEventStore.init();
     if(videoBatchStore)await videoBatchStore.init();
     if(process.env.JARVIS_STORAGE_MODE!=="postgres"&&approvalStore)await approvalStore.init();
@@ -821,7 +847,7 @@ if (require.main===module) {
     const contentScheduler=worker&&process.env.JARVIS_CONTENT_AUTOPLAN_ENABLED==="true"?startDailyContentPlanner({store:jobStore}):null;
     const subsidyScheduler=worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"?startDailySubsidyMonitor({store:jobStore}):null;
     const commandPlanner=createCommandPlanner();
-    const server=createServer({jobStore,approvalStore,videoBatchStore,paperTradingStore,influenceEventStore,worker,departmentHandlers,departmentContextLoader,commandPlanner,taskRegistry,authorizeTaskRegistry}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
+    const server=createServer({jobStore,approvalStore,videoBatchStore,paperTradingStore,influenceEventStore,binanceClient,binanceOrderExecutor,binanceMaxNotionalYen,worker,departmentHandlers,departmentContextLoader,commandPlanner,taskRegistry,authorizeTaskRegistry}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
     const shutdown=signal=>{ console.log(`Received ${signal}; shutting down.`); if(subsidyScheduler)subsidyScheduler.stop(); if(contentScheduler)contentScheduler.stop(); if(worker)worker.stop(); server.close(async error=>{if(error){console.error("Graceful shutdown failed.");process.exit(1);}if(postgresPool){try{await postgresPool.end();}catch{console.error("Database pool shutdown failed.");}}process.exit(0);}); setTimeout(()=>process.exit(1),10000).unref(); };
     process.on("SIGTERM",()=>shutdown("SIGTERM")); process.on("SIGINT",()=>shutdown("SIGINT"));
     server.listen(PORT,"0.0.0.0",()=>console.log(`ONE JARVIS running on port ${PORT}`));

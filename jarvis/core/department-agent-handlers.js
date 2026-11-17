@@ -3,6 +3,7 @@
 const {DEPARTMENTS}=require("./department-agents");
 const {createOpenAIHandler}=require("./openai-handler");
 const {createSubsidyResearchHandler}=require("./subsidy-research-handler");
+const {FINANCE_TAX_SYSTEM_PROMPT}=require("./finance-tax-system-prompt");
 
 const INSTRUCTIONS=Object.freeze({
  jarvis:"あなたはONE JARVIS統括室の独立AIエージェントです。全部署の成果を統合し、優先順位・依存関係・リスク・未確認事項を整理してください。実行していない作業を完了と表現せず、外部操作は行わず、承認待ちとして明確にしてください。",
@@ -23,7 +24,7 @@ function createDepartmentHandlers(options={}) {
  const {researchFetchImpl=fetch,store=null,contextLoader=null,...openAIOptions}=options;
  const handlers={};
  for(const department of DEPARTMENTS) {
-  const instructions=INSTRUCTIONS[department.id];
+  const instructions=INSTRUCTIONS[department.id]+(["jarvis","management","tax","invest","trader"].includes(department.id)?"\n\n"+FINANCE_TAX_SYSTEM_PROMPT:"");
   if(!instructions) throw new Error("Missing department agent instructions: "+department.id);
   const baseHandler=createOpenAIHandler({...openAIOptions,instructions});
   handlers["department."+department.id]=async(payload,meta)=>{
