@@ -210,16 +210,11 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
       if(!Number.isInteger(leaseMs)||leaseMs<5000||leaseMs>3600000)throw new Error("Invalid lease duration");
       return tx(async c=>{
         await assertLease(c,lease);
-        const taskContext=await taskLeaseContext(c,lease);
         const now=clock(),expiresAt=new Date(Date.parse(now)+leaseMs).toISOString();
         const r=await c.query("UPDATE jarvis.coordination_leases SET expires_at=$1,updated_at=$2 WHERE resource_key=$3 AND owner_id=$4 AND token_hash=$5 AND fencing_token=$6 AND expires_at>$2::timestamptz RETURNING expires_at",[expiresAt,now,lease.resourceKey,lease.ownerId,hash(lease.token),lease.fencingToken]);
         if(!r.rows[0])throw new Error("Lease heartbeat rejected");
         const renewed={...lease,expiresAt:r.rows[0].expires_at};
         await appendCoordinationEvent(c,lease.resourceKey,"lease_heartbeat",{resourceKey:lease.resourceKey,ownerId:lease.ownerId,tokenHash:hash(lease.token),fencingToken:lease.fencingToken,expiresAt:renewed.expiresAt});
-        if(taskContext){
-          const next={...taskContext.current.task,leaseExpiresAt:renewed.expiresAt,updatedAt:now};
-          await append(c,taskContext.taskId,"lease_heartbeat",next);
-        }
         return renewed;
       });
     },
