@@ -50,3 +50,9 @@ The production runtime is not activated by this PR. No connection string is incl
 - An opt-in real PostgreSQL integration test is available only when both `JARVIS_TEST_DATABASE_URL` and `JARVIS_ALLOW_TEST_SCHEMA_RESET=yes` are explicitly set, and the database name includes `test`. It drops and recreates the `jarvis` schema in that isolated database. CI does not configure these variables, so real multi-connection PostgreSQL integration remains unrun.
 - Do not configure this test against Neon production or any database containing user data.
 - JSONL migration, checksum reconciliation, rollback, and live Neon validation remain separate follow-up work.
+
+
+## Approval execution lifecycle
+- Approval execution claims can now be finalized as `succeeded` or `failed`, or marked `expired` after the approved expiry time. These methods only update the append-only approval journal; they do not execute external operations.
+- The real PostgreSQL integration test is restricted to loopback PostgreSQL hosts and a disposable database name containing `test`. It refuses Neon or any remote database because the test resets its isolated `jarvis` schema.
+- The CI integration test remains skipped unless explicitly enabled with a disposable local test database. A green CI run without that configuration is not evidence of real PostgreSQL concurrency validation.
