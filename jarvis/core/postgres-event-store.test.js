@@ -45,6 +45,8 @@ test("migrates idempotently and does not expose database connection details", as
   assert.ok(pool.state.queries.some(x => x.sql.includes("BEFORE UPDATE OR DELETE ON jarvis.events")));
   assert.ok(pool.state.queries.some(x => x.sql.includes("BEFORE TRUNCATE ON jarvis.events")));
   assert.ok(pool.state.queries.some(x => x.sql.includes("0003_append_only_event_ledger")));
+  const functionSql = pool.state.queries.find(x => x.sql.includes("CREATE OR REPLACE FUNCTION jarvis.reject_event_mutation"))?.sql || "";
+  assert.ok(functionSql.includes("AS $") && functionSql.includes("END; $"), "trigger function must use valid PostgreSQL dollar quoting");
   assert.equal((await store.health()).ok, true);
 });
 
