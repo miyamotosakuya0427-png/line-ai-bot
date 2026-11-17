@@ -105,6 +105,7 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson}={}){
         if(!req.headers?.["content-type"]?.toLowerCase().startsWith("application/json"))return json(res,415,{ok:false,error:"Content-Type must be application/json"});
         const d=await readJson(req),agentId=auth.principal.agentId;
         if(!validLease(d.lease,taskId,agentId))return json(res,403,{ok:false,error:"Lease owner does not match authenticated agent"});
+        if(operation==="transition"&&(!Array.isArray(d.resourceLeases||[])||(d.resourceLeases||[]).some(lease=>!lease||lease.ownerId!==agentId||typeof lease.resourceKey!=="string"||! /^(branch|path|database|external):/.test(lease.resourceKey))))return json(res,403,{ok:false,error:"Resource lease owner does not match authenticated agent"});
         if(operation==="heartbeat"){
           const lease=await registry.heartbeatLease({lease:d.lease,leaseMs:d.leaseMs===undefined?60000:d.leaseMs});
           json(res,200,{ok:true,lease});return true;
@@ -114,7 +115,7 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson}={}){
           json(res,200,{ok:true,released});return true;
         }
         if(!Number.isSafeInteger(d.expectedVersion)||!TASK_STATES.has(d.status))return json(res,400,{ok:false,error:"Invalid task transition"});
-        const result=await registry.transitionTask({taskId,expectedVersion:d.expectedVersion,lease:d.lease,status:d.status,patch:d.patch||{}});
+        const result=await registry.transitionTask({taskId,expectedVersion:d.expectedVersion,lease:d.lease,status:d.status,patch:d.patch||{},resourceLeases:d.resourceLeases||[]});
         if(!result)return json(res,404,{ok:false,error:"Task not found"});
         json(res,200,{ok:true,...result});return true;
       }
