@@ -133,6 +133,25 @@ test("worker applies exponential backoff only to explicitly retry-safe transient
   } finally { await f.cleanup(); }
 });
 
+test("worker stops after maxAttempts even when a failure is retry-safe", async () => {
+  const f = await fixture();
+  try {
+    await f.store.create({ type: "task.exhausted", payload: {} });
+    const worker = createWorker({ store: f.store, maxAttempts: 1, handlers: { "task.exhausted": async () => {
+      const error = new Error("provider rejected before execution");
+      error.retryable = true;
+      error.retrySafe = true;
+      throw error;
+    } } });
+    await worker.start();
+    const result = await worker.runNext();
+    assert.equal(result.retryScheduled, false);
+    assert.equal(result.job.status, "failed");
+    assert.equal(result.job.outcomeUnknown, false);
+    assert.equal((await worker.runNext()).processed, false);
+  } finally { await f.cleanup(); }
+});
+
 test("worker does not retry an external operation when its outcome is not confirmed safe", async () => {
   const f = await fixture();
   try {
