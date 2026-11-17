@@ -5,9 +5,26 @@ const ACTIONS=Object.freeze({
   list:"tasks:read",get:"tasks:read",create:"tasks:write",claim:"tasks:claim",
   heartbeat:"tasks:lease",release:"tasks:lease",transition:"tasks:transition",resourceLease:"resources:lease"
 });
+function createInMemoryTaskRegistryRateLimiter({limit=120,windowMs=60000,clock=()=>Date.now()}={}){
+  if(!Number.isInteger(limit)||limit<1||limit>10000||!Number.isInteger(windowMs)||windowMs<1000||windowMs>3600000||typeof clock!=="function")throw new Error("Invalid Task Registry rate limit configuration");
+  const buckets=new Map();
+  return {async consume(agentId){
+    const now=clock();
+    if(!Number.isFinite(now))throw new Error("Rate limiter clock is invalid");
+    if(buckets.size>10000){
+      for(const [key,bucket] of buckets)if(bucket.startedAt+windowMs<=now)buckets.delete(key);
+    }
+    let bucket=buckets.get(agentId);
+    if(!bucket||bucket.startedAt+windowMs<=now){bucket={startedAt:now,count:0};buckets.set(agentId,bucket);}
+    if(bucket.count>=limit)return{allowed:false,retryAfter:Math.max(1,Math.ceil((bucket.startedAt+windowMs-now)/1000))};
+    bucket.count+=1;
+    return{allowed:true,retryAfter:0};
+  }};
+}
 
-function createTaskRegistryApi({registry=null,authorize=null,json,readJson}={}){
+function createTaskRegistryApi({registry=null,authorize=null,json,readJson,rateLimiter=createInMemoryTaskRegistryRateLimiter()}={}){
   if(typeof json!=="function"||typeof readJson!=="function")throw new Error("JSON response and request readers are required");
+  if(!rateLimiter||typeof rateLimiter.consume!=="function")throw new Error("A Task Registry rate limiter is required");
   async function principalFor(req,action,taskId){
     if(!registry||typeof authorize!=="function")return {error:"unavailable"};
     let principal;
@@ -18,12 +35,16 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson}={}){
     const resourcePrefixes=principal.resourcePrefixes===undefined?[]:principal.resourcePrefixes;
     if(!Array.isArray(projectIds)||projectIds.length<1||projectIds.length>50||projectIds.some(x=>typeof x!=="string"||!/^[A-Za-z0-9._:-]{1,128}$/.test(x))||new Set(projectIds).size!==projectIds.length)return {error:"forbidden"};
     if(!Array.isArray(resourcePrefixes)||resourcePrefixes.length>100||resourcePrefixes.some(x=>typeof x!=="string"||! /^(branch|path|database|migration|deployment|external|media|publication):[A-Za-z0-9._-]{1,128}:$/.test(x)))return {error:"forbidden"};
+    let quota;
+    try{quota=await rateLimiter.consume(principal.agentId);}catch{return {error:"unavailable"};}
+    if(!quota||quota.allowed!==true)return {error:"rate_limited",retryAfter:Number.isInteger(quota?.retryAfter)?Math.max(1,quota.retryAfter):60};
     return {principal:{...principal,projectIds,resourcePrefixes}};
   }
   function authResponse(res,result){
     if(result.error==="unavailable"){json(res,503,{ok:false,error:"Task Registry API is not configured"});return true;}
     if(result.error==="unauthorized"){json(res,401,{ok:false,error:"Unauthorized"},{"WWW-Authenticate":"Bearer"});return true;}
     if(result.error==="forbidden"){json(res,403,{ok:false,error:"Insufficient task registry scope"});return true;}
+    if(result.error==="rate_limited"){json(res,429,{ok:false,error:"Task Registry rate limit exceeded"},{"Retry-After":String(result.retryAfter)});return true;}
     return false;
   }
   function validLease(lease,taskId,agentId){
