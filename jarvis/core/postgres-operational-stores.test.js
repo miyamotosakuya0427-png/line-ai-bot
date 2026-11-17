@@ -105,6 +105,21 @@ test("PostgreSQL job claims are exclusive and expired leases require manual reco
  assert.equal(completed.status,"succeeded");assert.equal(completed.lease,undefined);
 });
 
+test("PostgreSQL job retryAt prevents early claims and becomes eligible at its deadline",async()=>{
+ let now="2026-11-17T00:00:00.000Z";
+ const {jobs}=createPostgresOperationalStores({pool:fakePool(),clock:()=>now});
+ const {job}=await jobs.create({type:"task.retry",payload:{}});
+ await jobs.transition(job.id,"running");
+ const retryAt="2026-11-17T00:00:05.000Z";
+ await jobs.transition(job.id,"queued",{retryAt,lastError:"provider confirmed no effect"});
+ assert.equal(await jobs.claimNext({workerId:"early",leaseMs:5000}),null);
+ now=retryAt;
+ const claimed=await jobs.claimNext({workerId:"on-time",leaseMs:5000});
+ assert.equal(claimed.id,job.id);
+ assert.equal(claimed.attempts,2);
+ assert.equal(claimed.retryAt,null);
+});
+
 test("PostgreSQL approvals bind immutable target, payload, expiry, and authorized one-time execution claim",async()=>{
  const pool=fakePool(),{approvals}=createPostgresOperationalStores({pool,clock:()=>"2026-11-17T00:00:00.000Z",authorizeActor:async actor=>actor==="owner-api"});
  const payload={videoId:"V205",destination:"youtube",operation:"publish"};
