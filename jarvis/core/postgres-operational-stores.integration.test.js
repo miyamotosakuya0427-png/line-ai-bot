@@ -20,6 +20,8 @@ test("real PostgreSQL multi-connection claims and approval integrity", {skip:!en
   await pool.query(await fs.readFile(path.join(root,"migrations/0001_neon_event_store.sql"),"utf8"));
   await pool.query(await fs.readFile(path.join(root,"migrations/0002_job_approval_stores.sql"),"utf8"));
   await pool.query(await fs.readFile(path.join(root,"migrations/0003_append_only_event_ledger.sql"),"utf8"));
+  const triggerCount=await pool.query("SELECT count(*)::int AS count FROM pg_trigger WHERE tgrelid='jarvis.events'::regclass AND NOT tgisinternal");
+  assert.equal(triggerCount.rows[0].count,2,"row mutation and truncate protection triggers must both exist");
 
   await pool.query("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='jarvis_runtime_test') THEN CREATE ROLE jarvis_runtime_test NOLOGIN; END IF; END $$");
   await pool.query("GRANT USAGE ON SCHEMA jarvis TO jarvis_runtime_test");
