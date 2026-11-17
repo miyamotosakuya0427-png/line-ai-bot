@@ -15,7 +15,7 @@ The default deployment is read-only. Live order execution is disabled unless all
 - The approval store has an execution authorizer for the internal `binance-japan-spot-executor` actor
 - A separate risk callback approves the order
 
-Use an API key with Spot read and Spot trading permissions only. Disable withdrawals and all transfer permissions in Binance. Use IP restrictions for the Render outbound IPs if the account/API configuration supports them. Never use a master key with wallet withdrawal permissions.
+Start with an API key that has read-only / USER_DATA access and no trade permission. If live trading is later approved, enable Spot trading only; keep withdrawals, transfers, margin, futures, and options disabled. Disable withdrawals and all transfer permissions in Binance. Use IP restrictions for the Render outbound IPs if the account/API configuration supports them. Never use a master key with wallet withdrawal permissions.
 
 ## Supported adapter operations
 
@@ -39,7 +39,7 @@ A live order is bound to a specific approval resource and immutable payload. The
 - `JARVIS_BINANCE_LIVE_ORDERS_ENABLED` — explicit live order kill switch (default false)
 - `JARVIS_BINANCE_RISK_GATE_ENABLED` — explicit asset-balance risk gate (default false)
 - `JARVIS_BINANCE_VALIDATION_PASSED` — explicit operator gate after testnet/demo and security validation (default false)
-- `JARVIS_OWNER_TOKEN` — separate owner-only token required for account, open-order, and order execution routes
+- `JARVIS_OWNER_TOKEN` — separate owner-only token required for account, open-order, trade-history, permission-audit, and order execution routes
 - `JARVIS_BINANCE_MAX_ORDER_JPY` — maximum notional per order (default 5000)
 
 Account balances, open orders, trade history, and API-key permission audits require the separate owner token. The live risk gate independently checks Binance API restrictions and rejects keys that permit withdrawals, transfers, margin, futures, or options. The risk callback checks the available JPY balance for buys and base-asset balance for sells. There is not yet a production-grade daily realized-loss ledger or exchange reconciliation monitor, so the validation flag must remain false until those controls and a full demo rehearsal are independently completed.
