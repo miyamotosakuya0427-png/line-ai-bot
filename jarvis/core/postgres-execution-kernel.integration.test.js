@@ -57,6 +57,8 @@ test("PostgreSQL 16 execution kernel fences stale workers at the resource write 
   const loserId=winnerId==="worker-a"?"worker-b":"worker-a";
   assert.equal((await kernel.getWorker(winnerId)).status,"running");
   assert.equal((await kernel.getWorker(loserId)).status,"idle");
+  const heartbeatProcesses=await Promise.all([0,1].map(()=>runWorkerProcess("heartbeat",winnerId,first.task.taskId,{JARVIS_EXECUTION_CHILD_HEARTBEAT_LEASE:JSON.stringify(claimedA.lease)})));
+  assert.equal(heartbeatProcesses.filter(x=>x.acquired).length,2,"independent processes may heartbeat the same active Worker Lease");
   // Force a failure after the Task Lease upsert but before Worker binding.
   // The transaction must roll back both the lease row and any Task event.
   const rollbackTask=await makeTask("rollback",loserId);
@@ -87,9 +89,10 @@ test("PostgreSQL 16 execution kernel fences stale workers at the resource write 
   const concurrentWrites=await Promise.all(Array.from({length:10},()=>runWorkerProcess("idempotency",winnerId,first.task.taskId,{JARVIS_EXECUTION_CHILD_WRITE_INPUT:JSON.stringify(concurrentWriteInput)})));
   assert.equal(concurrentWrites.filter(x=>x.replayed===false).length,1,"one process commits the idempotent operation");
   assert.equal(concurrentWrites.filter(x=>x.replayed===true).length,9,"the other nine processes receive the committed replay result");
+  await pool.query("UPDATE jarvis.worker_registry SET heartbeat_at=$1 WHERE worker_id=$2",["2020-01-01T00:00:00.000Z",winnerId]);
   const prematureRecovery=await kernel.recoverExpiredWorker({workerId:winnerId});
   assert.equal(prematureRecovery.recovered,false,"a live lease must never be recovered");
-  now+=6000;
+  now+=5000;
   const candidates=await kernel.listExpiredWorkers({limit:20});
   assert.ok(candidates.some(x=>x.worker_id===winnerId),"expired Worker must be discoverable by the recovery scanner");
   const recovery=await kernel.recoverExpiredWorker({workerId:winnerId});
