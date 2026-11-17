@@ -7,10 +7,10 @@ function hash(token){return crypto.createHash("sha256").update(token).digest("he
 test("agent authorization maps opaque bearer tokens to scoped principals without storing raw tokens",async()=>{
   const token="agent-token-".padEnd(48,"x");
   const authorize=createTaskRegistryAuthorizer({config:JSON.stringify({
-    "worker-a":{tokenHash:hash(token),conversationId:"conversation-a",scopes:["tasks:read","tasks:claim","tasks:lease"]}
+    "worker-a":{tokenHash:hash(token),conversationId:"conversation-a",scopes:["tasks:read","tasks:claim","tasks:lease"],projectIds:["one-jarvis","video"],resourcePrefixes:["branch:one-jarvis:","path:video:"]}
   })});
   const principal=await authorize({headers:{authorization:"Bearer "+token}});
-  assert.deepEqual(principal,{agentId:"worker-a",conversationId:"conversation-a",scopes:["tasks:read","tasks:claim","tasks:lease"]});
+  assert.deepEqual(principal,{agentId:"worker-a",conversationId:"conversation-a",scopes:["tasks:read","tasks:claim","tasks:lease"],projectIds:["one-jarvis","video"],resourcePrefixes:["branch:one-jarvis:","path:video:"]});
   assert.equal(JSON.stringify(principal).includes(token),false);
 });
 test("invalid, missing, or unknown tokens fail closed",async()=>{
@@ -30,4 +30,10 @@ test("invalid scopes, duplicate token hashes, and malformed configuration are re
 });
 test("agent authorization rejects malformed conversation identities",()=>{
   assert.throws(()=>createTaskRegistryAuthorizer({config:JSON.stringify({"worker-a":{tokenHash:hash("a".repeat(40)),conversationId:7,scopes:["tasks:read"]}})}),/conversation identity is invalid/);
+});
+
+test("resource lease capability requires explicit resource prefixes",()=>{
+  const token="z".repeat(40);
+  assert.throws(()=>createTaskRegistryAuthorizer({config:JSON.stringify({"worker-a":{tokenHash:hash(token),scopes:["resources:lease"]}})}),/requires explicit resource prefixes/);
+  assert.throws(()=>createTaskRegistryAuthorizer({config:JSON.stringify({"worker-a":{tokenHash:hash(token),scopes:["tasks:read"],resourcePrefixes:["path:other-project"]}})}),/resource scope is invalid/);
 });
