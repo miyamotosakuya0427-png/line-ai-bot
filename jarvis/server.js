@@ -25,6 +25,7 @@ const { createPaperTradingStore } = require("./core/paper-trading-store");
 const { createInfluenceEventStore } = require("./core/influence-event-store");
 const { createCommandCenter } = require("./core/command-center");
 const { createCommandPlanner } = require("./core/command-center-planner");
+const { createTaskRegistryApi } = require("./core/task-registry-api");
 const PORT = Number(process.env.PORT || 3000);
 const MAX_BODY_BYTES = 24 * 1024;
 const TOKEN = process.env.JARVIS_API_TOKEN || "";
@@ -102,7 +103,8 @@ dailyForm.addEventListener("submit",async(event)=>{event.preventDefault();if(!id
 </script></body></html>`;
 }
 
-function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||"",sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,approvalStore=null,videoBatchStore=null,paperTradingStore=null,influenceEventStore=null,worker=null,departmentHandlers=null,departmentContextLoader=null,commandPlanner=null,now=()=>new Date()}={}) {
+function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||"",sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,approvalStore=null,videoBatchStore=null,paperTradingStore=null,influenceEventStore=null,worker=null,departmentHandlers=null,departmentContextLoader=null,commandPlanner=null,taskRegistry=null,authorizeTaskRegistry=null,now=()=>new Date()}={}) {
+  const taskRegistryApi=createTaskRegistryApi({registry:taskRegistry,authorize:authorizeTaskRegistry,json,readJson});
   async function callSheets(action, fields={}) {
     if (!sheetsUrl || !sheetsToken) { const e=new Error("Google Sheets integration is not configured"); e.statusCode=503; throw e; }
     const u=new URL(sheetsUrl);
@@ -120,6 +122,7 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
   return http.createServer(async(req,res)=>{
     try {
       const url=new URL(req.url,"http://localhost");
+      if (await taskRegistryApi(req,res,url)) return;
       if (req.method==="GET" && url.pathname==="/") {
         res.writeHead(200,{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store","Content-Security-Policy":"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'","X-Frame-Options":"DENY"});
         return res.end(dashboardPage());
