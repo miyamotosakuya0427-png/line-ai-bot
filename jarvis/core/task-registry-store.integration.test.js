@@ -3,11 +3,14 @@ const test=require("node:test");
 const assert=require("node:assert/strict");
 const fs=require("node:fs");
 const path=require("node:path");
-const {Pool}=require("pg");
 const {createTaskRegistry}=require("./task-registry-store");
 
 const databaseUrl=process.env.JARVIS_TASK_REGISTRY_TEST_DATABASE_URL;
 test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!databaseUrl}, async()=>{
+  // Load the optional PostgreSQL driver only when the isolated integration
+  // database is configured. The repository-wide unit suite discovers this
+  // file too, but intentionally does not install the jarvis workspace deps.
+  const {Pool}=require("pg");
   const pool=new Pool({connectionString:databaseUrl,max:8});
   let now=Date.now();
   const clock=()=>new Date(now).toISOString();
