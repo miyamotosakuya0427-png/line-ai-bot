@@ -82,10 +82,10 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
     async init(){return init();},
     async createTask(input={}){
       await init();
-      const {title,scope="",dedupeKey,projectId="one-jarvis",ownerConversation="unassigned",ownerAgent="unassigned",priority="P2",status="proposed",dependencyTaskIds=[]}=input;
-      if(!text(title,MAX_TITLE)||!text(scope,MAX_SCOPE,false)||!text(dedupeKey,MAX_DEDUPE)||!text(projectId,128)||!text(ownerConversation,MAX_OWNER)||!text(ownerAgent,MAX_OWNER)||!["P0","P1","P2","P3"].includes(priority)||!TASK_STATES.has(status)||!Array.isArray(dependencyTaskIds)||dependencyTaskIds.length>100||dependencyTaskIds.some(x=>!text(x,80)))throw new Error("Invalid task input");
+      const {title,scope="",acceptanceCriteria=[],dedupeKey,projectId="one-jarvis",ownerConversation="unassigned",ownerAgent="unassigned",priority="P2",status="proposed",dependencyTaskIds=[]}=input;
+      if(!text(title,MAX_TITLE)||!text(scope,MAX_SCOPE,false)||!text(dedupeKey,MAX_DEDUPE)||!text(projectId,128)||!text(ownerConversation,MAX_OWNER)||!text(ownerAgent,MAX_OWNER)||!["P0","P1","P2","P3"].includes(priority)||!TASK_STATES.has(status)||!Array.isArray(acceptanceCriteria)||acceptanceCriteria.length>100||acceptanceCriteria.some(x=>!text(x,1000))||!Array.isArray(dependencyTaskIds)||dependencyTaskIds.length>100||dependencyTaskIds.some(x=>!text(x,80)))throw new Error("Invalid task input");
       const id=crypto.randomUUID(),now=clock();
-      const task={taskId:id,dedupeKey,projectId,title,scope,ownerConversation,ownerAgent,priority,status,dependencyTaskIds:[...new Set(dependencyTaskIds)],branch:null,baseBranch:null,headSha:null,pullRequest:null,createdAt:now,updatedAt:now,startedAt:null,completedAt:null,changedPaths:[],testRunIds:[],verificationSummary:null,blockerIds:[],nextAction:null};
+      const task={taskId:id,dedupeKey,projectId,title,scope,acceptanceCriteria:[...acceptanceCriteria],ownerConversation,ownerAgent,priority,status,dependencyTaskIds:[...new Set(dependencyTaskIds)],branch:null,baseBranch:null,headSha:null,pullRequest:null,createdAt:now,updatedAt:now,startedAt:null,completedAt:null,leaseOwner:null,leaseTokenHash:null,leaseExpiresAt:null,fencingToken:0,changedPaths:[],testRunIds:[],verificationSummary:null,blockerIds:[],nextAction:null};
       return tx(async c=>{
         await lock(c,"task-dedupe:"+dedupeKey);
         const existing=await c.query("SELECT aggregate_id,payload FROM jarvis.events WHERE aggregate_type='task' AND event_type='created' AND payload->>'dedupeKey'=$1 LIMIT 1",[dedupeKey]);
@@ -137,7 +137,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         if(!lease)return null;
         const current=await latest(c,taskId);
         if(!current||!NEXT[current.task.status]?.has("claimed"))throw new Error("Task is not claimable");
-        const next={...current.task,status:"claimed",ownerAgent:ownerId,updatedAt:clock(),startedAt:current.task.startedAt||clock(),fencingToken:lease.fencingToken};
+        const next={...current.task,status:"claimed",ownerAgent:ownerId,updatedAt:clock(),startedAt:current.task.startedAt||clock(),leaseOwner:lease.ownerId,leaseTokenHash:hash(lease.token),leaseExpiresAt:lease.expiresAt,fencingToken:lease.fencingToken};
         await append(c,taskId,"claimed",next);
         return {task:clone(next),version:current.version+1,lease};
       });
