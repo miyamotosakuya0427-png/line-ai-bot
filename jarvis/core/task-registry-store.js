@@ -127,19 +127,24 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         return {task:clone(task),created:true,version:1};
       });
     },
-    async getTask(taskId){
+    async getTask(taskId,{ownerAgent=null,ownerConversation=null,projectId=null}={}){
       await init();
       const r=await pool.query("SELECT aggregate_version,payload FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1 ORDER BY aggregate_version DESC LIMIT 1",[taskId]);
-      return r.rows[0]?{task:clone(r.rows[0].payload),version:Number(r.rows[0].aggregate_version)}:null;
+      if(!r.rows[0])return null;
+      const task=r.rows[0].payload;
+      if(ownerAgent!==null&&task.ownerAgent!==ownerAgent)return null;
+      if(ownerConversation!==null&&task.ownerConversation!==ownerConversation)return null;
+      if(projectId!==null&&task.projectId!==projectId)return null;
+      return {task:clone(task),version:Number(r.rows[0].aggregate_version)};
     },
-    async listTasks({status=null,limit=50,offset=0}={}){
+    async listTasks({status=null,limit=50,offset=0,ownerAgent=null,ownerConversation=null,projectId=null}={}){
       await init();
       if(status!==null&&!TASK_STATES.has(status))throw new Error("Invalid task status");
       if(!Number.isInteger(limit)||limit<1||limit>200)throw new Error("Invalid task limit");
       if(!Number.isInteger(offset)||offset<0||offset>1000000)throw new Error("Invalid task offset");
       const r=await pool.query(
-        "SELECT aggregate_id,aggregate_version,payload FROM (SELECT DISTINCT ON (aggregate_id) aggregate_id,aggregate_version,payload FROM jarvis.events WHERE aggregate_type='task' ORDER BY aggregate_id,aggregate_version DESC) latest WHERE ($1::text IS NULL OR payload->>'status'=$1) ORDER BY payload->>'updatedAt' DESC,aggregate_id ASC LIMIT $2 OFFSET $3",
-        [status,limit,offset]
+        "SELECT aggregate_id,aggregate_version,payload FROM (SELECT DISTINCT ON (aggregate_id) aggregate_id,aggregate_version,payload FROM jarvis.events WHERE aggregate_type='task' ORDER BY aggregate_id,aggregate_version DESC) latest WHERE ($1::text IS NULL OR payload->>'status'=$1) AND ($2::text IS NULL OR payload->>'ownerAgent'=$2) AND ($3::text IS NULL OR payload->>'ownerConversation'=$3) AND ($4::text IS NULL OR payload->>'projectId'=$4) ORDER BY payload->>'updatedAt' DESC,aggregate_id ASC LIMIT $5 OFFSET $6",
+        [status,ownerAgent,ownerConversation,projectId,limit,offset]
       );
       return r.rows.map(x=>({task:clone(x.payload),version:Number(x.aggregate_version)}));
     },
