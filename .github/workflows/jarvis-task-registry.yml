@@ -9,6 +9,7 @@ on:
   push:
     branches:
       - "coordination/one-jarvis-task-registry-v1"
+      - "fix/one-jarvis-task-*"
     paths:
       - "jarvis/core/task-registry-store.js"
       - "jarvis/core/task-registry-store*.test.js"
