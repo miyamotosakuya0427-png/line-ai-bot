@@ -51,6 +51,34 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
     await c.query("INSERT INTO jarvis.events(aggregate_type,aggregate_id,aggregate_version,event_type,payload,created_at) VALUES('coordination_lease',$1,$2,$3,$4::jsonb,$5)",[resourceKey,version,eventType,JSON.stringify(payload),clock()]);
     return version;
   }
+  async function validateDependencies(c,taskId,dependencyTaskIds){
+    const dependencies=[...new Set(dependencyTaskIds||[])];
+    if(dependencies.length!==(dependencyTaskIds||[]).length||dependencies.includes(taskId))throw new Error("Invalid task dependencies");
+    const r=await c.query("SELECT DISTINCT ON (aggregate_id) aggregate_id,payload FROM jarvis.events WHERE aggregate_type='task' ORDER BY aggregate_id,aggregate_version DESC");
+    const graph=new Map(r.rows.map(row=>[row.aggregate_id,row.payload.dependencyTaskIds||[]]));
+    graph.set(taskId,dependencies);
+    const visited=new Set(),visiting=new Set();
+    function visit(id){
+      if(id===taskId&&visiting.size)throw new Error("Task dependency cycle detected");
+      if(visiting.has(id))throw new Error("Task dependency cycle detected");
+      if(visited.has(id))return;
+      if(!graph.has(id))throw new Error("Dependency task does not exist");
+      visiting.add(id);
+      for(const dependencyId of graph.get(id)||[])visit(dependencyId);
+      visiting.delete(id);visited.add(id);
+    }
+    for(const dependencyId of dependencies)visit(dependencyId);
+  }
+  async function assertDependenciesCompleted(c,task){
+    const ids=task.dependencyTaskIds||[];
+    if(!ids.length)return;
+    const r=await c.query(
+      "SELECT DISTINCT ON (aggregate_id) aggregate_id,payload->>'status' AS status FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=ANY($1::text[]) ORDER BY aggregate_id,aggregate_version DESC",
+      [ids]
+    );
+    const states=new Map(r.rows.map(row=>[row.aggregate_id,row.status]));
+    if(ids.some(id=>states.get(id)!=="completed"))throw new Error("Task dependencies are not completed");
+  }
   function validateLeaseInput({resourceKey,ownerId,leaseMs}){
     if(!text(resourceKey,240)||!text(ownerId,MAX_OWNER)||!Number.isInteger(leaseMs)||leaseMs<5000||leaseMs>3600000)throw new Error("Invalid lease request");
   }
@@ -83,6 +111,10 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
     if(!current)return null;
     if(current.version!==expectedVersion)throw new Error("Stale task version");
     if(!NEXT[current.task.status]?.has(status))throw new Error("Invalid task state transition");
+    if(Object.prototype.hasOwnProperty.call(patch,"dependencyTaskIds")){
+      await lock(c,"task-dependency-graph");
+      await validateDependencies(c,taskId,patch.dependencyTaskIds);
+    }
     const next={...current.task,...clone(patch),status,updatedAt:clock(),fencingToken:lease.fencingToken};
     await append(c,taskId,"status_changed",next);
     return {task:clone(next),version:current.version+1};
@@ -99,6 +131,8 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         await lock(c,"task-dedupe:"+dedupeKey);
         const existing=await c.query("SELECT aggregate_id,payload FROM jarvis.events WHERE aggregate_type='task' AND event_type='created' AND payload->>'dedupeKey'=$1 LIMIT 1",[dedupeKey]);
         if(existing.rows[0])return {task:clone(existing.rows[0].payload),created:false,version:1};
+        await lock(c,"task-dependency-graph");
+        await validateDependencies(c,id,task.dependencyTaskIds);
         await append(c,id,"created",task,dedupeKey);
         return {task:clone(task),created:true,version:1};
       });
@@ -108,12 +142,16 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
       const r=await pool.query("SELECT aggregate_version,payload FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1 ORDER BY aggregate_version DESC LIMIT 1",[taskId]);
       return r.rows[0]?{task:clone(r.rows[0].payload),version:Number(r.rows[0].aggregate_version)}:null;
     },
-    async listTasks({status=null,limit=50}={}){
+    async listTasks({status=null,limit=50,offset=0}={}){
       await init();
       if(status!==null&&!TASK_STATES.has(status))throw new Error("Invalid task status");
       if(!Number.isInteger(limit)||limit<1||limit>200)throw new Error("Invalid task limit");
-      const r=await pool.query("SELECT DISTINCT ON (aggregate_id) aggregate_id,aggregate_version,payload FROM jarvis.events WHERE aggregate_type='task' ORDER BY aggregate_id,aggregate_version DESC");
-      return r.rows.filter(x=>status===null||x.payload.status===status).slice(0,limit).map(x=>({task:clone(x.payload),version:Number(x.aggregate_version)}));
+      if(!Number.isInteger(offset)||offset<0||offset>1000000)throw new Error("Invalid task offset");
+      const r=await pool.query(
+        "SELECT aggregate_id,aggregate_version,payload FROM (SELECT DISTINCT ON (aggregate_id) aggregate_id,aggregate_version,payload FROM jarvis.events WHERE aggregate_type='task' ORDER BY aggregate_id,aggregate_version DESC) latest WHERE ($1::text IS NULL OR payload->>'status'=$1) ORDER BY payload->>'updatedAt' DESC,aggregate_id ASC LIMIT $2 OFFSET $3",
+        [status,limit,offset]
+      );
+      return r.rows.map(x=>({task:clone(x.payload),version:Number(x.aggregate_version)}));
     },
     async acquireLease(input={}){
       await init();
@@ -150,6 +188,8 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         if(!lease)return null;
         const current=await latest(c,taskId);
         if(!current)throw new Error("Task does not exist");
+        await lock(c,"task-dependency-graph");
+        await assertDependenciesCompleted(c,current.task);
         const now=clock();
         const reclaimable=current.task.status==="claimed"||current.task.status==="in_progress";
         if(current.task.status!=="ready"&&!reclaimable)throw new Error("Task is not claimable");

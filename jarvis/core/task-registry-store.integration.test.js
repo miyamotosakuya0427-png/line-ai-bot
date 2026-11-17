@@ -32,6 +32,44 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     assert.equal(duplicate.created,false);
     assert.equal(duplicate.task.taskId,created.task.taskId);
 
+    await assert.rejects(
+      a.createTask({title:"Missing dependency",dedupeKey:"missing-dependency:"+cryptoRandom(),dependencyTaskIds:["missing-task-id"]}),
+      /Dependency task does not exist/
+    );
+    const root=await a.createTask({title:"Dependency root",dedupeKey:"dependency-root:"+cryptoRandom(),status:"ready"});
+    const child=await b.createTask({title:"Dependency child",dedupeKey:"dependency-child:"+cryptoRandom(),status:"ready",dependencyTaskIds:[root.task.taskId]});
+    assert.deepEqual(child.task.dependencyTaskIds,[root.task.taskId]);
+    const rootLease=await a.acquireLease({resourceKey:"task:"+root.task.taskId,ownerId:"dependency-check",leaseMs:10000});
+    await assert.rejects(
+      a.transitionTask({taskId:root.task.taskId,expectedVersion:root.version,lease:rootLease,status:"blocked",patch:{dependencyTaskIds:[child.task.taskId]}}),
+      /Task dependency cycle detected/
+    );
+    assert.equal(await a.releaseLease({lease:rootLease}),true);
+
+    await assert.rejects(
+      a.claimTask({taskId:child.task.taskId,ownerId:"dependency-worker",leaseMs:10000}),
+      /Task dependencies are not completed/
+    );
+    const completionLease=await a.acquireLease({resourceKey:"task:"+root.task.taskId,ownerId:"dependency-completer",leaseMs:60000});
+    let rootVersion=root.version;
+    for(const status of ["claimed","in_progress","review","verified","completed"]){
+      const moved=await a.transitionTask({taskId:root.task.taskId,expectedVersion:rootVersion,lease:completionLease,status});
+      assert.ok(moved);
+      rootVersion=moved.version;
+    }
+    const eligibleChild=await b.claimTask({taskId:child.task.taskId,ownerId:"dependency-worker",leaseMs:10000});
+    assert.ok(eligibleChild,"dependency task becomes claimable after its prerequisite completes");
+    assert.equal(eligibleChild.task.status,"claimed");
+    assert.equal(await b.releaseLease({lease:eligibleChild.lease}),true);
+    assert.equal(await a.releaseLease({lease:completionLease}),true);
+
+    await b.createTask({title:"Pagination fixture task",dedupeKey:"pagination:"+cryptoRandom(),status:"ready"});
+    const firstPage=await a.listTasks({status:"ready",limit:1,offset:0});
+    const secondPage=await b.listTasks({status:"ready",limit:1,offset:1});
+    assert.equal(firstPage.length,1);
+    assert.equal(secondPage.length,1);
+    assert.notEqual(firstPage[0].task.taskId,secondPage[0].task.taskId,"SQL pagination must return distinct pages");
+
     const resourceKey="integration-resource:"+cryptoRandom();
     const claims=await Promise.all([
       a.acquireLease({resourceKey,ownerId:"worker-a",leaseMs:5000}),
