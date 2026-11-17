@@ -29,6 +29,12 @@ function createPostgresOperationalStores({pool,clock=()=>new Date().toISOString(
     await client.query("CREATE INDEX IF NOT EXISTS events_approval_idempotency_lookup ON jarvis.events ((payload->>'idempotencyKey'), event_id DESC) WHERE aggregate_type='approval' AND payload ? 'idempotencyKey'");
     await client.query("CREATE INDEX IF NOT EXISTS events_operational_latest ON jarvis.events (aggregate_type, aggregate_id, aggregate_version DESC) WHERE aggregate_type IN ('job','approval')");
     await client.query("INSERT INTO jarvis.schema_migrations(version) VALUES ('0002_job_approval_stores') ON CONFLICT (version) DO NOTHING");
+    await client.query("CREATE OR REPLACE FUNCTION jarvis.reject_event_mutation() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'jarvis.events is append-only' USING ERRCODE = '55000'; END; $$");
+    await client.query("DROP TRIGGER IF EXISTS jarvis_events_append_only_row ON jarvis.events");
+    await client.query("CREATE TRIGGER jarvis_events_append_only_row BEFORE UPDATE OR DELETE ON jarvis.events FOR EACH ROW EXECUTE FUNCTION jarvis.reject_event_mutation()");
+    await client.query("DROP TRIGGER IF EXISTS jarvis_events_append_only_truncate ON jarvis.events");
+    await client.query("CREATE TRIGGER jarvis_events_append_only_truncate BEFORE TRUNCATE ON jarvis.events FOR EACH STATEMENT EXECUTE FUNCTION jarvis.reject_event_mutation()");
+    await client.query("INSERT INTO jarvis.schema_migrations(version) VALUES ('0003_append_only_event_ledger') ON CONFLICT (version) DO NOTHING");
     await client.query("COMMIT");
     return{ok:true};
    }catch(e){try{await client.query("ROLLBACK");}catch{}throw e;}finally{client.release();}

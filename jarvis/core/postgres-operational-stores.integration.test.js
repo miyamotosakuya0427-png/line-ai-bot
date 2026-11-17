@@ -20,6 +20,38 @@ test("real PostgreSQL multi-connection claims and approval integrity", {skip:!en
   const root=path.join(__dirname,"..");
   await pool.query(await fs.readFile(path.join(root,"migrations/0001_neon_event_store.sql"),"utf8"));
   await pool.query(await fs.readFile(path.join(root,"migrations/0002_job_approval_stores.sql"),"utf8"));
+  await pool.query(await fs.readFile(path.join(root,"migrations/0003_append_only_event_ledger.sql"),"utf8"));
+  await pool.query(await fs.readFile(path.join(root,"migrations/0003_append_only_event_ledger.sql"),"utf8"));
+  const triggerCount=await pool.query("SELECT count(*)::int AS count FROM pg_trigger WHERE tgrelid='jarvis.events'::regclass AND NOT tgisinternal");
+  assert.equal(triggerCount.rows[0].count,2,"row mutation and truncate protection triggers must both exist");
+
+  await pool.query("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='jarvis_runtime_test') THEN CREATE ROLE jarvis_runtime_test NOLOGIN; END IF; END $$");
+  await pool.query("GRANT USAGE ON SCHEMA jarvis TO jarvis_runtime_test");
+  await pool.query("GRANT SELECT, INSERT ON jarvis.events TO jarvis_runtime_test");
+  await pool.query("GRANT USAGE, SELECT ON SEQUENCE jarvis.events_event_id_seq TO jarvis_runtime_test");
+  const runtime=await pool.connect();
+  let eventId;
+  try {
+   await runtime.query("SET ROLE jarvis_runtime_test");
+   const privileges=await runtime.query("SELECT current_user, has_table_privilege(current_user,'jarvis.events','SELECT') AS can_select, has_table_privilege(current_user,'jarvis.events','INSERT') AS can_insert, has_table_privilege(current_user,'jarvis.events','UPDATE') AS can_update, has_table_privilege(current_user,'jarvis.events','DELETE') AS can_delete, has_table_privilege(current_user,'jarvis.events','TRUNCATE') AS can_truncate");
+   assert.equal(privileges.rows[0].current_user,"jarvis_runtime_test");
+   assert.equal(privileges.rows[0].can_select,true);
+   assert.equal(privileges.rows[0].can_insert,true);
+   assert.equal(privileges.rows[0].can_update,false);
+   assert.equal(privileges.rows[0].can_delete,false);
+   assert.equal(privileges.rows[0].can_truncate,false);
+   const inserted=await runtime.query("INSERT INTO jarvis.events(aggregate_type,aggregate_id,aggregate_version,event_type,payload) VALUES('integration','ledger-check',1,'created',$1::jsonb) RETURNING event_id",['{"ok":true}']);
+   eventId=inserted.rows[0].event_id;
+   const selected=await runtime.query("SELECT payload FROM jarvis.events WHERE event_id=$1",[eventId]);
+   assert.deepEqual(selected.rows[0].payload,{ok:true});
+  } finally {
+   try { await runtime.query("RESET ROLE"); } finally { runtime.release(); }
+  }
+  assert.ok(Number(eventId)>0,"least-privilege runtime role must insert an event");
+  await assert.rejects(pool.query("UPDATE jarvis.events SET event_type='tampered' WHERE event_id=$1",[eventId]),/append-only/);
+  await assert.rejects(pool.query("DELETE FROM jarvis.events WHERE event_id=$1",[eventId]),/append-only/);
+  await assert.rejects(pool.query("TRUNCATE jarvis.events"),/append-only/);
+
   let now="2026-11-17T00:00:00.000Z";
   const stores=createPostgresOperationalStores({pool,clock:()=>now,authorizeActor:async actor=>actor==="integration-owner"});
   const {jobs,approvals}=stores;

@@ -4,8 +4,9 @@ const assert=require("node:assert/strict");
 const {createPostgresOperationalStores}=require("./postgres-operational-stores");
 
 function fakePool(){
- const state={events:[],released:0,rowLocks:new Set()};
+ const state={events:[],released:0,rowLocks:new Set(),queries:[]};
  async function query(sql,p=[]){
+  state.queries.push(sql);
   if(sql==="COMMIT"||sql==="ROLLBACK"){state.rowLocks.clear();return{rows:[]};}
   if(sql.includes("FOR UPDATE SKIP LOCKED")){const now=Date.parse(p[0]);const latest=new Map();for(const e of state.events.filter(x=>x.aggregate_type==="job")){const old=latest.get(e.aggregate_id);if(!old||old.aggregate_version<e.aggregate_version)latest.set(e.aggregate_id,e);}const candidate=[...latest.values()].filter(e=>(e.payload.status==="queued"||(e.payload.status==="running"&&Date.parse(e.payload.lease?.expiresAt||0)<=now))&&!state.rowLocks.has(e.aggregate_id)).sort((a,b)=>a.payload.createdAt.localeCompare(b.payload.createdAt))[0];if(!candidate)return{rows:[]};state.rowLocks.add(candidate.aggregate_id);return{rows:[{aggregate_id:candidate.aggregate_id,payload:candidate.payload}]};}
   if(sql.includes("COALESCE(MAX(aggregate_version)")){const a=state.events.filter(x=>x.aggregate_type===p[0]&&x.aggregate_id===p[1]);return{rows:[{v:a.reduce((n,x)=>Math.max(n,x.aggregate_version),0)}]};}
@@ -21,6 +22,18 @@ function fakePool(){
  }
  return{state,async connect(){return{query,release(){state.released++;}}},query,async end(){}};
 }
+
+test("operational store init installs append-only migration after operational indexes",async()=>{
+ const pool=fakePool(),{jobs}=createPostgresOperationalStores({pool});
+ await jobs.init();
+ const q=pool.state.queries;
+ const indexes=q.findIndex(sql=>sql.includes("events_job_idempotency_lookup"));
+ const functionSql=q.findIndex(sql=>sql.includes("CREATE OR REPLACE FUNCTION jarvis.reject_event_mutation")&&sql.includes("AS $$")&&sql.includes("END; $$"));
+ assert.ok(indexes>=0&&functionSql>indexes,"migration 0003 must follow operational migration 0002");
+ assert.ok(q.some(sql=>sql.includes("BEFORE UPDATE OR DELETE ON jarvis.events")));
+ assert.ok(q.some(sql=>sql.includes("BEFORE TRUNCATE ON jarvis.events")));
+ assert.ok(q.some(sql=>sql.includes("0003_append_only_event_ledger")));
+});
 
 test("PostgreSQL job store preserves create/get/idempotency/list/transition contract",async()=>{
  const pool=fakePool(),{jobs}=createPostgresOperationalStores({pool,clock:()=>"2026-11-17T00:00:00.000Z"});
