@@ -42,6 +42,9 @@ test("migrates idempotently and does not expose database connection details", as
   assert.deepEqual(await store.migrate(), { ok: true, version: "0001_neon_event_store" });
   assert.deepEqual(await store.migrate(), { ok: true, version: "0001_neon_event_store" });
   assert.equal(pool.state.queries.filter(x => x.sql === "BEGIN").length, 1);
+  assert.ok(pool.state.queries.some(x => x.sql.includes("BEFORE UPDATE OR DELETE ON jarvis.events")));
+  assert.ok(pool.state.queries.some(x => x.sql.includes("BEFORE TRUNCATE ON jarvis.events")));
+  assert.ok(pool.state.queries.some(x => x.sql.includes("0003_append_only_event_ledger")));
   assert.equal((await store.health()).ok, true);
 });
 
