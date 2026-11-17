@@ -63,6 +63,7 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     assert.equal(await b.releaseLease({lease:eligibleChild.lease}),true);
     assert.equal(await a.releaseLease({lease:completionLease}),true);
 
+    await b.createTask({title:"Pagination fixture task",dedupeKey:"pagination:"+cryptoRandom(),status:"ready"});
     const firstPage=await a.listTasks({status:"ready",limit:1,offset:0});
     const secondPage=await b.listTasks({status:"ready",limit:1,offset:1});
     assert.equal(firstPage.length,1);
