@@ -18,15 +18,16 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson}={}){
     return {principal};
   }
   function authResponse(res,result){
-    if(result.error==="unavailable")return json(res,503,{ok:false,error:"Task Registry API is not configured"});
-    if(result.error==="unauthorized")return json(res,401,{ok:false,error:"Unauthorized"},{"WWW-Authenticate":"Bearer"});
-    if(result.error==="forbidden")return json(res,403,{ok:false,error:"Insufficient task registry scope"});
-    return null;
+    if(result.error==="unavailable"){json(res,503,{ok:false,error:"Task Registry API is not configured"});return true;}
+    if(result.error==="unauthorized"){json(res,401,{ok:false,error:"Unauthorized"},{"WWW-Authenticate":"Bearer"});return true;}
+    if(result.error==="forbidden"){json(res,403,{ok:false,error:"Insufficient task registry scope"});return true;}
+    return false;
   }
   function validLease(lease,taskId,agentId){
     return !!lease&&lease.resourceKey==="task:"+taskId&&lease.ownerId===agentId&&typeof lease.token==="string"&&Number.isSafeInteger(lease.fencingToken);
   }
   function errorResponse(res,error){
+    if(Number.isInteger(error?.statusCode)&&error.statusCode>=400&&error.statusCode<=499)return json(res,error.statusCode,{ok:false,error:error.statusCode===413?"Request body too large":"Invalid request"});
     const message=typeof error?.message==="string"?error.message:"";
     if(/Invalid task|Invalid lease|Invalid task patch|Invalid task dependencies|Dependency task does not exist/.test(message))return json(res,400,{ok:false,error:message});
     if(/Stale task version|expired, stale|not owned|not claimable|dependency cycle|already|Lease heartbeat rejected/.test(message))return json(res,409,{ok:false,error:message});
