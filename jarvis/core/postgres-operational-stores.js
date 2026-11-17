@@ -13,7 +13,8 @@ function clone(v){return JSON.parse(JSON.stringify(v));}
 function bytes(v){try{return Buffer.byteLength(JSON.stringify(v),"utf8");}catch{return Infinity;}}
 function validJobPayload(v){return !!v&&typeof v==="object"&&!Array.isArray(v)&&bytes(v)<=MAX_JOB_PAYLOAD;}
 function validText(v,max,required=false){return typeof v==="string"&&v.length<=max&&(!required||!!v.trim());}
-function digest(v){return crypto.createHash("sha256").update(JSON.stringify(v)).digest("hex");}
+function canonicalJson(value){const normalized=JSON.parse(JSON.stringify(value));function sort(v){if(Array.isArray(v))return v.map(sort);if(v&&typeof v==="object"){const out={};for(const key of Object.keys(v).sort())out[key]=sort(v[key]);return out;}return v;}return JSON.stringify(sort(normalized));}
+function digest(v){return crypto.createHash("sha256").update(canonicalJson(v)).digest("hex");}
 function approvalRequestDigest(a){if(a.digestVersion!==2)return digest({departmentId:a.departmentId,actionClass:a.actionClass,summary:a.summary,details:a.details});return digest({departmentId:a.departmentId,actionClass:a.actionClass,summary:a.summary,details:a.details,resourceId:a.resourceId||null,operationPayload:a.operationPayload??null,expiresAt:a.expiresAt||null});}
 function createPostgresOperationalStores({pool,clock=()=>new Date().toISOString(),authorizeActor=null}={}){
  if(!pool||typeof pool.connect!=="function"||typeof pool.query!=="function")throw new Error("PostgreSQL pool is required");
