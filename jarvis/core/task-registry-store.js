@@ -110,7 +110,15 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
     if(!taskId)throw new Error("Task lease does not match task");
     await lock(c,"task:"+taskId);
     const current=await latest(c,taskId);
-    if(!current||current.task.leaseOwner!==lease.ownerId||current.task.leaseTokenHash!==hash(lease.token)||current.task.fencingToken!==lease.fencingToken)throw new Error("Task lease is expired, stale, or not owned by this caller");
+    if(!current)throw new Error("Task does not exist");
+    // A task: coordination lease may be acquired directly for low-level
+    // coordination (for example dependency-graph checks) without claiming the
+    // Task aggregate. Only bind it to aggregate ownership when claimTask()
+    // metadata is present; if present, every ownership field must match.
+    const task=current.task;
+    const hasClaimMetadata=task.leaseOwner!==null||task.leaseTokenHash!==null||task.leaseExpiresAt!==null;
+    if(!hasClaimMetadata)return null;
+    if(task.leaseOwner!==lease.ownerId||task.leaseTokenHash!==hash(lease.token)||task.fencingToken!==lease.fencingToken)throw new Error("Task lease is expired, stale, or not owned by this caller");
     return {taskId,current};
   }
   async function assertDependenciesCompleted(c,task){
