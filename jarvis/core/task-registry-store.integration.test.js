@@ -4,6 +4,7 @@ const assert=require("node:assert/strict");
 const fs=require("node:fs");
 const path=require("node:path");
 const {createTaskRegistry}=require("./task-registry-store");
+const {createServer}=require("../server");
 
 const databaseUrl=process.env.JARVIS_TASK_REGISTRY_TEST_DATABASE_URL;
 test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!databaseUrl}, async()=>{
@@ -14,7 +15,7 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
   const pool=new Pool({connectionString:databaseUrl,max:8});
   let now=Date.now();
   const clock=()=>new Date(now).toISOString();
-  const migrations=["0001_neon_event_store.sql","0002_job_approval_stores.sql","0003_append_only_event_ledger.sql","0004_task_registry.sql"];
+  const migrations=["0001_neon_event_store.sql","0002_job_approval_stores.sql","0003_append_only_event_ledger.sql","0004_task_registry.sql","0005_task_registry_scoped_dedupe.sql"];
   try{
     for(const file of migrations){
       const sql=fs.readFileSync(path.join(__dirname,"..","migrations",file),"utf8");
@@ -31,6 +32,9 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     assert.equal(created.created,true);
     assert.equal(duplicate.created,false);
     assert.equal(duplicate.task.taskId,created.task.taskId);
+    const sameKeyOtherAgent=await b.createTask({title:"Same key, different owner",dedupeKey:dedupe,status:"ready",ownerAgent:"different-agent",ownerConversation:"different-conversation"});
+    assert.equal(sameKeyOtherAgent.created,true,"idempotency keys are isolated by agent and conversation ownership");
+    assert.notEqual(sameKeyOtherAgent.task.taskId,created.task.taskId);
 
     await assert.rejects(
       a.createTask({title:"Missing dependency",dedupeKey:"missing-dependency:"+cryptoRandom(),dependencyTaskIds:["missing-task-id"]}),
@@ -106,6 +110,44 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
       b.acquireLease({resourceKey:"integration-race:"+cryptoRandom(),ownerId:"race-b",leaseMs:5000})
     ]);
     assert.equal(staleRace.filter(x=>x.status==="fulfilled"&&x.value).length,2,"independent resources can be leased concurrently");
+
+    const apiScopes=["tasks:read","tasks:write","tasks:dispatch","tasks:claim","tasks:lease","tasks:transition","resources:lease"];
+    const api=createServer({
+      token:"api-test-token-".padEnd(64,"x"),
+      taskRegistry:a,
+      authorizeTaskRegistry:async req=>{
+        if(req.headers.authorization==="Bearer agent-a")return{agentId:"api-agent-a",conversationId:"api-conversation-a",scopes:apiScopes};
+        if(req.headers.authorization==="Bearer agent-b")return{agentId:"api-agent-b",conversationId:"api-conversation-b",scopes:apiScopes};
+        return null;
+      }
+    });
+    await new Promise(resolve=>api.listen(0,"127.0.0.1",resolve));
+    const apiRoot="http://127.0.0.1:"+api.address().port;
+    try{
+      const createdResponse=await fetch(apiRoot+"/v1/tasks",{method:"POST",headers:{Authorization:"Bearer agent-a","Content-Type":"application/json"},body:JSON.stringify({title:"PostgreSQL HTTP API task",dedupeKey:"api-integration:"+cryptoRandom(),status:"ready"})});
+      assert.equal(createdResponse.status,201);
+      const createdBody=await createdResponse.json();
+      const apiTaskId=createdBody.task.taskId;
+      assert.equal(createdBody.task.ownerAgent,"api-agent-a");
+      const claimedResponse=await fetch(apiRoot+"/v1/tasks/"+apiTaskId+"/claim",{method:"POST",headers:{Authorization:"Bearer agent-a","Content-Type":"application/json"},body:JSON.stringify({leaseMs:10000})});
+      assert.equal(claimedResponse.status,200);
+      const claimBody=await claimedResponse.json();
+      const foreignHeartbeat=await fetch(apiRoot+"/v1/tasks/"+apiTaskId+"/heartbeat",{method:"POST",headers:{Authorization:"Bearer agent-b","Content-Type":"application/json"},body:JSON.stringify({lease:claimBody.lease})});
+      assert.equal(foreignHeartbeat.status,403);
+      const transitionResponse=await fetch(apiRoot+"/v1/tasks/"+apiTaskId+"/transition",{method:"POST",headers:{Authorization:"Bearer agent-a","Content-Type":"application/json"},body:JSON.stringify({expectedVersion:2,lease:claimBody.lease,status:"in_progress",patch:{nextAction:"PostgreSQL API verified"}})});
+      assert.equal(transitionResponse.status,200);
+      const resourceResponse=await fetch(apiRoot+"/v1/resources/leases",{method:"POST",headers:{Authorization:"Bearer agent-a","Content-Type":"application/json"},body:JSON.stringify({resourceKey:"path:repo:jarvis/server.js",leaseMs:10000})});
+      assert.equal(resourceResponse.status,201);
+      const resourceLease=(await resourceResponse.json()).lease;
+      const resourceRelease=await fetch(apiRoot+"/v1/resources/leases/release",{method:"POST",headers:{Authorization:"Bearer agent-a","Content-Type":"application/json"},body:JSON.stringify({lease:resourceLease})});
+      assert.equal(resourceRelease.status,200);
+      assert.equal((await resourceRelease.json()).released,true);
+      const listResponse=await fetch(apiRoot+"/v1/tasks?status=in_progress&limit=10",{headers:{Authorization:"Bearer agent-a"}});
+      assert.equal(listResponse.status,200);
+      assert.ok((await listResponse.json()).tasks.some(x=>x.task.taskId===apiTaskId));
+    }finally{
+      await new Promise(resolve=>api.close(resolve));
+    }
   }finally{
     await pool.end();
   }
