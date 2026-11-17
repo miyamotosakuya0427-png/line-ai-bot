@@ -66,7 +66,7 @@ function validateApproval(a,line,issues) {
 }
 
 async function inspectFile(filePath, kind) {
-  const report={kind,path:path.resolve(filePath),exists:false,bytes:0,rawSha256:null,canonicalLatestSha256:null,lines:0,validEvents:0,latestRecords:0,invalidLines:[],records:[],duplicateIds:[],duplicateIdempotencyKeys:[],issues:[]};
+  const report={kind,path:path.resolve(filePath),exists:false,bytes:0,rawSha256:null,canonicalLatestSha256:null,lines:0,validEvents:0,latestRecords:0,invalidLines:[],duplicateIds:[],duplicateIdempotencyKeys:[],issues:[]};
   let handle;
   try { handle=await fs.open(filePath,"r"); }
   catch(error) {
