@@ -189,6 +189,10 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
       await init();
       return tx(async c=>acquireInTx(c,input));
     },
+    async assertLeaseCurrent({lease}={}){
+      await init();
+      return tx(async c=>{await assertLease(c,lease);return true;});
+    },
     async heartbeatLease({lease,leaseMs=60000}={}){
       await init();
       if(!Number.isInteger(leaseMs)||leaseMs<5000||leaseMs>3600000)throw new Error("Invalid lease duration");
