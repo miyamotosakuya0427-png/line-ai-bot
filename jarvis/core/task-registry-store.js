@@ -216,10 +216,16 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
     async claimTask({taskId,ownerId,leaseMs=60000}={}){
       await init();
       return tx(async c=>{
-        const lease=await acquireInTx(c,{resourceKey:"task:"+taskId,ownerId,leaseMs});
-        if(!lease)return null;
         const current=await latest(c,taskId);
         if(!current)throw new Error("Task does not exist");
+        const dependencies=current.task.dependencyTaskIds||[];
+        if(dependencies.length){
+          const dependencyRows=await c.query("SELECT DISTINCT ON (aggregate_id) aggregate_id,payload FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=ANY($1::text[]) ORDER BY aggregate_id,aggregate_version DESC",[dependencies]);
+          const dependencyStatus=new Map(dependencyRows.rows.map(row=>[row.aggregate_id,row.payload.status]));
+          if(dependencies.some(id=>dependencyStatus.get(id)!=="completed"))return null;
+        }
+        const lease=await acquireInTx(c,{resourceKey:"task:"+taskId,ownerId,leaseMs});
+        if(!lease)return null;
         const now=clock();
         const reclaimable=current.task.status==="claimed"||current.task.status==="in_progress";
         if(current.task.status!=="ready"&&!reclaimable)throw new Error("Task is not claimable");
