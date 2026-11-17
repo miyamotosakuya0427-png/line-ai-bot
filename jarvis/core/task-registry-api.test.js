@@ -6,7 +6,7 @@ const {createServer}=require("../server");
 function fixture({configured=true,authorize=true}={}){
   const tasks=new Map();let sequence=0;
   const registry={
-    async listTasks({status=null,limit=50,offset=0,ownerAgent=null,ownerConversation=null}={}){return [...tasks.values()].filter(x=>(status===null||x.task.status===status)&&(ownerAgent===null||x.task.ownerAgent===ownerAgent)&&(ownerConversation===null||x.task.ownerConversation===ownerConversation)).slice(offset,offset+limit);},
+    async listTasks({status=null,limit=50,offset=0,ownerAgent=null,ownerConversation=null,projectId=null}={}){return [...tasks.values()].filter(x=>(status===null||x.task.status===status)&&(ownerAgent===null||x.task.ownerAgent===ownerAgent)&&(ownerConversation===null||x.task.ownerConversation===ownerConversation)&&(projectId===null||x.task.projectId===projectId)).slice(offset,offset+limit);},
     async createTask(input){const id="task-"+(++sequence);const task={taskId:id,...input};const value={task,version:1};tasks.set(id,value);return{...value,created:true};},
     async getTask(id,{ownerAgent=null,ownerConversation=null}={}){const value=tasks.get(id);if(!value)return null;if(ownerAgent!==null&&value.task.ownerAgent!==ownerAgent)return null;if(ownerConversation!==null&&value.task.ownerConversation!==ownerConversation)return null;return value;},
     async claimTask({taskId,ownerId,leaseMs}){const current=tasks.get(taskId);if(!current||current.task.status!=="ready")return null;const lease={resourceKey:"task:"+taskId,ownerId,token:"opaque-token",fencingToken:1,expiresAt:new Date(Date.now()+leaseMs).toISOString()};const next={...current.task,status:"claimed",ownerAgent:ownerId};const value={task:next,version:current.version+1};tasks.set(taskId,value);return{...value,lease};},
@@ -18,7 +18,7 @@ function fixture({configured=true,authorize=true}={}){
   const scopes=["tasks:read","tasks:write","tasks:dispatch","tasks:claim","tasks:lease","tasks:transition","resources:lease"];
   const server=createServer({
     taskRegistry:configured?registry:null,
-    authorizeTaskRegistry:authorize?async(req)=>req.headers.authorization==="Bearer agent-a"?{agentId:"agent-a",conversationId:"opaque-conversation",scopes}:req.headers.authorization==="Bearer agent-b"?{agentId:"agent-b",scopes}:req.headers.authorization==="Bearer agent-a-other"?{agentId:"agent-a",conversationId:"other-conversation",scopes}:req.headers.authorization==="Bearer agent-a-unbound"?{agentId:"agent-a",scopes}:null:null
+    authorizeTaskRegistry:authorize?async(req)=>req.headers.authorization==="Bearer agent-a"?{agentId:"agent-a",conversationId:"opaque-conversation",scopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]}:req.headers.authorization==="Bearer agent-b"?{agentId:"agent-b",scopes,projectIds:["other-project"],resourcePrefixes:["path:other-project:"]}:req.headers.authorization==="Bearer agent-a-other"?{agentId:"agent-a",conversationId:"other-conversation",scopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]}:req.headers.authorization==="Bearer agent-a-unbound"?{agentId:"agent-a",scopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]}:null:null
   });
   return{server,registry,tasks};
 }
@@ -47,6 +47,9 @@ test("Task Registry API enforces authentication and per-agent scopes",async t=>{
 test("Task Registry API creates, claims, heartbeats, transitions and releases under authenticated ownership",async t=>{
   const {server,tasks}=fixture();t.after(()=>new Promise(resolve=>server.close(resolve)));
   const root=await listen(server);
+  const outOfProject=await post(root,"/v1/tasks",{title:"Forbidden project task",dedupeKey:"api-task-other",projectId:"other-project"});
+  assert.equal(outOfProject.status,403);
+  assert.equal((await fetch(root+"/v1/tasks?projectId=other-project",{headers:{Authorization:"Bearer agent-a"}})).status,403);
   const created=await post(root,"/v1/tasks",{title:"API task",dedupeKey:"api-task-1",status:"ready",ownerAgent:"spoofed"});
   assert.equal(created.status,201);
   const body=await created.json();assert.equal(body.task.ownerAgent,"agent-a");assert.equal(body.task.status,"ready");
@@ -78,10 +81,17 @@ test("Task Registry API creates, claims, heartbeats, transitions and releases un
 test("resource leases are separate from task leases and require authenticated resource scope",async t=>{
   const {server}=fixture();t.after(()=>new Promise(resolve=>server.close(resolve)));
   const root=await listen(server);
-  const acquired=await post(root,"/v1/resources/leases",{resourceKey:"path:repo:jarvis/server.js",leaseMs:10000});
+  const acquired=await post(root,"/v1/resources/leases",{resourceKey:"path:one-jarvis:jarvis/server.js",leaseMs:10000});
   assert.equal(acquired.status,201);const {lease}=await acquired.json();
-  assert.equal(lease.resourceKey,"path:repo:jarvis/server.js");
+  assert.equal(lease.resourceKey,"path:one-jarvis:jarvis/server.js");
   assert.equal((await post(root,"/v1/resources/leases/release",{lease},"agent-b")).status,403);
   const released=await post(root,"/v1/resources/leases/release",{lease});
   assert.equal(released.status,200);assert.equal((await released.json()).released,true);
+});
+
+test("agent cannot acquire or release resources outside its explicit resource prefix",async t=>{
+  const {server}=fixture();t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const root=await listen(server);
+  assert.equal((await post(root,"/v1/resources/leases",{resourceKey:"path:other-project:secret.txt"})).status,403);
+  assert.equal((await post(root,"/v1/resources/leases",{resourceKey:"path:one-jarvis:jarvis/server.js"})).status,201);
 });

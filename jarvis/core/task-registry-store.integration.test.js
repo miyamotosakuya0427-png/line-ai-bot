@@ -116,8 +116,8 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
       token:"api-test-token-".padEnd(64,"x"),
       taskRegistry:a,
       authorizeTaskRegistry:async req=>{
-        if(req.headers.authorization==="Bearer agent-a")return{agentId:"api-agent-a",conversationId:"api-conversation-a",scopes:apiScopes};
-        if(req.headers.authorization==="Bearer agent-b")return{agentId:"api-agent-b",conversationId:"api-conversation-b",scopes:apiScopes};
+        if(req.headers.authorization==="Bearer agent-a")return{agentId:"api-agent-a",conversationId:"api-conversation-a",scopes:apiScopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]};
+        if(req.headers.authorization==="Bearer agent-b")return{agentId:"api-agent-b",conversationId:"api-conversation-b",scopes:apiScopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]};
         return null;
       }
     });
@@ -136,7 +136,7 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
       assert.equal(foreignHeartbeat.status,403);
       const transitionResponse=await fetch(apiRoot+"/v1/tasks/"+apiTaskId+"/transition",{method:"POST",headers:{Authorization:"Bearer agent-a","Content-Type":"application/json"},body:JSON.stringify({expectedVersion:2,lease:claimBody.lease,status:"in_progress",patch:{nextAction:"PostgreSQL API verified"}})});
       assert.equal(transitionResponse.status,200);
-      const resourceResponse=await fetch(apiRoot+"/v1/resources/leases",{method:"POST",headers:{Authorization:"Bearer agent-a","Content-Type":"application/json"},body:JSON.stringify({resourceKey:"path:repo:jarvis/server.js",leaseMs:10000})});
+      const resourceResponse=await fetch(apiRoot+"/v1/resources/leases",{method:"POST",headers:{Authorization:"Bearer agent-a","Content-Type":"application/json"},body:JSON.stringify({resourceKey:"path:one-jarvis:jarvis/server.js",leaseMs:10000})});
       assert.equal(resourceResponse.status,201);
       const resourceLease=(await resourceResponse.json()).lease;
       const resourceRelease=await fetch(apiRoot+"/v1/resources/leases/release",{method:"POST",headers:{Authorization:"Bearer agent-a","Content-Type":"application/json"},body:JSON.stringify({lease:resourceLease})});
