@@ -44,6 +44,13 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
     await c.query("INSERT INTO jarvis.events(aggregate_type,aggregate_id,aggregate_version,event_type,payload,idempotency_key,created_at) VALUES('task',$1,$2,$3,$4::jsonb,$5,$6)",[id,version,eventType,JSON.stringify(payload),idempotencyKey,clock()]);
     return version;
   }
+  async function appendCoordinationEvent(c,resourceKey,eventType,payload){
+    await lock(c,"coordination-lease:"+resourceKey);
+    const r=await c.query("SELECT COALESCE(MAX(aggregate_version),0)::bigint AS version FROM jarvis.events WHERE aggregate_type='coordination_lease' AND aggregate_id=$1",[resourceKey]);
+    const version=Number(r.rows[0].version)+1;
+    await c.query("INSERT INTO jarvis.events(aggregate_type,aggregate_id,aggregate_version,event_type,payload,created_at) VALUES('coordination_lease',$1,$2,$3,$4::jsonb,$5)",[resourceKey,version,eventType,JSON.stringify(payload),clock()]);
+    return version;
+  }
   function validateLeaseInput({resourceKey,ownerId,leaseMs}){
     if(!text(resourceKey,240)||!text(ownerId,MAX_OWNER)||!Number.isInteger(leaseMs)||leaseMs<5000||leaseMs>3600000)throw new Error("Invalid lease request");
   }
@@ -57,7 +64,9 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
       [resourceKey,ownerId,tokenHash,expiresAt,now]
     );
     if(!r.rows[0])return null;
-    return {resourceKey,ownerId,token,fencingToken:Number(r.rows[0].fencing_token),expiresAt:r.rows[0].expires_at};
+    const lease={resourceKey,ownerId,token,fencingToken:Number(r.rows[0].fencing_token),expiresAt:r.rows[0].expires_at};
+    await appendCoordinationEvent(c,resourceKey,"lease_acquired",{resourceKey,ownerId,tokenHash,fencingToken:lease.fencingToken,expiresAt:lease.expiresAt});
+    return lease;
   }
   async function assertLease(c,lease){
     if(!lease||!text(lease.resourceKey,240)||!text(lease.ownerId,MAX_OWNER)||!text(lease.token,256)||!Number.isSafeInteger(lease.fencingToken))throw new Error("Current lease is required");
@@ -118,7 +127,9 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         const now=clock(),expiresAt=new Date(Date.parse(now)+leaseMs).toISOString();
         const r=await c.query("UPDATE jarvis.coordination_leases SET expires_at=$1,updated_at=$2 WHERE resource_key=$3 AND owner_id=$4 AND token_hash=$5 AND fencing_token=$6 AND expires_at>$2::timestamptz RETURNING expires_at",[expiresAt,now,lease.resourceKey,lease.ownerId,hash(lease.token),lease.fencingToken]);
         if(!r.rows[0])throw new Error("Lease heartbeat rejected");
-        return {...lease,expiresAt:r.rows[0].expires_at};
+        const renewed={...lease,expiresAt:r.rows[0].expires_at};
+        await appendCoordinationEvent(c,lease.resourceKey,"lease_heartbeat",{resourceKey:lease.resourceKey,ownerId:lease.ownerId,tokenHash:hash(lease.token),fencingToken:lease.fencingToken,expiresAt:renewed.expiresAt});
+        return renewed;
       });
     },
     async releaseLease({lease}={}){
@@ -127,7 +138,9 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         await assertLease(c,lease);
         const now=clock();
         const r=await c.query("UPDATE jarvis.coordination_leases SET expires_at=$1,updated_at=$1 WHERE resource_key=$2 AND owner_id=$3 AND token_hash=$4 AND fencing_token=$5 RETURNING resource_key",[now,lease.resourceKey,lease.ownerId,hash(lease.token),lease.fencingToken]);
-        return r.rowCount===1;
+        if(r.rowCount!==1)return false;
+        await appendCoordinationEvent(c,lease.resourceKey,"lease_released",{resourceKey:lease.resourceKey,ownerId:lease.ownerId,tokenHash:hash(lease.token),fencingToken:lease.fencingToken,releasedAt:now});
+        return true;
       });
     },
     async claimTask({taskId,ownerId,leaseMs=60000}={}){
@@ -136,9 +149,18 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         const lease=await acquireInTx(c,{resourceKey:"task:"+taskId,ownerId,leaseMs});
         if(!lease)return null;
         const current=await latest(c,taskId);
-        if(!current||!NEXT[current.task.status]?.has("claimed"))throw new Error("Task is not claimable");
-        const next={...current.task,status:"claimed",ownerAgent:ownerId,updatedAt:clock(),startedAt:current.task.startedAt||clock(),leaseOwner:lease.ownerId,leaseTokenHash:hash(lease.token),leaseExpiresAt:lease.expiresAt,fencingToken:lease.fencingToken};
-        await append(c,taskId,"claimed",next);
+        if(!current)throw new Error("Task does not exist");
+        const now=clock();
+        const reclaimable=current.task.status==="claimed"||current.task.status==="in_progress";
+        if(current.task.status!=="ready"&&!reclaimable)throw new Error("Task is not claimable");
+        if(reclaimable){
+          const previousExpiry=Date.parse(current.task.leaseExpiresAt||"");
+          if(!Number.isFinite(previousExpiry)||previousExpiry>Date.parse(now))throw new Error("Task lease recovery requires an expired recorded lease");
+        }else if(!NEXT[current.task.status]?.has("claimed")){
+          throw new Error("Task is not claimable");
+        }
+        const next={...current.task,status:"claimed",ownerAgent:ownerId,updatedAt:now,startedAt:current.task.startedAt||now,leaseOwner:lease.ownerId,leaseTokenHash:hash(lease.token),leaseExpiresAt:lease.expiresAt,fencingToken:lease.fencingToken,...(reclaimable?{recoveredFromStatus:current.task.status,recoveredAt:now}: {})};
+        await append(c,taskId,reclaimable?"lease_reclaimed":"claimed",next);
         return {task:clone(next),version:current.version+1,lease};
       });
     },
