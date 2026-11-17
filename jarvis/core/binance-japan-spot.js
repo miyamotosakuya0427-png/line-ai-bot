@@ -43,9 +43,8 @@ function validateLimitOrder(order,exchangeInfo,{maxNotional="5000"}={}) {
   if(decimalCompare(price,priceFilter.minPrice)<0||decimalCompare(price,priceFilter.maxPrice)>0||!decimalMultiple(price,priceFilter.tickSize))throw new Error("Price violates Binance PRICE_FILTER");
   if(decimalCompare(quantity,lot.minQty)<0||decimalCompare(quantity,lot.maxQty)>0||!decimalMultiple(quantity,lot.stepSize))throw new Error("Quantity violates Binance LOT_SIZE");
   const maximum=String(maxNotional);
-  const product=Number(price)*Number(quantity);
-  if(!Number.isFinite(product)||product>Number(maximum))throw new Error("Order exceeds the configured JPY notional limit");
-  if(notional&&notional.minNotional&& !decimalProductAtLeast(price,quantity,notional.minNotional))throw new Error("Order is below Binance minimum notional");
+  if(decimalProductCompare(price,quantity,maximum)>0)throw new Error("Order exceeds the configured JPY notional limit");
+  if(notional&&notional.minNotional&&decimalProductCompare(price,quantity,notional.minNotional)<0)throw new Error("Order is below Binance minimum notional");
   return {symbol,side,type:"LIMIT",timeInForce:"GTC",quantity,price};
 }
 
