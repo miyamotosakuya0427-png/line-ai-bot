@@ -42,6 +42,26 @@ test("real PostgreSQL multi-connection claims and approval integrity", {skip:!en
   const attempts=await Promise.allSettled(Array.from({length:4},()=>approvals.claimExecution(approval.approval.id,{resourceId:"R-1",operationPayload:payload,actor:"integration-owner"})));
   assert.equal(attempts.filter(x=>x.status==="fulfilled").length,1,"only one execution claim may be granted");
   assert.equal((await approvals.get(approval.approval.id)).executionStatus,"claimed");
+
+  // Fixture-only migration rehearsal: use synthetic records and the disposable local DB only.
+  const {rehearseFixtureImport}=require("../scripts/postgres-migration-rehearsal");
+  const {createHash}=require("node:crypto");
+  const {canonicalJson}=require("../scripts/jsonl-migration-dry-run");
+  const fixtureJob={id:"fixture-migrate-job",type:"migration.fixture",payload:{label:"synthetic 🚧"},status:"running",attempts:2,idempotencyKey:"fixture-job-key",createdAt:now,updatedAt:now,error:null,result:null,lease:{owner:"fixture-worker",heartbeatAt:now,expiresAt:"2026-11-17T00:01:00.000Z"}};
+  const fixtureApproval={id:"fixture-migrate-approval",departmentId:"content",actionClass:"publish",summary:"Synthetic approval",details:"fixture only",resourceId:"fixture-resource",operationPayload:{resourceId:"fixture-resource",action:"publish"},expiresAt:"2026-11-18T00:00:00.000Z",status:"approved",idempotencyKey:"fixture-approval-key",createdAt:now,updatedAt:now,decisionAt:now,decisionReason:"approved in fixture",decidedBy:"integration-owner",executionStatus:"not_started",digestVersion:2};
+  const digestBody={departmentId:fixtureApproval.departmentId,actionClass:fixtureApproval.actionClass,summary:fixtureApproval.summary,details:fixtureApproval.details,resourceId:fixtureApproval.resourceId,operationPayload:fixtureApproval.operationPayload,expiresAt:fixtureApproval.expiresAt};
+  fixtureApproval.requestDigest=createHash("sha256").update(canonicalJson(digestBody)).digest("hex");
+  const beforeFixture=await pool.query("SELECT count(*)::int AS n FROM jarvis.events");
+  await assert.rejects(rehearseFixtureImport({pool,jobs:[fixtureJob],approvals:[fixtureApproval],failAfter:1}),/Injected fixture failure/);
+  const afterRollback=await pool.query("SELECT count(*)::int AS n FROM jarvis.events");
+  assert.equal(afterRollback.rows[0].n,beforeFixture.rows[0].n,"failed fixture import must rollback all rows");
+  const imported=await rehearseFixtureImport({pool,jobs:[fixtureJob],approvals:[fixtureApproval]});
+  assert.equal(imported.inserted,2);assert.equal(imported.checksumsMatch,true);
+  const repeated=await rehearseFixtureImport({pool,jobs:[fixtureJob],approvals:[fixtureApproval]});
+  assert.equal(repeated.inserted,0);assert.equal(repeated.identical,2,"re-importing identical fixture rows must be idempotent");
+  const operational=createPostgresOperationalStores({pool,clock:()=>now});
+  assert.deepEqual(await operational.jobs.get(fixtureJob.id),fixtureJob,"imported job must preserve full store record including lease");
+  assert.deepEqual(await operational.approvals.get(fixtureApproval.id),fixtureApproval,"imported approval must preserve digest and execution state");
  } finally {
   try{await pool.query("DROP SCHEMA IF EXISTS jarvis CASCADE");}finally{await pool.end();}
  }
