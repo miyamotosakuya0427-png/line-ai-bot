@@ -34,3 +34,8 @@ Transient SQLSTATEs (serialization failures, deadlocks, temporary connection fai
 4. Test against a separate Neon branch/database before any production migration.
 5. Define dual-write, reconciliation, cutover, and rollback before switching any runtime.
 6. Only after explicit approval, set `DATABASE_URL` on the dedicated ONE JARVIS Render service. Do not deploy automatically.
+
+
+## Append-only audit ledger hardening
+
+Runtime initialization also installs migration `0003_append_only_event_ledger`. PostgreSQL triggers reject row updates, row deletes, and table truncation on `jarvis.events`; the runtime role should not own the schema or table and should receive only the minimum required privileges. These triggers protect against ordinary DML, not a database superuser or an owner who can alter or disable triggers. Production-grade tamper resistance still requires separating migration ownership from the runtime role and monitoring privileged DDL.
