@@ -62,17 +62,21 @@ test("worker fails closed for job types without a registered handler", async () 
   } finally { await f.cleanup(); }
 });
 
-test("worker recovers interrupted running jobs before processing", async () => {
+test("worker quarantines interrupted execution as outcome unknown instead of rerunning it", async () => {
   const f = await fixture();
   try {
     const { job } = await f.store.create({ type: "task.resume", payload: {} });
     await f.store.transition(job.id, "running");
-    const worker = createWorker({ store: f.store, handlers: { "task.resume": async () => {} } });
+    let calls = 0;
+    const worker = createWorker({ store: f.store, handlers: { "task.resume": async () => { calls += 1; } } });
     const started = await worker.start();
     assert.equal(started.recovered, 1);
+    const recovered = await f.store.get(job.id);
+    assert.equal(recovered.status, "failed");
+    assert.equal(recovered.outcomeUnknown, true);
     const result = await worker.runNext();
-    assert.equal(result.job.status, "succeeded");
-    assert.equal(result.job.attempts, 2);
+    assert.equal(result.processed, false);
+    assert.equal(calls, 0);
   } finally { await f.cleanup(); }
 });
 
@@ -96,25 +100,59 @@ test("worker polling can be started and stopped", async () => {
   } finally { await f.cleanup(); }
 });
 
-test("worker retries transient errors and succeeds on a later attempt", async () => {
+test("worker applies exponential backoff only to explicitly retry-safe transient failures", async () => {
   const f = await fixture();
   try {
     const { job } = await f.store.create({ type: "task.transient", payload: {} });
     let calls = 0;
-    const worker = createWorker({ store: f.store, handlers: { "task.transient": async () => {
-      calls += 1;
-      if (calls === 1) { const error = new Error("rate limited"); error.retryable = true; throw error; }
-      return { answer: "recovered" };
-    } } });
+    let now = "2026-11-17T00:00:00.000Z";
+    const worker = createWorker({
+      store: f.store, clock: () => now, retryBaseMs: 1000, retryMaxMs: 4000, maxAttempts: 3,
+      handlers: { "task.transient": async () => {
+        calls += 1;
+        if (calls < 3) { const error = new Error("provider confirmed no effect"); error.retryable = true; error.retrySafe = true; throw error; }
+        return { answer: "recovered" };
+      } }
+    });
     await worker.start();
     const first = await worker.runNext();
     assert.equal(first.retryScheduled, true);
-    assert.equal(first.job.status, "queued");
+    assert.equal(first.retryDelayMs, 1000);
+    assert.equal(first.job.retryAt, "2026-11-17T00:00:01.000Z");
+    assert.equal((await worker.runNext()).waiting, true);
+    now = first.job.retryAt;
     const second = await worker.runNext();
-    assert.equal(second.job.id, job.id);
-    assert.equal(second.job.status, "succeeded");
-    assert.equal(second.job.attempts, 2);
-    assert.deepEqual(second.job.result, { answer: "recovered" });
+    assert.equal(second.retryDelayMs, 2000);
+    assert.equal(second.job.retryAt, "2026-11-17T00:00:03.000Z");
+    now = second.job.retryAt;
+    const third = await worker.runNext();
+    assert.equal(third.job.id, job.id);
+    assert.equal(third.job.status, "succeeded");
+    assert.equal(third.job.attempts, 3);
+    assert.deepEqual(third.job.result, { answer: "recovered" });
+  } finally { await f.cleanup(); }
+});
+
+test("worker does not retry an external operation when its outcome is not confirmed safe", async () => {
+  const f = await fixture();
+  try {
+    await f.store.create({ type: "task.uncertain", payload: {} });
+    let calls = 0;
+    const worker = createWorker({ store: f.store, handlers: { "task.uncertain": async () => {
+      calls += 1;
+      const error = new Error("connection lost after request");
+      error.retryable = true;
+      error.outcomeUnknown = true;
+      throw error;
+    } } });
+    await worker.start();
+    const first = await worker.runNext();
+    assert.equal(first.retryScheduled, false);
+    assert.equal(first.outcomeUnknown, true);
+    assert.equal(first.job.status, "failed");
+    assert.equal(first.job.outcomeUnknown, true);
+    assert.equal((await worker.runNext()).processed, false);
+    assert.equal(calls, 1);
   } finally { await f.cleanup(); }
 });
 
