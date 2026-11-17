@@ -39,7 +39,10 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     const root=await a.createTask({title:"Dependency root",dedupeKey:"dependency-root:"+cryptoRandom(),status:"ready"});
     const child=await b.createTask({title:"Dependency child",dedupeKey:"dependency-child:"+cryptoRandom(),status:"ready",dependencyTaskIds:[root.task.taskId]});
     assert.deepEqual(child.task.dependencyTaskIds,[root.task.taskId]);
-    assert.equal(await a.claimTask({taskId:child.task.taskId,ownerId:"dependency-child-worker",leaseMs:10000}),null,"dependent task must wait until its dependency is completed");
+    await assert.rejects(
+      a.claimTask({taskId:child.task.taskId,ownerId:"dependency-child-worker",leaseMs:10000}),
+      /Task dependencies are not completed/
+    );
     const rootLease=await a.acquireLease({resourceKey:"task:"+root.task.taskId,ownerId:"dependency-check",leaseMs:10000});
     await assert.rejects(
       a.transitionTask({taskId:root.task.taskId,expectedVersion:root.version,lease:rootLease,status:"blocked",patch:{dependencyTaskIds:[child.task.taskId]}}),
@@ -129,12 +132,78 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     assert.equal(recovered.task.recoveredFromStatus,"in_progress");
     assert.ok(recovered.lease.fencingToken>claim.lease.fencingToken,"task recovery increments fencing token");
     await assert.rejects(a.transitionTask({taskId:created.task.taskId,expectedVersion:moved.version,lease:claim.lease,status:"review"}),/expired, stale, or not owned/);
+
+    // A task abandoned immediately after claim (before in_progress) must also
+    // be recoverable once its recorded lease expires.
+    const claimedOnly=await a.createTask({title:"Claimed-only recovery fixture",dedupeKey:"claimed-recovery:"+cryptoRandom(),status:"ready"});
+    const abandonedClaim=await a.claimTask({taskId:claimedOnly.task.taskId,ownerId:"worker-claimed-abandoned",leaseMs:5000});
+    assert.ok(abandonedClaim);
+    assert.equal(abandonedClaim.task.status,"claimed");
+    now+=6000;
+    const claimedRecovery=await b.claimTask({taskId:claimedOnly.task.taskId,ownerId:"worker-claimed-recovery",leaseMs:10000});
+    assert.ok(claimedRecovery,"expired claimed task can be reclaimed");
+    assert.equal(claimedRecovery.task.status,"claimed");
+    assert.equal(claimedRecovery.task.recoveredFromStatus,"claimed");
+    assert.ok(claimedRecovery.lease.fencingToken>abandonedClaim.lease.fencingToken);
+    await assert.rejects(
+      a.heartbeatLease({lease:abandonedClaim.lease,leaseMs:10000}),
+      /expired, stale, or not owned/
+    );
+
     const leaseAudit=await pool.query("SELECT event_type,payload FROM jarvis.events WHERE aggregate_type='coordination_lease' AND aggregate_id=$1 ORDER BY aggregate_version",[ "task:"+created.task.taskId ]);
     assert.ok(leaseAudit.rows.some(x=>x.event_type==="lease_acquired"));
     assert.ok(leaseAudit.rows.some(x=>x.event_type==="lease_reclaimed"));
     await assert.rejects(pool.query("UPDATE jarvis.events SET event_type='tampered' WHERE aggregate_type='task' AND aggregate_id=$1",[created.task.taskId]),/append-only/);
     await assert.rejects(pool.query("DELETE FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1",[created.task.taskId]),/append-only/);
     await assert.rejects(pool.query("TRUNCATE jarvis.events"),/append-only/);
+
+    const heartbeatTask=await a.createTask({title:"Task lease heartbeat sync",dedupeKey:"task-heartbeat:"+cryptoRandom(),status:"ready"});
+    const heartbeatClaim=await a.claimTask({taskId:heartbeatTask.task.taskId,ownerId:"heartbeat-worker",leaseMs:10000});
+    const heartbeatStateBefore=await a.getTask(heartbeatTask.task.taskId);
+    now+=5000;
+    const taskHeartbeat=await a.heartbeatLease({lease:heartbeatClaim.lease,leaseMs:15000});
+    assert.ok(Date.parse(taskHeartbeat.expiresAt)>Date.parse(heartbeatClaim.lease.expiresAt),"heartbeat extends the coordination lease");
+    const heartbeatStateAfter=await a.getTask(heartbeatTask.task.taskId);
+    assert.equal(heartbeatStateAfter.version,heartbeatStateBefore.version,"heartbeat does not invalidate the task's expected aggregate version");
+    now+=6000;
+    assert.equal(await b.claimTask({taskId:heartbeatTask.task.taskId,ownerId:"too-early-worker",leaseMs:10000}),null,"the renewed coordination lease blocks reclaim after the original task expiry");
+    now+=10000;
+    const heartbeatRecovered=await b.claimTask({taskId:heartbeatTask.task.taskId,ownerId:"heartbeat-recovery",leaseMs:10000});
+    assert.ok(heartbeatRecovered,"task becomes reclaimable after the renewed coordination lease expires");
+    assert.ok(heartbeatRecovered.lease.fencingToken>heartbeatClaim.lease.fencingToken);
+    await assert.rejects(
+      a.transitionTask({taskId:heartbeatTask.task.taskId,expectedVersion:heartbeatStateBefore.version,lease:heartbeatClaim.lease,status:"review"}),
+      /expired, stale, or not owned/
+    );
+    assert.equal(await b.releaseLease({lease:heartbeatRecovered.lease}),true);
+
+    const voluntarilyReleasedTask=await a.createTask({title:"Voluntary task lease release",dedupeKey:"voluntary-release:"+cryptoRandom(),status:"ready"});
+    const voluntaryClaim=await a.claimTask({taskId:voluntarilyReleasedTask.task.taskId,ownerId:"voluntary-worker-a",leaseMs:10000});
+    assert.ok(voluntaryClaim);
+    assert.equal(await a.releaseLease({lease:voluntaryClaim.lease}),true);
+    const afterVoluntaryRelease=await a.getTask(voluntarilyReleasedTask.task.taskId);
+    assert.equal(afterVoluntaryRelease.task.status,"ready","releasing an unstarted task returns it to ready");
+    assert.equal(afterVoluntaryRelease.task.leaseOwner,null);
+    const voluntaryReclaim=await b.claimTask({taskId:voluntarilyReleasedTask.task.taskId,ownerId:"voluntary-worker-b",leaseMs:10000});
+    assert.ok(voluntaryReclaim,"a released task lease can be acquired immediately");
+    assert.ok(voluntaryReclaim.lease.fencingToken>voluntaryClaim.lease.fencingToken);
+    await assert.rejects(
+      a.transitionTask({taskId:voluntarilyReleasedTask.task.taskId,expectedVersion:voluntaryClaim.version,lease:voluntaryClaim.lease,status:"in_progress"}),
+      /expired, stale, or not owned/
+    );
+
+    const yieldedTask=await a.createTask({title:"In-progress task lease release",dedupeKey:"yielded-release:"+cryptoRandom(),status:"ready"});
+    const yieldedClaim=await a.claimTask({taskId:yieldedTask.task.taskId,ownerId:"yield-worker-a",leaseMs:10000});
+    const yieldedRunning=await a.transitionTask({taskId:yieldedTask.task.taskId,expectedVersion:yieldedClaim.version,lease:yieldedClaim.lease,status:"in_progress"});
+    assert.equal(await a.releaseLease({lease:yieldedClaim.lease}),true);
+    const afterYield=await a.getTask(yieldedTask.task.taskId);
+    assert.equal(afterYield.task.status,"in_progress","releasing a running task preserves its progress");
+    assert.ok(Date.parse(afterYield.task.leaseExpiresAt)<=now,"released in-progress task is immediately recoverable");
+    const yieldedRecovery=await b.claimTask({taskId:yieldedTask.task.taskId,ownerId:"yield-worker-b",leaseMs:10000});
+    assert.ok(yieldedRecovery,"a released in-progress task can be reclaimed without waiting for old TTL");
+    assert.ok(yieldedRecovery.lease.fencingToken>yieldedClaim.lease.fencingToken);
+    const yieldedAudit=await pool.query("SELECT event_type FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1 ORDER BY aggregate_version",[yieldedTask.task.taskId]);
+    assert.ok(yieldedAudit.rows.some(x=>x.event_type==="lease_released"));
 
     const releaseKey="integration-release:"+cryptoRandom();
     const released=await a.acquireLease({resourceKey:releaseKey,ownerId:"release-a",leaseMs:5000});
