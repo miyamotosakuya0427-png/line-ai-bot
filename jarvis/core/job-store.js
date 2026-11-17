@@ -59,9 +59,9 @@ function createJobStore({ filePath, pool, clock = () => new Date().toISOString()
         try { JSON.parse(tail.toString("utf8")); completeJson = true; } catch {}
         if (completeJson) {
           const handle = await fs.open(filePath, "a", 0o600);
-          try { await handle.writeFile("\\n", "utf8"); await handle.sync(); }
+          try { await handle.writeFile("\n", "utf8"); await handle.sync(); }
           finally { await handle.close(); }
-          rawBuffer = Buffer.concat([rawBuffer, Buffer.from("\\n")]);
+          rawBuffer = Buffer.concat([rawBuffer, Buffer.from("\n")]);
         } else {
           const quarantinePath = filePath + ".recovery-" + crypto.randomUUID() + ".tail";
           const quarantine = await fs.open(quarantinePath, "wx", 0o600);
