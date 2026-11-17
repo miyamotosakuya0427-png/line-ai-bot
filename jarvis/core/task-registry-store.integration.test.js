@@ -129,6 +129,24 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     assert.equal(recovered.task.recoveredFromStatus,"in_progress");
     assert.ok(recovered.lease.fencingToken>claim.lease.fencingToken,"task recovery increments fencing token");
     await assert.rejects(a.transitionTask({taskId:created.task.taskId,expectedVersion:moved.version,lease:claim.lease,status:"review"}),/expired, stale, or not owned/);
+
+    // A task abandoned immediately after claim (before in_progress) must also
+    // be recoverable once its recorded lease expires.
+    const claimedOnly=await a.createTask({title:"Claimed-only recovery fixture",dedupeKey:"claimed-recovery:"+cryptoRandom(),status:"ready"});
+    const abandonedClaim=await a.claimTask({taskId:claimedOnly.task.taskId,ownerId:"worker-claimed-abandoned",leaseMs:5000});
+    assert.ok(abandonedClaim);
+    assert.equal(abandonedClaim.task.status,"claimed");
+    now+=6000;
+    const claimedRecovery=await b.claimTask({taskId:claimedOnly.task.taskId,ownerId:"worker-claimed-recovery",leaseMs:10000});
+    assert.ok(claimedRecovery,"expired claimed task can be reclaimed");
+    assert.equal(claimedRecovery.task.status,"claimed");
+    assert.equal(claimedRecovery.task.recoveredFromStatus,"claimed");
+    assert.ok(claimedRecovery.lease.fencingToken>abandonedClaim.lease.fencingToken);
+    await assert.rejects(
+      a.heartbeatLease({lease:abandonedClaim.lease,leaseMs:10000}),
+      /expired, stale, or not owned/
+    );
+
     const leaseAudit=await pool.query("SELECT event_type,payload FROM jarvis.events WHERE aggregate_type='coordination_lease' AND aggregate_id=$1 ORDER BY aggregate_version",[ "task:"+created.task.taskId ]);
     assert.ok(leaseAudit.rows.some(x=>x.event_type==="lease_acquired"));
     assert.ok(leaseAudit.rows.some(x=>x.event_type==="lease_reclaimed"));
