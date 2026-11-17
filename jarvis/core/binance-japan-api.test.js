@@ -23,7 +23,7 @@ test("creates an expiring immutable approval request, never places an order",asy
   {filterType:"MIN_NOTIONAL",minNotional:"100"}
  ]}]})};
  const approvalStore={create:async value=>{created=value;return{created:true,approval:{id:"11111111-1111-4111-8111-111111111111",...value}};}};
- await handleBinanceApi({req:{method:"POST",headers:{authorization:"Bearer token","content-type":"application/json"},body:{symbol:"BTCJPY",side:"BUY",price:"10000000",quantity:"0.0001"}},res,url:new URL("https://jarvis.test/v1/binance/orders/prepare"),client,approvalStore,token:"token",maxNotionalYen:5000,now:()=>new Date("2026-11-18T00:00:00Z"),...h});
+ await handleBinanceApi({req:{method:"POST",headers:{authorization:"Bearer token","content-type":"application/json"},body:{symbol:"BTCJPY",side:"BUY",price:"10000000",quantity:"0.0001",idempotencyKey:"buy-btcjpy-001"}},res,url:new URL("https://jarvis.test/v1/binance/orders/prepare"),client,approvalStore,token:"token",maxNotionalYen:5000,now:()=>new Date("2026-11-18T00:00:00Z"),...h});
  assert.equal(res.status,201);assert.equal(created.resourceId,"binance-japan-spot");assert.equal(created.operationPayload.type,"LIMIT");assert.equal(created.operationPayload.timeInForce,"GTC");assert.equal(created.expiresAt,"2026-11-18T00:15:00.000Z");assert.equal(res.body.executionEnabled,false);
 });
 
