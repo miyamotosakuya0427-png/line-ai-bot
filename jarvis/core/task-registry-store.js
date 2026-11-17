@@ -202,7 +202,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         }
         const next={...current.task,status:"claimed",ownerAgent:workerId,updatedAt:now,startedAt:current.task.startedAt||now,leaseOwner:lease.ownerId,leaseTokenHash:hash(lease.token),leaseExpiresAt:lease.expiresAt,fencingToken:lease.fencingToken,...(reclaimable?{recoveredFromStatus:current.task.status,recoveredAt:now}:{})};
         await append(c,taskId,reclaimable?"lease_reclaimed":"claimed",next);
-        const bound=await c.query("UPDATE jarvis.worker_registry SET current_task_id=$1,lease_resource_key=$2,fencing_token=$3,status='running',heartbeat_at=$4,version=version+1,updated_at=$4 WHERE worker_id=$5 AND status='idle' AND current_task_id IS NULL RETURNING *",[taskId,lease.resourceKey,lease.fencingToken,now,workerId]);
+        const bound=await c.query("UPDATE jarvis.worker_registry SET current_task_id=$1,lease_resource_key=$2,fencing_token=$3,status='running',heartbeat_at=$4,version=version+1,updated_at=$4 WHERE worker_id=$5 AND status IN ('idle','recovering') AND current_task_id IS NULL RETURNING *",[taskId,lease.resourceKey,lease.fencingToken,now,workerId]);
         if(bound.rowCount!==1)throw new Error("Atomic Worker binding failed");
         return {task:clone(next),version:current.version+1,lease,worker:bound.rows[0]};
       });
