@@ -149,6 +149,10 @@ function createPostgresExecutionKernel({pool,clock=()=>new Date().toISOString(),
         const task=await c.query("SELECT payload FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1 ORDER BY aggregate_version DESC LIMIT 1 FOR SHARE",[taskId]);
         const taskState=task.rows[0]?.payload;
         if(!taskState||!["claimed","in_progress"].includes(taskState.status)||taskState.leaseOwner!==workerId||Number(taskState.fencingToken)!==taskLease.fencingToken||taskState.projectId!==projectId)throw new Error("Task is not actively owned by this worker");
+        // Serialize both operation-ID and idempotency-key races before reading
+        // the journal. Sorted advisory locks avoid lock-order inversion.
+        const operationLocks=["fenced-operation:"+operationId,"fenced-idempotency:"+idempotencyKey].sort();
+        for(const lockKey of operationLocks)await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[lockKey]);
         const prior=await c.query("SELECT * FROM jarvis.fenced_operations WHERE operation_id=$1 OR idempotency_key=$2 FOR UPDATE",[operationId,idempotencyKey]);
         if(prior.rows[0]){
           const p=prior.rows[0];
