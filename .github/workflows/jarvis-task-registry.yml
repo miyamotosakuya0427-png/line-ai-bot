@@ -1,4 +1,7 @@
 name: ONE JARVIS Task Registry PostgreSQL 16
+
+permissions:
+  contents: read
 on:
   pull_request:
     paths:
@@ -10,6 +13,7 @@ on:
       - "jarvis/core/task-registry-auth.test.js"
       - "jarvis/server.js"
       - "jarvis/migrations/0004_task_registry.sql"
+      - "jarvis/migrations/0005_task_registry_scoped_dedupe.sql"
       - ".github/workflows/jarvis-task-registry.yml"
   push:
     branches:

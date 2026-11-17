@@ -13,3 +13,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS events_task_dedupe_key
   WHERE aggregate_type = 'task'
     AND event_type = 'created'
     AND payload ? 'dedupeKey';
+
+INSERT INTO jarvis.schema_migrations(version)
+VALUES ('0005_task_registry_scoped_dedupe')
+ON CONFLICT (version) DO NOTHING;
