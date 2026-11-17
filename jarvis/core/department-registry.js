@@ -82,7 +82,6 @@ function createDepartmentDispatcher({registry,handlers={},leaseMs=60000,heartbea
           finally{heartbeatBusy=false;}
         })();
       },heartbeatMs);
-      heartbeat.unref?.();
       let result;
       try{
         result=await handler(payload,{
