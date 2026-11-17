@@ -4,7 +4,6 @@ const crypto=require("node:crypto");
 const {validateLimitOrder}=require("./binance-japan-spot");
 const {RESOURCE_ID}=require("./binance-japan-executor");
 
-function uuid(value){return typeof value==="string"&&/^[0-9a-f-]{36}$/i.test(value);}
 function bearer(res,json,status,message){return json(res,status,{ok:false,error:message},{ "WWW-Authenticate":"Bearer" });}
 
 async function handleBinanceApi({req,res,url,client=null,executor=null,approvalStore=null,token="",ownerToken="",json,readJson,isAuthorized,now=()=>new Date(),maxNotionalYen=5000}={}) {
@@ -29,12 +28,14 @@ async function handleBinanceApi({req,res,url,client=null,executor=null,approvalS
     return json(res,200,{ok:true,source:"Binance Japan Spot API",symbol,interval,klines,verification:"exchange_response_not_independently_verified"});
   }
   if(req.method==="GET"&&url.pathname==="/v1/binance/account"){
+    if(!isAuthorized(req,ownerToken))return bearer(res,json,ownerToken?401:503,ownerToken?"Owner authentication required":"Owner authentication is not configured");
     if(!client.configured)return json(res,503,{ok:false,error:"Binance read-only API credentials are not configured"});
     const account=await client.account();
     const balances=(account.balances||[]).filter(x=>Number(x.free||0)>0||Number(x.locked||0)>0).map(x=>({asset:x.asset,free:x.free,locked:x.locked}));
     return json(res,200,{ok:true,account:{accountType:account.accountType,canTrade:account.canTrade,canWithdraw:account.canWithdraw,canDeposit:account.canDeposit,balances},safety:{withdrawalActionsExposed:false}});
   }
   if(req.method==="GET"&&url.pathname==="/v1/binance/open-orders"){
+    if(!isAuthorized(req,ownerToken))return bearer(res,json,ownerToken?401:503,ownerToken?"Owner authentication required":"Owner authentication is not configured");
     if(!client.configured)return json(res,503,{ok:false,error:"Binance read-only API credentials are not configured"});
     const symbol=url.searchParams.get("symbol")||undefined;
     if(symbol&&!/^[A-Z0-9]{5,20}$/.test(symbol.toUpperCase()))return json(res,400,{ok:false,error:"Invalid symbol"});
