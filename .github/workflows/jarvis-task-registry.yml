@@ -21,6 +21,7 @@ on:
       - "jarvis/core/postgres-scheduling-store.integration.test.js"
       - "jarvis/core/postgres-execution-kernel.js"
       - "jarvis/core/postgres-execution-kernel.integration.test.js"
+      - "jarvis/core/postgres-task-registry-rate-limiter.js"
       - "jarvis/migrations/0007_execution_kernel_fencing.sql"
       - ".github/workflows/jarvis-task-registry.yml"
   push:
