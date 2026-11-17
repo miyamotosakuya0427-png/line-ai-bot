@@ -39,7 +39,10 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     const root=await a.createTask({title:"Dependency root",dedupeKey:"dependency-root:"+cryptoRandom(),status:"ready"});
     const child=await b.createTask({title:"Dependency child",dedupeKey:"dependency-child:"+cryptoRandom(),status:"ready",dependencyTaskIds:[root.task.taskId]});
     assert.deepEqual(child.task.dependencyTaskIds,[root.task.taskId]);
-    assert.equal(await a.claimTask({taskId:child.task.taskId,ownerId:"dependency-child-worker",leaseMs:10000}),null,"dependent task must wait until its dependency is completed");
+    await assert.rejects(
+      a.claimTask({taskId:child.task.taskId,ownerId:"dependency-child-worker",leaseMs:10000}),
+      /Task dependencies are not completed/
+    );
     const rootLease=await a.acquireLease({resourceKey:"task:"+root.task.taskId,ownerId:"dependency-check",leaseMs:10000});
     await assert.rejects(
       a.transitionTask({taskId:root.task.taskId,expectedVersion:root.version,lease:rootLease,status:"blocked",patch:{dependencyTaskIds:[child.task.taskId]}}),
