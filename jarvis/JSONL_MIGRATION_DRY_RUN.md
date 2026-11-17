@@ -35,5 +35,19 @@ The command emits JSON to stdout and exits with code 2 if any issue is found. It
 5. Re-run the dry-run against the reviewed copy and compare event counts, latest counts, and checksums.
 6. A later migration phase must use a separately reviewed importer, a disposable PostgreSQL database, transaction boundaries, idempotent upserts, row-by-row reconciliation, and a rollback plan. This utility does none of those things.
 
+## Storage path discovery
+
+The application obtains the job journal path from `JARVIS_JOB_STORE_PATH`. The approval journal path is `JARVIS_APPROVAL_STORE_PATH`, or defaults to `${JARVIS_JOB_STORE_PATH}.approvals`. These are environment-provided absolute paths; source code does not reveal their runtime values. The dedicated Render `one-jarvis` service is currently on branch `one-jarvis-foundation`, while this work is on the PR branch; no live service filesystem path or file bytes are exposed by the repository inspection. Therefore no real-data dry-run was attempted. Do not infer a path or read a different branch's data as a substitute.
+
+## Fixture-only PostgreSQL rehearsal
+
+`npm test` includes `scripts/postgres-migration-rehearsal.test.js` and the real PostgreSQL integration test. The rehearsal accepts synthetic arrays only and refuses pools whose configured connection string is not loopback or whose database name does not contain `test`. It writes one version-1 event per aggregate in a single transaction, preserves the complete JSON payload (including job lease and approval digest fields), compares canonical checksums and counts, and rolls back on any conflict. Identical fixture replays are treated as already imported; conflicting aggregate payloads abort rather than overwrite. The integration test injects a mid-transaction failure, verifies row counts return to their prior value, imports fixtures, replays them, and checks store API reads. No JSONL file or Neon endpoint is passed to this function.
+
+## Recovery and cutover rules
+
+- On any checksum/count mismatch, conflict, or injected/real failure, stop; the rehearsal transaction rolls back. Keep the source JSONL untouched.
+- Do not point the rehearsal at Neon or a production connection string. It refuses non-loopback hosts and non-test database names.
+- For a future production migration, freeze writers, preserve a verified backup, record source checksums, migrate in a separately approved maintenance window, compare every aggregate and idempotency key, then switch storage only after independent sign-off. Rollback means restore the prior application storage configuration and retain original JSONL; never delete or overwrite it.
+
 ## Current limitations
 This phase does not write PostgreSQL, prove that the live Neon schema matches every historical record, perform rollback, or execute production migration. It checks the job and approval snapshot contracts used by the current stores. Legacy records that predate newer optional approval fields are retained as optional; a later compatibility review must confirm their application semantics before import.
