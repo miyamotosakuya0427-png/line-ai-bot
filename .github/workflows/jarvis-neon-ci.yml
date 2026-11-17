@@ -25,6 +25,23 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: jarvis_test
+          POSTGRES_PASSWORD: jarvis_test_only
+          POSTGRES_DB: one_jarvis_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U jarvis_test -d one_jarvis_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      JARVIS_TEST_DATABASE_URL: postgresql://jarvis_test:jarvis_test_only@127.0.0.1:5432/one_jarvis_test?sslmode=disable
+      JARVIS_ALLOW_TEST_SCHEMA_RESET: yes
     defaults:
       run:
         working-directory: jarvis
@@ -36,5 +53,5 @@ jobs:
           package-manager-cache: false
       - run: npm install --ignore-scripts --no-audit --no-fund
       - run: npm test
-      - run: test -z "$JARVIS_TEST_DATABASE_URL" || echo "Isolated PostgreSQL integration test explicitly enabled"
+      - run: echo "Running isolated local PostgreSQL integration tests; Neon is not used"
       - run: node --check core/postgres-event-store.js && node --check core/postgres-operational-stores.js && node --check server.js && node --check core/job-store.js && node --check core/approval-store.js && node --check core/worker.js && node --check core/approval-store.test.js && node --check core/postgres-operational-stores.test.js && node --check core/postgres-operational-stores.integration.test.js && node --check core/approval-store.test.js
