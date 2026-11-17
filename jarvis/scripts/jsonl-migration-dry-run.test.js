@@ -65,3 +65,15 @@ test("canonical JSON sorts object keys recursively but preserves array order",()
  assert.equal(canonicalJson({z:1,a:{y:2,x:3}}),canonicalJson({a:{x:3,y:2},z:1}));
  assert.notEqual(canonicalJson([1,2]),canonicalJson([2,1]));
 });
+
+test("legitimate retry snapshots are not mistaken for duplicate aggregate creation",async t=>{
+ const f=await fixture(t);
+ await writePair(f,[job("retry",{status:"queued",attempts:0}),job("retry",{status:"running",attempts:1}),job("retry",{status:"queued",attempts:1})],[approval("a1")]);
+ const r=await runDryRun({jobsPath:f.jobs,approvalsPath:f.approvals});
+ assert.equal(r.pass,true);assert.equal(r.jobs.duplicateIds.length,0);assert.equal(r.summary.latestJobs,1);
+});
+test("report contains checksums and metadata but never copies source payloads",async t=>{
+ const f=await fixture(t);await writePair(f,[job("private",{payload:{secretMarker:"DO_NOT_LEAK"}})],[approval("a1",{details:"PRIVATE_APPROVAL_DETAILS"})]);
+ const serialized=JSON.stringify(await runDryRun({jobsPath:f.jobs,approvalsPath:f.approvals}));
+ assert.equal(serialized.includes("DO_NOT_LEAK"),false);assert.equal(serialized.includes("PRIVATE_APPROVAL_DETAILS"),false);
+});
