@@ -138,12 +138,23 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
 
     const heartbeatTask=await a.createTask({title:"Task lease heartbeat sync",dedupeKey:"task-heartbeat:"+cryptoRandom(),status:"ready"});
     const heartbeatClaim=await a.claimTask({taskId:heartbeatTask.task.taskId,ownerId:"heartbeat-worker",leaseMs:10000});
-    now+=1000;
+    const heartbeatStateBefore=await a.getTask(heartbeatTask.task.taskId);
+    now+=5000;
     const taskHeartbeat=await a.heartbeatLease({lease:heartbeatClaim.lease,leaseMs:15000});
-    const heartbeatState=await a.getTask(heartbeatTask.task.taskId);
-    assert.equal(heartbeatState.task.leaseExpiresAt,taskHeartbeat.expiresAt,"task aggregate expiry must match renewed coordination lease");
-    assert.equal(heartbeatState.version,heartbeatClaim.version+1,"task heartbeat must append an aggregate event");
-    assert.equal(await a.releaseLease({lease:taskHeartbeat}),true);
+    assert.ok(Date.parse(taskHeartbeat.expiresAt)>Date.parse(heartbeatClaim.lease.expiresAt),"heartbeat extends the coordination lease");
+    const heartbeatStateAfter=await a.getTask(heartbeatTask.task.taskId);
+    assert.equal(heartbeatStateAfter.version,heartbeatStateBefore.version,"heartbeat does not invalidate the task's expected aggregate version");
+    now+=6000;
+    assert.equal(await b.claimTask({taskId:heartbeatTask.task.taskId,ownerId:"too-early-worker",leaseMs:10000}),null,"the renewed coordination lease blocks reclaim after the original task expiry");
+    now+=10000;
+    const heartbeatRecovered=await b.claimTask({taskId:heartbeatTask.task.taskId,ownerId:"heartbeat-recovery",leaseMs:10000});
+    assert.ok(heartbeatRecovered,"task becomes reclaimable after the renewed coordination lease expires");
+    assert.ok(heartbeatRecovered.lease.fencingToken>heartbeatClaim.lease.fencingToken);
+    await assert.rejects(
+      a.transitionTask({taskId:heartbeatTask.task.taskId,expectedVersion:heartbeatStateBefore.version,lease:heartbeatClaim.lease,status:"review"}),
+      /expired, stale, or not owned/
+    );
+    assert.equal(await b.releaseLease({lease:heartbeatRecovered.lease}),true);
 
     const voluntarilyReleasedTask=await a.createTask({title:"Voluntary task lease release",dedupeKey:"voluntary-release:"+cryptoRandom(),status:"ready"});
     const voluntaryClaim=await a.claimTask({taskId:voluntarilyReleasedTask.task.taskId,ownerId:"voluntary-worker-a",leaseMs:10000});
