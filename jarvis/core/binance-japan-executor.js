@@ -1,5 +1,6 @@
 "use strict";
 
+const {validateLimitOrder}=require("./binance-japan-spot");
 const RESOURCE_ID="binance-japan-spot";
 const ACTOR="binance-japan-spot-executor";
 
@@ -11,7 +12,10 @@ function createBinanceJapanOrderExecutor({client,approvalStore,enabled=false,own
     const approval=await approvalStore.get(approvalId);
     if(!approval)return {ok:false,status:"not_found"};
     const payload=approval.operationPayload;
-    if(approval.resourceId!==RESOURCE_ID||approval.actionClass!=="financial"||!payload||payload.type!=="LIMIT"||payload.timeInForce!=="GTC")throw new Error("Approval is not a valid Binance Japan Spot limit order");
+    if(approval.departmentId!=="trader"||approval.resourceId!==RESOURCE_ID||approval.actionClass!=="financial"||!payload||typeof payload.clientOrderId!=="string"||!/^OJ[A-Za-z0-9]{8,34}$/.test(payload.clientOrderId))throw new Error("Approval is not a valid Binance Japan Spot order");
+    const exchangeInfo=await client.exchangeInfo(payload.symbol);
+    const validated=validateLimitOrder(payload,exchangeInfo,{maxNotional:String(maxNotionalYen)});
+    for(const key of ["symbol","side","type","timeInForce","quantity","price"])if(validated[key]!==payload[key])throw new Error("Approved order payload does not match current Binance order rules");
     const notional=Number(payload.price)*Number(payload.quantity);
     if(!Number.isFinite(notional)||notional<=0||notional>maxNotionalYen)throw new Error("Binance order exceeds the configured JPY notional limit");
     const risk=await authorizeRisk({approval,payload,notionalYen:notional});
