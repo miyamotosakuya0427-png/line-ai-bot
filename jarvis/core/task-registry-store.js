@@ -3,7 +3,7 @@ const crypto = require("node:crypto");
 
 const {ALL_TASK_STATES,canonicalTaskState,canTransitionTask}=require("./task-state-machine");
 const TASK_STATES = ALL_TASK_STATES;
-const PATCH_FIELDS = new Set(["scope","ownerConversation","ownerAgent","priority","branch","baseBranch","headSha","pullRequest","dependencyTaskIds","parentTaskId","changedPaths","testRunIds","verificationSummary","blockerIds","nextAction","startedAt","completedAt","outcomeUnknownReason","reconciliationId"]);
+const PATCH_FIELDS = new Set(["scope","ownerConversation","ownerAgent","departmentId","priority","branch","baseBranch","headSha","pullRequest","dependencyTaskIds","changedPaths","testRunIds","verificationSummary","blockerIds","nextAction","startedAt","completedAt","outcomeUnknownReason","reconciliationId"]);
 const MAX_TITLE=240, MAX_SCOPE=12000, MAX_OWNER=128, MAX_DEDUPE=240;
 function text(value,max,required=true){return typeof value==="string"&&value.length<=max&&(!required||!!value.trim());}
 function clone(value){return JSON.parse(JSON.stringify(value));}
@@ -111,10 +111,10 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
     async init(){return init();},
     async createTask(input={}){
       await init();
-      const {title,scope="",acceptanceCriteria=[],dedupeKey,projectId="one-jarvis",ownerConversation="unassigned",ownerAgent="unassigned",priority="P2",status="proposed",dependencyTaskIds=[],parentTaskId=null}=input;
-      if(!text(title,MAX_TITLE)||!text(scope,MAX_SCOPE,false)||!text(dedupeKey,MAX_DEDUPE)||!text(projectId,128)||!text(ownerConversation,MAX_OWNER)||!text(ownerAgent,MAX_OWNER)||!["P0","P1","P2","P3"].includes(priority)||!TASK_STATES.has(status)||!Array.isArray(acceptanceCriteria)||acceptanceCriteria.length>100||acceptanceCriteria.some(x=>!text(x,1000))||!Array.isArray(dependencyTaskIds)||dependencyTaskIds.length>100||dependencyTaskIds.some(x=>!text(x,80))||(parentTaskId!==null&&!text(parentTaskId,80)))throw new Error("Invalid task input");
+      const {title,scope="",acceptanceCriteria=[],dedupeKey,projectId="one-jarvis",ownerConversation="unassigned",ownerAgent="unassigned",departmentId="general",priority="P2",status="proposed",dependencyTaskIds=[],parentTaskId=null}=input;
+      if(!text(title,MAX_TITLE)||!text(scope,MAX_SCOPE,false)||!text(dedupeKey,MAX_DEDUPE)||!text(projectId,128)||!text(ownerConversation,MAX_OWNER)||!text(ownerAgent,MAX_OWNER)||!text(departmentId,128)||!["P0","P1","P2","P3"].includes(priority)||!TASK_STATES.has(status)||!Array.isArray(acceptanceCriteria)||acceptanceCriteria.length>100||acceptanceCriteria.some(x=>!text(x,1000))||!Array.isArray(dependencyTaskIds)||dependencyTaskIds.length>100||dependencyTaskIds.some(x=>!text(x,80))||(parentTaskId!==null&&!text(parentTaskId,80)))throw new Error("Invalid task input");
       const id=crypto.randomUUID(),now=clock();
-      const task={taskId:id,dedupeKey,projectId,title,scope,acceptanceCriteria:[...acceptanceCriteria],ownerConversation,ownerAgent,priority,status,state:canonicalTaskState(status),parentTaskId,dependencyTaskIds:[...new Set(dependencyTaskIds)],branch:null,baseBranch:null,headSha:null,pullRequest:null,createdAt:now,updatedAt:now,startedAt:null,completedAt:null,leaseOwner:null,leaseTokenHash:null,leaseExpiresAt:null,fencingToken:0,changedPaths:[],testRunIds:[],verificationSummary:null,blockerIds:[],nextAction:null};
+      const task={taskId:id,dedupeKey,projectId,title,scope,acceptanceCriteria:[...acceptanceCriteria],ownerConversation,ownerAgent,departmentId,priority,status,state:canonicalTaskState(status),parentTaskId,dependencyTaskIds:[...new Set(dependencyTaskIds)],branch:null,baseBranch:null,headSha:null,pullRequest:null,createdAt:now,updatedAt:now,startedAt:null,completedAt:null,leaseOwner:null,leaseTokenHash:null,leaseExpiresAt:null,fencingToken:0,changedPaths:[],testRunIds:[],verificationSummary:null,blockerIds:[],nextAction:null};
       return tx(async c=>{
         if(parentTaskId){await lock(c,"task-parent:"+parentTaskId);const parent=await latest(c,parentTaskId);if(!parent||["completed","cancelled"].includes(canonicalTaskState(parent.task.state||parent.task.status)))throw new Error("Parent task is missing or terminal");if(parent.task.projectId!==projectId||parent.task.ownerConversation!==ownerConversation)throw new Error("Parent task scope mismatch");}
         await lock(c,"task-dedupe:"+dedupeKey);
@@ -143,7 +143,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
       if(!Number.isInteger(limit)||limit<1||limit>200)throw new Error("Invalid task limit");
       if(!Number.isInteger(offset)||offset<0||offset>1000000)throw new Error("Invalid task offset");
       const r=await pool.query(
-        "SELECT aggregate_id,aggregate_version,payload FROM (SELECT DISTINCT ON (aggregate_id) aggregate_id,aggregate_version,payload FROM jarvis.events WHERE aggregate_type='task' ORDER BY aggregate_id,aggregate_version DESC) latest WHERE ($1::text IS NULL OR payload->>'status'=$1) AND ($2::text IS NULL OR payload->>'ownerAgent'=$2) AND ($3::text IS NULL OR payload->>'ownerConversation'=$3) AND ($4::text IS NULL OR payload->>'projectId'=$4) ORDER BY payload->>'updatedAt' DESC,aggregate_id ASC LIMIT $5 OFFSET $6",
+        "SELECT aggregate_id,aggregate_version,payload FROM (SELECT DISTINCT ON (aggregate_id) aggregate_id,aggregate_version,payload FROM jarvis.events WHERE aggregate_type='task' ORDER BY aggregate_id,aggregate_version DESC) latest WHERE ($1::text IS NULL OR payload->>'status'=$1 OR payload->>'state'=$1) AND ($2::text IS NULL OR payload->>'ownerAgent'=$2) AND ($3::text IS NULL OR payload->>'ownerConversation'=$3) AND ($4::text IS NULL OR payload->>'projectId'=$4) ORDER BY payload->>'updatedAt' DESC,aggregate_id ASC LIMIT $5 OFFSET $6",
         [status,ownerAgent,ownerConversation,projectId,limit,offset]
       );
       return r.rows.map(x=>({task:clone(x.payload),version:Number(x.aggregate_version)}));
