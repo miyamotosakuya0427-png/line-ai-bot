@@ -114,6 +114,22 @@ function createPostgresExecutionKernel({pool,clock=()=>new Date().toISOString(),
       for(const candidate of candidates)results.push({workerId:candidate.worker_id,...await this.recoverExpiredWorker({workerId:candidate.worker_id})});
       return results;
     },
+    async completeWorkerTask({workerId,taskId,lease,finalState}={}){
+      await init();
+      if(!validId(workerId)||!validId(taskId)||!["completed","failed","outcome_unknown","quarantined","cancelled","waiting","retry_wait"].includes(finalState))throw new Error("Invalid Worker task completion");
+      return tx(async c=>{
+        await getLease(c,lease);
+        if(lease.ownerId!==workerId||lease.resourceKey!=="task:"+taskId)throw new Error("Task lease does not belong to Worker");
+        const current=await c.query("SELECT status,current_task_id,lease_resource_key,fencing_token,version FROM jarvis.worker_registry WHERE worker_id=$1 FOR UPDATE",[workerId]);
+        const worker=current.rows[0];
+        if(!worker||worker.current_task_id!==taskId||worker.lease_resource_key!==lease.resourceKey||Number(worker.fencing_token)!==lease.fencingToken)throw new Error("Worker task binding is stale");
+        const now=clock();
+        const updated=await c.query("UPDATE jarvis.worker_registry SET status='idle',current_task_id=NULL,lease_resource_key=NULL,fencing_token=NULL,version=version+1,updated_at=$1 WHERE worker_id=$2 AND version=$3 RETURNING *",[now,workerId,Number(worker.version)]);
+        if(updated.rowCount!==1)throw new Error("Worker release lost an optimistic concurrency race");
+        await appendWorkerEvent(c,workerId,"worker_task_released",{workerId,taskId,finalState,fencingToken:lease.fencingToken,releasedAt:now,workerVersion:Number(updated.rows[0].version)});
+        return updated.rows[0];
+      });
+    },
     async transitionWorker({workerId,expectedVersion,status}={}){
       await init();
       if(!validId(workerId)||!Number.isSafeInteger(expectedVersion)||!WORKER_STATES.has(status))throw new Error("Invalid worker transition");
