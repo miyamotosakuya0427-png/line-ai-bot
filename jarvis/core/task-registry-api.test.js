@@ -2,7 +2,7 @@
 const test=require("node:test");
 const assert=require("node:assert/strict");
 const {createServer}=require("../server");
-const {createInMemoryTaskRegistryRateLimiter}=require("./task-registry-api");
+const {createTaskRegistryApi,createInMemoryTaskRegistryRateLimiter}=require("./task-registry-api");
 const {canonicalTaskState}=require("./task-state-machine");
 
 function fixture({configured=true,authorize=true,rateLimiter=null}={}){
@@ -27,6 +27,10 @@ function fixture({configured=true,authorize=true,rateLimiter=null}={}){
 }
 async function listen(server){await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));return"http://127.0.0.1:"+server.address().port;}
 async function post(root,path,body,token="agent-a"){return fetch(root+path,{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify(body)});}
+
+test("configured Task Registry API refuses an implicit process-local rate limiter",()=>{
+  assert.throws(()=>createTaskRegistryApi({registry:{},authorize:async()=>({}),json(){},readJson(){}}),/shared Task Registry rate limiter must be explicitly configured/);
+});
 
 test("Task Registry API fails closed when registry or agent authorization is not configured",async t=>{
   for(const options of [{configured:false,authorize:true},{configured:true,authorize:false}]){
