@@ -192,7 +192,8 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         if(!current)throw new Error("Task does not exist");
         const now=clock();
         const currentState=canonicalTaskState(current.task.state||current.task.status);
-        const reclaimable=currentState==="claimed"||currentState==="running";
+        const reclaimable=currentState==="claimed";
+        if(currentState==="running")throw new Error("Expired running Task requires outcome_unknown reconciliation; automatic reclaim is prohibited");
         if(currentState!=="queued"&&!reclaimable)throw new Error("Task is not claimable");
         if(reclaimable){
           const previousExpiry=Date.parse(current.task.leaseExpiresAt||"");
