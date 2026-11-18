@@ -2,6 +2,7 @@
 const test=require("node:test");
 const assert=require("node:assert/strict");
 const {createServer}=require("../server");
+const {createInMemoryTaskRegistryRateLimiter}=require("./task-registry-api");
 
 function fixture({configured=true,authorize=true,rateLimiter=null}={}){
   const tasks=new Map();let sequence=0;
@@ -19,7 +20,7 @@ function fixture({configured=true,authorize=true,rateLimiter=null}={}){
   const server=createServer({
     taskRegistry:configured?registry:null,
     authorizeTaskRegistry:authorize?async(req)=>req.headers.authorization==="Bearer agent-a"?{agentId:"agent-a",conversationId:"opaque-conversation",scopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]}:req.headers.authorization==="Bearer agent-b"?{agentId:"agent-b",scopes,projectIds:["other-project"],resourcePrefixes:["path:other-project:"]}:req.headers.authorization==="Bearer agent-a-other"?{agentId:"agent-a",conversationId:"other-conversation",scopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]}:req.headers.authorization==="Bearer agent-a-unbound"?{agentId:"agent-a",scopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]}:null:null,
-    taskRegistryRateLimiter:rateLimiter
+    taskRegistryRateLimiter:rateLimiter||createInMemoryTaskRegistryRateLimiter()
   });
   return{server,registry,tasks};
 }
