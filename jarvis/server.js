@@ -829,7 +829,7 @@ if (require.main===module) {
       jobStore=JOB_STORE_PATH?createJobStore({filePath:JOB_STORE_PATH}):null;
       approvalStore=APPROVAL_STORE_PATH?createApprovalStore({filePath:APPROVAL_STORE_PATH}):null;
     }
-    let taskRegistry=null,authorizeTaskRegistry=null;
+    let taskRegistry=null,authorizeTaskRegistry=null,taskRegistryRateLimiter=null,executionRecoveryScheduler=null;
     if(process.env.JARVIS_TASK_REGISTRY_API_ENABLED==="true"){
       if(!postgresPool)throw new Error("Task Registry API requires JARVIS_STORAGE_MODE=postgres.");
       const {createTaskRegistry}=require("./core/task-registry-store");
@@ -837,6 +837,13 @@ if (require.main===module) {
       taskRegistry=createTaskRegistry({pool:postgresPool});
       await taskRegistry.init(); // Read-only schema check; migration 0004 is never applied here.
       authorizeTaskRegistry=createTaskRegistryAuthorizer();
+      const {createPostgresTaskRegistryRateLimiter}=require("./core/postgres-task-registry-rate-limiter");
+      const {createPostgresExecutionKernel}=require("./core/postgres-execution-kernel");
+      const {createExecutionRecoveryScheduler}=require("./core/execution-recovery-scheduler");
+      const executionKernel=createPostgresExecutionKernel({pool:postgresPool});
+      await executionKernel.init(); // Read-only migration 0007/schema check; never applies a migration.
+      taskRegistryRateLimiter=createPostgresTaskRegistryRateLimiter({pool:postgresPool});
+      if(process.env.JARVIS_EXECUTION_RECOVERY_ENABLED==="true")executionRecoveryScheduler=createExecutionRecoveryScheduler({executionKernel});
     }
     const videoBatchStore=JOB_STORE_PATH?createVideoBatchStore({filePath:JOB_STORE_PATH+".video-batches.jsonl"}):null;
     const paperTradingStore=JOB_STORE_PATH?createPaperTradingStore({filePath:JOB_STORE_PATH+".paper-trading.jsonl"}):null;
@@ -855,10 +862,10 @@ if (require.main===module) {
     const contentScheduler=worker&&process.env.JARVIS_CONTENT_AUTOPLAN_ENABLED==="true"?startDailyContentPlanner({store:jobStore}):null;
     const subsidyScheduler=worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"?startDailySubsidyMonitor({store:jobStore}):null;
     const commandPlanner=createCommandPlanner();
-    const server=createServer({jobStore,approvalStore,videoBatchStore,paperTradingStore,influenceEventStore,worker,departmentHandlers,departmentContextLoader,commandPlanner,taskRegistry,authorizeTaskRegistry}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
-    const shutdown=signal=>{ console.log(`Received ${signal}; shutting down.`); if(subsidyScheduler)subsidyScheduler.stop(); if(contentScheduler)contentScheduler.stop(); if(worker)worker.stop(); server.close(async error=>{if(error){console.error("Graceful shutdown failed.");process.exit(1);}if(postgresPool){try{await postgresPool.end();}catch{console.error("Database pool shutdown failed.");}}process.exit(0);}); setTimeout(()=>process.exit(1),10000).unref(); };
+    const server=createServer({jobStore,approvalStore,videoBatchStore,paperTradingStore,influenceEventStore,worker,departmentHandlers,departmentContextLoader,commandPlanner,taskRegistry,authorizeTaskRegistry,taskRegistryRateLimiter}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
+    const shutdown=signal=>{ console.log(`Received ${signal}; shutting down.`); if(subsidyScheduler)subsidyScheduler.stop(); if(contentScheduler)contentScheduler.stop(); if(executionRecoveryScheduler)executionRecoveryScheduler.stop(); if(worker)worker.stop(); server.close(async error=>{if(error){console.error("Graceful shutdown failed.");process.exit(1);}if(postgresPool){try{await postgresPool.end();}catch{console.error("Database pool shutdown failed.");}}process.exit(0);}); setTimeout(()=>process.exit(1),10000).unref(); };
     process.on("SIGTERM",()=>shutdown("SIGTERM")); process.on("SIGINT",()=>shutdown("SIGINT"));
-    server.listen(PORT,"0.0.0.0",()=>console.log(`ONE JARVIS running on port ${PORT}`));
+    server.listen(PORT,"0.0.0.0",()=>{if(executionRecoveryScheduler)executionRecoveryScheduler.start();console.log(`ONE JARVIS running on port ${PORT}`);});
   })().catch(error=>{console.error(process.env.JARVIS_STORAGE_MODE==="postgres"?"ONE JARVIS startup failed; check PostgreSQL configuration and connectivity.":error.message);process.exit(1);});
 }
 module.exports={createServer,isAuthorized,readJson};
