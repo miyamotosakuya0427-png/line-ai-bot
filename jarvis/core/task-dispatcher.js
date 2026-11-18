@@ -5,7 +5,7 @@ function createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEli
     if(!value)throw new Error("Dispatcher dependency is required: "+name);
   }
   for(const method of ["listTasks","getTask","claimTaskForWorker","transitionTask","heartbeatLease","releaseLease"])if(typeof registry[method]!=="function")throw new Error("Task Registry method is required: "+method);
-  for(const method of ["heartbeatWorker","transitionWorker","getWorker"])if(typeof executionKernel[method]!=="function")throw new Error("Execution kernel method is required: "+method);
+  for(const method of ["heartbeatWorker"])if(typeof executionKernel[method]!=="function")throw new Error("Execution kernel method is required: "+method);
   if(typeof authorizeTask!=="function"||typeof isAgentEligible!=="function"||typeof selectWorker!=="function"||typeof resultWriter!=="function"||typeof rateLimiter.consume!=="function"||!handlers||typeof handlers!=="object"||Array.isArray(handlers))throw new Error("Dispatcher callbacks are invalid");
   if(!Number.isInteger(leaseMs)||leaseMs<5000||leaseMs>3600000||!Number.isInteger(heartbeatMs)||heartbeatMs<1000||heartbeatMs>=leaseMs)throw new Error("Invalid dispatcher lease configuration");
   const handlerMap=new Map(Object.entries(handlers));
@@ -30,23 +30,24 @@ function createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEli
     if(!revalidated||revalidated.allowed!==true||revalidated.agentId!==requesterAgentId||!revalidated.projectIds?.includes(task.projectId)||revalidated.conversationId!==conversationId)throw new Error("Task authorization expired before claim");
     const claim=await registry.claimTaskForWorker({taskId,workerId:worker.workerId,leaseMs});
     if(!claim)return {dispatched:false,reason:"ATOMIC_CLAIM_CONFLICT",taskId};
-    let lease=claim.lease,active=claim,leaseLost=false,heartbeatBusy=false;
+    let lease=claim.lease,active=claim,leaseLost=false,heartbeatBusy=false,heartbeatPromise=Promise.resolve();
     const controller=new AbortController();
-    const heartbeat=setInterval(async()=>{
+    const heartbeat=setInterval(()=>{
       if(heartbeatBusy||leaseLost)return;
       heartbeatBusy=true;
-      try{
-        lease=await registry.heartbeatLease({lease,leaseMs});
-        await executionKernel.heartbeatWorker({workerId:worker.workerId,lease});
-      }catch(error){
-        leaseLost=true;
-        controller.abort(new Error("Task lease lost; worker must stop external writes"));
-      }finally{heartbeatBusy=false;}
+      heartbeatPromise=(async()=>{
+        try{
+          lease=await registry.heartbeatLease({lease,leaseMs});
+          await executionKernel.heartbeatWorker({workerId:worker.workerId,lease});
+        }catch(error){
+          leaseLost=true;
+          controller.abort(new Error("Task lease lost; worker must stop external writes"));
+        }finally{heartbeatBusy=false;}
+      })();
     },heartbeatMs);
     heartbeat.unref?.();
     try{
       active=await registry.transitionTask({taskId,expectedVersion:claim.version,lease,status:"running",patch:{nextAction:"Dispatcher worker executing"}});
-      await executionKernel.transitionWorker({workerId:worker.workerId,expectedVersion:Number(claim.worker.version),status:"running"});
       const result=await handler({task:active.task,worker,signal:controller.signal,lease,principal});
       if(leaseLost)throw new Error("Worker lost its lease before result persistence");
       if(result?.outcomeUnknown===true){
@@ -62,10 +63,13 @@ function createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEli
       active=await registry.transitionTask({taskId,expectedVersion:active.version,lease,status:"completed",patch:{verificationSummary:String(saved.summary||"Fenced result persisted").slice(0,1000)}});
       return {dispatched:true,outcome:"completed",task:active.task,result:saved};
     }catch(error){
-      if(leaseLost)throw error;
+      if(!leaseLost&&active?.version&&active.task?.status==="running"){
+        try{active=await registry.transitionTask({taskId,expectedVersion:active.version,lease,status:"outcome_unknown",patch:{outcomeUnknownReason:"Execution or fenced persistence failed; explicit reconciliation required"}});}catch{}
+      }
       throw error;
     }finally{
       clearInterval(heartbeat);
+      await heartbeatPromise.catch(()=>{});
       if(!leaseLost){
         try{await registry.releaseLease({lease});}catch{}
       }
