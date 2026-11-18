@@ -90,9 +90,9 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
     const current=await latest(c,taskId);
     if(!current)return null;
     if(current.version!==expectedVersion)throw new Error("Stale task version");
-    if(!canTransitionTask(current.task.state||current.task.status,status))throw new Error("Invalid task state transition");
+    if(!canTransitionTask(current.task.status||current.task.state,status))throw new Error("Invalid task state transition");
     const nextState=canonicalTaskState(status);
-    if(canonicalTaskState(current.task.state||current.task.status)==="outcome_unknown"&&["completed","failed"].includes(nextState)&&(!text(patch.reconciliationId,128)||!text(patch.reconciledBy,128)))throw new Error("Outcome reconciliation ID and human/operator identity are required");
+    if(canonicalTaskState(current.task.status||current.task.state)==="outcome_unknown"&&["completed","failed"].includes(nextState)&&(!text(patch.reconciliationId,128)||!text(patch.reconciledBy,128)))throw new Error("Outcome reconciliation ID and human/operator identity are required");
     if(nextState==="completed"){
       await lock(c,"task-parent:"+taskId);
       const children=await c.query("SELECT DISTINCT ON (aggregate_id) aggregate_id,payload FROM jarvis.events WHERE aggregate_type='task' ORDER BY aggregate_id,aggregate_version DESC");
