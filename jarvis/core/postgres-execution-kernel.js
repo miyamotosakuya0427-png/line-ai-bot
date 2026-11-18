@@ -123,6 +123,11 @@ function createPostgresExecutionKernel({pool,clock=()=>new Date().toISOString(),
         const current=await c.query("SELECT status,current_task_id,lease_resource_key,fencing_token,version FROM jarvis.worker_registry WHERE worker_id=$1 FOR UPDATE",[workerId]);
         const worker=current.rows[0];
         if(!worker||worker.current_task_id!==taskId||worker.lease_resource_key!==lease.resourceKey||Number(worker.fencing_token)!==lease.fencingToken)throw new Error("Worker task binding is stale");
+        const task=await c.query("SELECT payload FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1 ORDER BY aggregate_version DESC LIMIT 1",[taskId]);
+        const payload=task.rows[0]?.payload;
+        const legacy={verified:"completed",in_progress:"running",ready:"queued",blocked:"waiting",review:"waiting_approval",proposed:"pending"};
+        const persistedState=payload?.state||legacy[payload?.status]||payload?.status;
+        if(persistedState!==finalState)throw new Error("Worker cannot be released before the matching Task state is durable");
         const now=clock();
         const updated=await c.query("UPDATE jarvis.worker_registry SET status='idle',current_task_id=NULL,lease_resource_key=NULL,fencing_token=NULL,version=version+1,updated_at=$1 WHERE worker_id=$2 AND version=$3 RETURNING *",[now,workerId,Number(worker.version)]);
         if(updated.rowCount!==1)throw new Error("Worker release lost an optimistic concurrency race");
