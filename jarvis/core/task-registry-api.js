@@ -106,7 +106,7 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson,rateL
         const projectId=d.projectId||auth.principal.projectIds[0];
         if(!auth.principal.projectIds.includes(projectId))return json(res,403,{ok:false,error:"Project is outside the authenticated agent scope"});
         const result=await registry.createTask({
-          title:d.title,scope:d.scope||"",acceptanceCriteria:d.acceptanceCriteria||[],dedupeKey:d.dedupeKey,
+          title:d.title,scope:d.scope||"",acceptanceCriteria:d.acceptanceCriteria||[],dedupeKey:d.dedupeKey,departmentId:d.departmentId||"general",
           projectId,priority:d.priority||"P2",
           dependencyTaskIds:d.dependencyTaskIds||[],parentTaskId:d.parentTaskId||null,ownerConversation:auth.principal.conversationId||"agent:"+agentId,ownerAgent:agentId,
           ...(d.status==="ready"&&auth.principal.scopes.includes("tasks:dispatch")?{status:"ready"}:{status:"proposed"})
