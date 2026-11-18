@@ -1,6 +1,7 @@
 "use strict";
 
-const TASK_STATES=new Set(["proposed","ready","claimed","in_progress","blocked","review","verified","completed","cancelled"]);
+const {ALL_TASK_STATES}=require("./task-state-machine");
+const TASK_STATES=ALL_TASK_STATES;
 const ACTIONS=Object.freeze({
   list:"tasks:read",get:"tasks:read",create:"tasks:write",claim:"tasks:claim",
   heartbeat:"tasks:lease",release:"tasks:lease",transition:"tasks:transition",resourceLease:"resources:lease"
@@ -107,7 +108,7 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson,rateL
         const result=await registry.createTask({
           title:d.title,scope:d.scope||"",acceptanceCriteria:d.acceptanceCriteria||[],dedupeKey:d.dedupeKey,
           projectId,priority:d.priority||"P2",
-          dependencyTaskIds:d.dependencyTaskIds||[],ownerConversation:auth.principal.conversationId||"agent:"+agentId,ownerAgent:agentId,
+          dependencyTaskIds:d.dependencyTaskIds||[],parentTaskId:d.parentTaskId||null,ownerConversation:auth.principal.conversationId||"agent:"+agentId,ownerAgent:agentId,
           ...(d.status==="ready"&&auth.principal.scopes.includes("tasks:dispatch")?{status:"ready"}:{status:"proposed"})
         });
         json(res,result.created?201:200,{ok:true,...result});return true;
