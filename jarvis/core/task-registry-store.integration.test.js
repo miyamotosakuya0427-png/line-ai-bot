@@ -47,6 +47,19 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     const root=await a.createTask({title:"Dependency root",dedupeKey:"dependency-root:"+cryptoRandom(),status:"ready"});
     const child=await b.createTask({title:"Dependency child",dedupeKey:"dependency-child:"+cryptoRandom(),status:"ready",dependencyTaskIds:[root.task.taskId]});
     assert.deepEqual(child.task.dependencyTaskIds,[root.task.taskId]);
+
+    const parent=await a.createTask({title:"Parent aggregate",dedupeKey:"parent-aggregate:"+cryptoRandom(),status:"ready"});
+    const requiredChild=await b.createTask({title:"Required child",dedupeKey:"required-child:"+cryptoRandom(),status:"ready",parentTaskId:parent.task.taskId});
+    assert.equal(requiredChild.task.parentTaskId,parent.task.taskId);
+    const parentClaim=await a.claimTask({taskId:parent.task.taskId,ownerId:"parent-worker",leaseMs:10000});
+    const parentRunning=await a.transitionTask({taskId:parent.task.taskId,expectedVersion:parentClaim.version,lease:parentClaim.lease,status:"in_progress"});
+    await assert.rejects(a.transitionTask({taskId:parent.task.taskId,expectedVersion:parentRunning.version,lease:parentClaim.lease,status:"completed"}),/every child task is completed/);
+    const childClaim=await b.claimTask({taskId:requiredChild.task.taskId,ownerId:"child-worker",leaseMs:10000});
+    const childRunning=await b.transitionTask({taskId:requiredChild.task.taskId,expectedVersion:childClaim.version,lease:childClaim.lease,status:"in_progress"});
+    const childCompleted=await b.transitionTask({taskId:requiredChild.task.taskId,expectedVersion:childRunning.version,lease:childClaim.lease,status:"completed"});
+    assert.equal(childCompleted.task.state,"completed");
+    const parentCompleted=await a.transitionTask({taskId:parent.task.taskId,expectedVersion:parentRunning.version,lease:parentClaim.lease,status:"completed"});
+    assert.equal(parentCompleted.task.state,"completed");
     const rootLease=await a.acquireLease({resourceKey:"task:"+root.task.taskId,ownerId:"dependency-check",leaseMs:10000});
     await assert.rejects(
       a.transitionTask({taskId:root.task.taskId,expectedVersion:root.version,lease:rootLease,status:"blocked",patch:{dependencyTaskIds:[child.task.taskId]}}),
