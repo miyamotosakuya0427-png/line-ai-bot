@@ -214,16 +214,15 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         const current=await latest(c,taskId);
         if(!current)throw new Error("Task does not exist");
         const now=clock();
-        const reclaimable=current.task.status==="claimed"||current.task.status==="in_progress";
-        if(current.task.status!=="ready"&&!reclaimable)throw new Error("Task is not claimable");
+        const currentState=canonicalTaskState(current.task.state||current.task.status);
+        const reclaimable=currentState==="claimed"||currentState==="running";
+        if(currentState!=="queued"&&!reclaimable)throw new Error("Task is not claimable");
         if(reclaimable){
           const previousExpiry=Date.parse(current.task.leaseExpiresAt||"");
           if(!Number.isFinite(previousExpiry)||previousExpiry>Date.parse(now))throw new Error("Task lease recovery requires an expired recorded lease");
           await appendCoordinationEvent(c,lease.resourceKey,"lease_reclaimed",{resourceKey:lease.resourceKey,ownerId,previousOwnerId:current.task.leaseOwner||null,previousFencingToken:current.task.fencingToken,recoveredFromStatus:current.task.status,recoveredAt:now,fencingToken:lease.fencingToken});
-        }else if(!NEXT[current.task.status]?.has("claimed")){
-          throw new Error("Task is not claimable");
         }
-        const next={...current.task,status:"claimed",ownerAgent:ownerId,updatedAt:now,startedAt:current.task.startedAt||now,leaseOwner:lease.ownerId,leaseTokenHash:hash(lease.token),leaseExpiresAt:lease.expiresAt,fencingToken:lease.fencingToken,...(reclaimable?{recoveredFromStatus:current.task.status,recoveredAt:now}: {})};
+        const next={...current.task,status:"claimed",state:"claimed",ownerAgent:ownerId,updatedAt:now,startedAt:current.task.startedAt||now,leaseOwner:lease.ownerId,leaseTokenHash:hash(lease.token),leaseExpiresAt:lease.expiresAt,fencingToken:lease.fencingToken,...(reclaimable?{recoveredFromStatus:current.task.status,recoveredAt:now}: {})};
         await append(c,taskId,reclaimable?"lease_reclaimed":"claimed",next);
         return {task:clone(next),version:current.version+1,lease};
       });
