@@ -158,11 +158,11 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         }
       }
       if (await taskRegistryApi(req,res,url)) return;
-      if (req.method==="GET" && url.pathname==="/command-center-ui") {
-        res.writeHead(200,{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store","Content-Security-Policy":"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'","X-Frame-Options":"DENY"});
+      if (req.method==="GET" && (url.pathname==="/" || url.pathname==="/command-center-ui")) {
+        res.writeHead(200,{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store","Content-Security-Policy":"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'","X-Frame-Options":"DENY"});
         return res.end(commandCenterDashboardPage());
       }
-      if (req.method==="GET" && url.pathname==="/") {
+      if (req.method==="GET" && url.pathname==="/legacy") {
         res.writeHead(200,{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store","Content-Security-Policy":"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'","X-Frame-Options":"DENY"});
         return res.end(dashboardPage());
       }
