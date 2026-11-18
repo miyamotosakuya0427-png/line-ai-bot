@@ -8,6 +8,7 @@ const { createApprovalStore } = require("./core/approval-store");
 const { createWorker } = require("./core/worker");
 const { createOpenAIHandler } = require("./core/openai-handler");
 const { dashboardPage } = require("./dashboard");
+const { commandCenterDashboardPage } = require("./command-center-dashboard");
 const { EMPLOYEE_SHEET, DAILY_REPORT_SHEET, readEmployees, readDailyReports, buildCompanyOverview, filterDailyReports } = require("./core/company-reader");
 const { buildDailyReportAnalytics } = require("./core/company-analytics");
 const { SALES_SHEET, EXPENSE_SHEET, INVOICE_SHEET, PAYMENT_SHEET, readFinancialSheets, readReceivablesSheets } = require("./core/financial-sheet-reader");
@@ -157,6 +158,10 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         }
       }
       if (await taskRegistryApi(req,res,url)) return;
+      if (req.method==="GET" && url.pathname==="/command-center-ui") {
+        res.writeHead(200,{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store","Content-Security-Policy":"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'","X-Frame-Options":"DENY"});
+        return res.end(commandCenterDashboardPage());
+      }
       if (req.method==="GET" && url.pathname==="/") {
         res.writeHead(200,{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store","Content-Security-Policy":"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'","X-Frame-Options":"DENY"});
         return res.end(dashboardPage());
