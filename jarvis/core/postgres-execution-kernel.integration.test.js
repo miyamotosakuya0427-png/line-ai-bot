@@ -113,6 +113,13 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   assert.deepEqual(stored.rows[0].payload,{value:2});
   assert.equal(Number(stored.rows[0].version),2);
   assert.equal(Number(stored.rows[0].fencing_token),resourceLeaseB.fencingToken);
+  const bRunning=await registry.transitionTask({taskId:first.task.taskId,expectedVersion:claimedB.version,lease:claimedB.lease,status:"running"});
+  const bCompleted=await registry.transitionTask({taskId:first.task.taskId,expectedVersion:bRunning.version,lease:claimedB.lease,status:"completed"});
+  assert.equal(bCompleted.task.state,"completed");
+  const workerReleased=await kernel.completeWorkerTask({workerId:loserId,taskId:first.task.taskId,lease:claimedB.lease,finalState:"completed"});
+  assert.equal(workerReleased.status,"idle");
+  assert.equal(workerReleased.current_task_id,null);
+  assert.equal(await registry.releaseLease({lease:claimedB.lease}),true);
   await assert.rejects(kernel.writeResource({resourceId:"shared-doc",projectId:"one-jarvis",workerId:loserId,taskId:first.task.taskId,taskLease:claimedB.lease,lease:resourceLeaseB,operationId:"op-cross-scope",idempotencyKey:"idem-cross-scope",operationScope:"resource.delete",payload:{value:3},expectedVersion:2}),/Invalid or unauthorized/);
   const ops=await pool.query("SELECT count(*)::int AS count FROM jarvis.fenced_operations WHERE resource_id='shared-doc'");
   assert.equal(ops.rows[0].count,2,"only committed writes are journaled");
