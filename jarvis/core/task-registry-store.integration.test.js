@@ -5,6 +5,7 @@ const fs=require("node:fs");
 const path=require("node:path");
 const {createTaskRegistry}=require("./task-registry-store");
 const {createServer}=require("../server");
+const {createPostgresTaskRegistryRateLimiter}=require("./postgres-task-registry-rate-limiter");
 
 const databaseUrl=process.env.JARVIS_TASK_REGISTRY_TEST_DATABASE_URL;
 test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!databaseUrl}, async()=>{
@@ -15,7 +16,7 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
   const pool=new Pool({connectionString:databaseUrl,max:8});
   let now=Date.now();
   const clock=()=>new Date(now).toISOString();
-  const migrations=["0001_neon_event_store.sql","0002_job_approval_stores.sql","0003_append_only_event_ledger.sql","0004_task_registry.sql","0005_task_registry_scoped_dedupe.sql"];
+  const migrations=["0001_neon_event_store.sql","0002_job_approval_stores.sql","0003_append_only_event_ledger.sql","0004_task_registry.sql","0005_task_registry_scoped_dedupe.sql","0006_scheduling_reservation_store.sql","0007_execution_kernel_fencing.sql"];
   try{
     for(const file of migrations){
       const sql=fs.readFileSync(path.join(__dirname,"..","migrations",file),"utf8");
@@ -132,6 +133,7 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     const api=createServer({
       token:"api-test-token-".padEnd(64,"x"),
       taskRegistry:a,
+      taskRegistryRateLimiter:createPostgresTaskRegistryRateLimiter({pool}),
       authorizeTaskRegistry:async req=>{
         if(req.headers.authorization==="Bearer agent-a")return{agentId:"api-agent-a",conversationId:"api-conversation-a",scopes:apiScopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]};
         if(req.headers.authorization==="Bearer agent-b")return{agentId:"api-agent-b",conversationId:"api-conversation-b",scopes:apiScopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]};
