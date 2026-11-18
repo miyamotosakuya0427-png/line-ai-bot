@@ -1,4 +1,5 @@
 name: ONE JARVIS Task Registry PostgreSQL 16
+# Stage 5: canonical Task State Machine, Dispatcher and recovery validation
 
 permissions:
   contents: read
