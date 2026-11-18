@@ -1,19 +1,9 @@
 "use strict";
 const crypto = require("node:crypto");
 
-const TASK_STATES = new Set(["proposed","ready","claimed","in_progress","blocked","review","verified","completed","cancelled"]);
-const PATCH_FIELDS = new Set(["scope","ownerConversation","ownerAgent","priority","branch","baseBranch","headSha","pullRequest","dependencyTaskIds","changedPaths","testRunIds","verificationSummary","blockerIds","nextAction","startedAt","completedAt"]);
-const NEXT = {
-  proposed: new Set(["ready","blocked","cancelled"]),
-  ready: new Set(["claimed","blocked","cancelled"]),
-  claimed: new Set(["in_progress","blocked","ready","cancelled"]),
-  in_progress: new Set(["blocked","review","ready","cancelled"]),
-  blocked: new Set(["ready","cancelled"]),
-  review: new Set(["in_progress","verified","blocked"]),
-  verified: new Set(["completed","review"]),
-  completed: new Set(),
-  cancelled: new Set()
-};
+const {ALL_TASK_STATES,canonicalTaskState,canTransitionTask}=require("./task-state-machine");
+const TASK_STATES = ALL_TASK_STATES;
+const PATCH_FIELDS = new Set(["scope","ownerConversation","ownerAgent","departmentId","priority","branch","baseBranch","headSha","pullRequest","dependencyTaskIds","changedPaths","testRunIds","verificationSummary","blockerIds","nextAction","startedAt","completedAt","outcomeUnknownReason","reconciliationId","reconciledBy"]);
 const MAX_TITLE=240, MAX_SCOPE=12000, MAX_OWNER=128, MAX_DEDUPE=240;
 function text(value,max,required=true){return typeof value==="string"&&value.length<=max&&(!required||!!value.trim());}
 function clone(value){return JSON.parse(JSON.stringify(value));}
@@ -100,12 +90,21 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
     const current=await latest(c,taskId);
     if(!current)return null;
     if(current.version!==expectedVersion)throw new Error("Stale task version");
-    if(!NEXT[current.task.status]?.has(status))throw new Error("Invalid task state transition");
+    if(!canTransitionTask(current.task.status||current.task.state,status))throw new Error("Invalid task state transition");
+    const nextState=canonicalTaskState(status);
+    if(canonicalTaskState(current.task.status||current.task.state)==="outcome_unknown"&&["completed","failed"].includes(nextState)&&(!text(patch.reconciliationId,128)||!text(patch.reconciledBy,128)))throw new Error("Outcome reconciliation ID and human/operator identity are required");
+    if(nextState==="completed"){
+      await lock(c,"task-parent:"+taskId);
+      const children=await c.query("SELECT DISTINCT ON (aggregate_id) aggregate_id,payload FROM jarvis.events WHERE aggregate_type='task' ORDER BY aggregate_id,aggregate_version DESC");
+      const required=children.rows.filter(row=>row.payload.parentTaskId===taskId);
+      if(required.some(row=>canonicalTaskState(row.payload.state||row.payload.status)!=="completed"))throw new Error("Parent task cannot complete before every child task is completed");
+    }
+    if(current.task.parentTaskId&&(nextState==="completed"||nextState==="failed"))await lock(c,"task-parent:"+current.task.parentTaskId);
     if(Object.prototype.hasOwnProperty.call(patch,"dependencyTaskIds")){
       await lock(c,"task-dependency-graph");
       await validateDependencies(c,taskId,patch.dependencyTaskIds);
     }
-    const next={...current.task,...clone(patch),status,updatedAt:clock(),fencingToken:lease.fencingToken};
+    const next={...current.task,...clone(patch),status,state:nextState,updatedAt:clock(),fencingToken:lease.fencingToken,...(nextState==="completed"?{completedAt:clock()}: {})};
     await append(c,taskId,"status_changed",next);
     return {task:clone(next),version:current.version+1};
   }
@@ -113,11 +112,12 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
     async init(){return init();},
     async createTask(input={}){
       await init();
-      const {title,scope="",acceptanceCriteria=[],dedupeKey,projectId="one-jarvis",ownerConversation="unassigned",ownerAgent="unassigned",priority="P2",status="proposed",dependencyTaskIds=[]}=input;
-      if(!text(title,MAX_TITLE)||!text(scope,MAX_SCOPE,false)||!text(dedupeKey,MAX_DEDUPE)||!text(projectId,128)||!text(ownerConversation,MAX_OWNER)||!text(ownerAgent,MAX_OWNER)||!["P0","P1","P2","P3"].includes(priority)||!TASK_STATES.has(status)||!Array.isArray(acceptanceCriteria)||acceptanceCriteria.length>100||acceptanceCriteria.some(x=>!text(x,1000))||!Array.isArray(dependencyTaskIds)||dependencyTaskIds.length>100||dependencyTaskIds.some(x=>!text(x,80)))throw new Error("Invalid task input");
+      const {title,scope="",acceptanceCriteria=[],dedupeKey,projectId="one-jarvis",ownerConversation="unassigned",ownerAgent="unassigned",departmentId="general",priority="P2",status="proposed",dependencyTaskIds=[],parentTaskId=null}=input;
+      if(!text(title,MAX_TITLE)||!text(scope,MAX_SCOPE,false)||!text(dedupeKey,MAX_DEDUPE)||!text(projectId,128)||!text(ownerConversation,MAX_OWNER)||!text(ownerAgent,MAX_OWNER)||!text(departmentId,128)||!["P0","P1","P2","P3"].includes(priority)||!TASK_STATES.has(status)||!Array.isArray(acceptanceCriteria)||acceptanceCriteria.length>100||acceptanceCriteria.some(x=>!text(x,1000))||!Array.isArray(dependencyTaskIds)||dependencyTaskIds.length>100||dependencyTaskIds.some(x=>!text(x,80))||(parentTaskId!==null&&!text(parentTaskId,80)))throw new Error("Invalid task input");
       const id=crypto.randomUUID(),now=clock();
-      const task={taskId:id,dedupeKey,projectId,title,scope,acceptanceCriteria:[...acceptanceCriteria],ownerConversation,ownerAgent,priority,status,dependencyTaskIds:[...new Set(dependencyTaskIds)],branch:null,baseBranch:null,headSha:null,pullRequest:null,createdAt:now,updatedAt:now,startedAt:null,completedAt:null,leaseOwner:null,leaseTokenHash:null,leaseExpiresAt:null,fencingToken:0,changedPaths:[],testRunIds:[],verificationSummary:null,blockerIds:[],nextAction:null};
+      const task={taskId:id,dedupeKey,projectId,title,scope,acceptanceCriteria:[...acceptanceCriteria],ownerConversation,ownerAgent,departmentId,priority,status,state:canonicalTaskState(status),parentTaskId,dependencyTaskIds:[...new Set(dependencyTaskIds)],branch:null,baseBranch:null,headSha:null,pullRequest:null,createdAt:now,updatedAt:now,startedAt:null,completedAt:null,leaseOwner:null,leaseTokenHash:null,leaseExpiresAt:null,fencingToken:0,changedPaths:[],testRunIds:[],verificationSummary:null,blockerIds:[],nextAction:null};
       return tx(async c=>{
+        if(parentTaskId){await lock(c,"task-parent:"+parentTaskId);const parent=await latest(c,parentTaskId);if(!parent||["completed","cancelled"].includes(canonicalTaskState(parent.task.state||parent.task.status)))throw new Error("Parent task is missing or terminal");if(parent.task.projectId!==projectId||parent.task.ownerConversation!==ownerConversation)throw new Error("Parent task scope mismatch");}
         await lock(c,"task-dedupe:"+dedupeKey);
         const existing=await c.query("SELECT aggregate_id,payload FROM jarvis.events WHERE aggregate_type='task' AND event_type='created' AND payload->>'dedupeKey'=$1 AND payload->>'ownerAgent'=$2 AND payload->>'ownerConversation'=$3 AND payload->>'projectId'=$4 LIMIT 1",[dedupeKey,ownerAgent,ownerConversation,projectId]);
         if(existing.rows[0])return {task:clone(existing.rows[0].payload),created:false,version:1};
@@ -144,7 +144,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
       if(!Number.isInteger(limit)||limit<1||limit>200)throw new Error("Invalid task limit");
       if(!Number.isInteger(offset)||offset<0||offset>1000000)throw new Error("Invalid task offset");
       const r=await pool.query(
-        "SELECT aggregate_id,aggregate_version,payload FROM (SELECT DISTINCT ON (aggregate_id) aggregate_id,aggregate_version,payload FROM jarvis.events WHERE aggregate_type='task' ORDER BY aggregate_id,aggregate_version DESC) latest WHERE ($1::text IS NULL OR payload->>'status'=$1) AND ($2::text IS NULL OR payload->>'ownerAgent'=$2) AND ($3::text IS NULL OR payload->>'ownerConversation'=$3) AND ($4::text IS NULL OR payload->>'projectId'=$4) ORDER BY payload->>'updatedAt' DESC,aggregate_id ASC LIMIT $5 OFFSET $6",
+        "SELECT aggregate_id,aggregate_version,payload FROM (SELECT DISTINCT ON (aggregate_id) aggregate_id,aggregate_version,payload FROM jarvis.events WHERE aggregate_type='task' ORDER BY aggregate_id,aggregate_version DESC) latest WHERE ($1::text IS NULL OR payload->>'status'=$1 OR payload->>'state'=$1) AND ($2::text IS NULL OR payload->>'ownerAgent'=$2) AND ($3::text IS NULL OR payload->>'ownerConversation'=$3) AND ($4::text IS NULL OR payload->>'projectId'=$4) ORDER BY payload->>'updatedAt' DESC,aggregate_id ASC LIMIT $5 OFFSET $6",
         [status,ownerAgent,ownerConversation,projectId,limit,offset]
       );
       return r.rows.map(x=>({task:clone(x.payload),version:Number(x.aggregate_version)}));
@@ -191,16 +191,16 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         const current=await latest(c,taskId);
         if(!current)throw new Error("Task does not exist");
         const now=clock();
-        const reclaimable=current.task.status==="claimed"||current.task.status==="in_progress";
-        if(current.task.status!=="ready"&&!reclaimable)throw new Error("Task is not claimable");
+        const currentState=canonicalTaskState(current.task.state||current.task.status);
+        const reclaimable=currentState==="claimed";
+        if(currentState==="running")throw new Error("Expired running Task requires outcome_unknown reconciliation; automatic reclaim is prohibited");
+        if(currentState!=="queued"&&!reclaimable)throw new Error("Task is not claimable");
         if(reclaimable){
           const previousExpiry=Date.parse(current.task.leaseExpiresAt||"");
           if(!Number.isFinite(previousExpiry)||previousExpiry>Date.parse(now))throw new Error("Task lease recovery requires an expired recorded lease");
           await appendCoordinationEvent(c,lease.resourceKey,"lease_reclaimed",{resourceKey:lease.resourceKey,ownerId:workerId,previousOwnerId:current.task.leaseOwner||null,previousFencingToken:current.task.fencingToken,recoveredFromStatus:current.task.status,recoveredAt:now,fencingToken:lease.fencingToken});
-        }else if(!NEXT[current.task.status]?.has("claimed")){
-          throw new Error("Task is not claimable");
         }
-        const next={...current.task,status:"claimed",ownerAgent:workerId,updatedAt:now,startedAt:current.task.startedAt||now,leaseOwner:lease.ownerId,leaseTokenHash:hash(lease.token),leaseExpiresAt:lease.expiresAt,fencingToken:lease.fencingToken,...(reclaimable?{recoveredFromStatus:current.task.status,recoveredAt:now}:{})};
+        const next={...current.task,status:"claimed",state:"claimed",ownerAgent:workerId,updatedAt:now,startedAt:current.task.startedAt||now,leaseOwner:lease.ownerId,leaseTokenHash:hash(lease.token),leaseExpiresAt:lease.expiresAt,fencingToken:lease.fencingToken,...(reclaimable?{recoveredFromStatus:current.task.status,recoveredAt:now}:{})};
         await append(c,taskId,reclaimable?"lease_reclaimed":"claimed",next);
         const bound=await c.query("UPDATE jarvis.worker_registry SET current_task_id=$1,lease_resource_key=$2,fencing_token=$3,status='running',heartbeat_at=$4,version=version+1,updated_at=$4 WHERE worker_id=$5 AND status IN ('idle','recovering') AND current_task_id IS NULL RETURNING *",[taskId,lease.resourceKey,lease.fencingToken,now,workerId]);
         if(bound.rowCount!==1)throw new Error("Atomic Worker binding failed");
@@ -215,16 +215,16 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         const current=await latest(c,taskId);
         if(!current)throw new Error("Task does not exist");
         const now=clock();
-        const reclaimable=current.task.status==="claimed"||current.task.status==="in_progress";
-        if(current.task.status!=="ready"&&!reclaimable)throw new Error("Task is not claimable");
+        const currentState=canonicalTaskState(current.task.state||current.task.status);
+        const reclaimable=currentState==="claimed";
+        if(currentState==="running")throw new Error("Expired running Task requires outcome_unknown reconciliation; automatic reclaim is prohibited");
+        if(currentState!=="queued"&&!reclaimable)throw new Error("Task is not claimable");
         if(reclaimable){
           const previousExpiry=Date.parse(current.task.leaseExpiresAt||"");
           if(!Number.isFinite(previousExpiry)||previousExpiry>Date.parse(now))throw new Error("Task lease recovery requires an expired recorded lease");
           await appendCoordinationEvent(c,lease.resourceKey,"lease_reclaimed",{resourceKey:lease.resourceKey,ownerId,previousOwnerId:current.task.leaseOwner||null,previousFencingToken:current.task.fencingToken,recoveredFromStatus:current.task.status,recoveredAt:now,fencingToken:lease.fencingToken});
-        }else if(!NEXT[current.task.status]?.has("claimed")){
-          throw new Error("Task is not claimable");
         }
-        const next={...current.task,status:"claimed",ownerAgent:ownerId,updatedAt:now,startedAt:current.task.startedAt||now,leaseOwner:lease.ownerId,leaseTokenHash:hash(lease.token),leaseExpiresAt:lease.expiresAt,fencingToken:lease.fencingToken,...(reclaimable?{recoveredFromStatus:current.task.status,recoveredAt:now}: {})};
+        const next={...current.task,status:"claimed",state:"claimed",ownerAgent:ownerId,updatedAt:now,startedAt:current.task.startedAt||now,leaseOwner:lease.ownerId,leaseTokenHash:hash(lease.token),leaseExpiresAt:lease.expiresAt,fencingToken:lease.fencingToken,...(reclaimable?{recoveredFromStatus:current.task.status,recoveredAt:now}: {})};
         await append(c,taskId,reclaimable?"lease_reclaimed":"claimed",next);
         return {task:clone(next),version:current.version+1,lease};
       });

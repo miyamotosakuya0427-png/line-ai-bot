@@ -2,29 +2,35 @@
 const test=require("node:test");
 const assert=require("node:assert/strict");
 const {createServer}=require("../server");
+const {createTaskRegistryApi,createInMemoryTaskRegistryRateLimiter}=require("./task-registry-api");
+const {canonicalTaskState}=require("./task-state-machine");
 
 function fixture({configured=true,authorize=true,rateLimiter=null}={}){
   const tasks=new Map();let sequence=0;
   const registry={
     async listTasks({status=null,limit=50,offset=0,ownerAgent=null,ownerConversation=null,projectId=null}={}){return [...tasks.values()].filter(x=>(status===null||x.task.status===status)&&(ownerAgent===null||x.task.ownerAgent===ownerAgent)&&(ownerConversation===null||x.task.ownerConversation===ownerConversation)&&(projectId===null||x.task.projectId===projectId)).slice(offset,offset+limit);},
-    async createTask(input){const id="task-"+(++sequence);const task={taskId:id,...input};const value={task,version:1};tasks.set(id,value);return{...value,created:true};},
+    async createTask(input){const id="task-"+(++sequence);const task={taskId:id,...input,state:canonicalTaskState(input.status||"proposed")};const value={task,version:1};tasks.set(id,value);return{...value,created:true};},
     async getTask(id,{ownerAgent=null,ownerConversation=null}={}){const value=tasks.get(id);if(!value)return null;if(ownerAgent!==null&&value.task.ownerAgent!==ownerAgent)return null;if(ownerConversation!==null&&value.task.ownerConversation!==ownerConversation)return null;return value;},
-    async claimTask({taskId,ownerId,leaseMs}){const current=tasks.get(taskId);if(!current||current.task.status!=="ready")return null;const lease={resourceKey:"task:"+taskId,ownerId,token:"opaque-token",fencingToken:1,expiresAt:new Date(Date.now()+leaseMs).toISOString()};const next={...current.task,status:"claimed",ownerAgent:ownerId};const value={task:next,version:current.version+1};tasks.set(taskId,value);return{...value,lease};},
+    async claimTask({taskId,ownerId,leaseMs}){const current=tasks.get(taskId);if(!current||current.task.status!=="ready")return null;const lease={resourceKey:"task:"+taskId,ownerId,token:"opaque-token",fencingToken:1,expiresAt:new Date(Date.now()+leaseMs).toISOString()};const next={...current.task,status:"claimed",state:"claimed",ownerAgent:ownerId};const value={task:next,version:current.version+1};tasks.set(taskId,value);return{...value,lease};},
     async heartbeatLease({lease,leaseMs}){return{...lease,expiresAt:new Date(Date.now()+leaseMs).toISOString()};},
     async releaseLease(){return true;},
-    async transitionTask({taskId,expectedVersion,lease,status,patch}){const current=tasks.get(taskId);if(!current)return null;if(current.version!==expectedVersion)throw new Error("Stale task version");const value={task:{...current.task,...patch,status},version:current.version+1};tasks.set(taskId,value);return value;},
+    async transitionTask({taskId,expectedVersion,lease,status,patch}){const current=tasks.get(taskId);if(!current)return null;if(current.version!==expectedVersion)throw new Error("Stale task version");const value={task:{...current.task,...patch,status,state:canonicalTaskState(status)},version:current.version+1};tasks.set(taskId,value);return value;},
     async acquireLease({resourceKey,ownerId,leaseMs}){return{resourceKey,ownerId,token:"resource-token",fencingToken:2,expiresAt:new Date(Date.now()+leaseMs).toISOString()};}
   };
   const scopes=["tasks:read","tasks:write","tasks:dispatch","tasks:claim","tasks:lease","tasks:transition","resources:lease"];
   const server=createServer({
     taskRegistry:configured?registry:null,
     authorizeTaskRegistry:authorize?async(req)=>req.headers.authorization==="Bearer agent-a"?{agentId:"agent-a",conversationId:"opaque-conversation",scopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]}:req.headers.authorization==="Bearer agent-b"?{agentId:"agent-b",scopes,projectIds:["other-project"],resourcePrefixes:["path:other-project:"]}:req.headers.authorization==="Bearer agent-a-other"?{agentId:"agent-a",conversationId:"other-conversation",scopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]}:req.headers.authorization==="Bearer agent-a-unbound"?{agentId:"agent-a",scopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]}:null:null,
-    taskRegistryRateLimiter:rateLimiter
+    taskRegistryRateLimiter:rateLimiter||createInMemoryTaskRegistryRateLimiter()
   });
   return{server,registry,tasks};
 }
 async function listen(server){await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));return"http://127.0.0.1:"+server.address().port;}
 async function post(root,path,body,token="agent-a"){return fetch(root+path,{method:"POST",headers:{Authorization:"Bearer "+token,"Content-Type":"application/json"},body:JSON.stringify(body)});}
+
+test("configured Task Registry API refuses an implicit process-local rate limiter",()=>{
+  assert.throws(()=>createTaskRegistryApi({registry:{},authorize:async()=>({}),json(){},readJson(){}}),/shared Task Registry rate limiter must be explicitly configured/);
+});
 
 test("Task Registry API fails closed when registry or agent authorization is not configured",async t=>{
   for(const options of [{configured:false,authorize:true},{configured:true,authorize:false}]){
@@ -38,7 +44,7 @@ test("Task Registry API enforces authentication and per-agent scopes",async t=>{
   const {server}=fixture();t.after(()=>new Promise(resolve=>server.close(resolve)));
   const root=await listen(server);
   assert.equal((await fetch(root+"/v1/tasks")).status,401);
-  const denied=createServer({taskRegistry:{listTasks:async()=>[]},authorizeTaskRegistry:async()=>({agentId:"agent-readonly",scopes:[]})});
+  const denied=createServer({taskRegistry:{listTasks:async()=>[]},authorizeTaskRegistry:async()=>({agentId:"agent-readonly",scopes:[]}),taskRegistryRateLimiter:createInMemoryTaskRegistryRateLimiter()});
   t.after(()=>new Promise(resolve=>denied.close(resolve)));
   await new Promise(resolve=>denied.listen(0,"127.0.0.1",resolve));
   const response=await fetch("http://127.0.0.1:"+denied.address().port+"/v1/tasks");
@@ -51,9 +57,9 @@ test("Task Registry API creates, claims, heartbeats, transitions and releases un
   const outOfProject=await post(root,"/v1/tasks",{title:"Forbidden project task",dedupeKey:"api-task-other",projectId:"other-project"});
   assert.equal(outOfProject.status,403);
   assert.equal((await fetch(root+"/v1/tasks?projectId=other-project",{headers:{Authorization:"Bearer agent-a"}})).status,403);
-  const created=await post(root,"/v1/tasks",{title:"API task",dedupeKey:"api-task-1",status:"ready",ownerAgent:"spoofed"});
+  const created=await post(root,"/v1/tasks",{title:"API task",dedupeKey:"api-task-1",status:"ready",departmentId:"finance",ownerAgent:"spoofed"});
   assert.equal(created.status,201);
-  const body=await created.json();assert.equal(body.task.ownerAgent,"agent-a");assert.equal(body.task.status,"ready");
+  const body=await created.json();assert.equal(body.task.ownerAgent,"agent-a");assert.equal(body.task.status,"ready");assert.equal(body.task.state,"queued");assert.equal(body.task.departmentId,"finance");
   const id=body.task.taskId;
   assert.equal((await fetch(root+"/v1/tasks/"+id,{headers:{Authorization:"Bearer agent-a"}})).status,200);
   assert.equal((await fetch(root+"/v1/tasks/"+id,{headers:{Authorization:"Bearer agent-b"}})).status,404,"another agent cannot read this task");

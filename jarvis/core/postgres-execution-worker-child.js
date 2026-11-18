@@ -11,18 +11,19 @@ async function main() {
   const mode = process.env.JARVIS_EXECUTION_CHILD_MODE || "";
   const pool = new Pool({ connectionString: url, max: 1, ssl: new URL(url).searchParams.get("sslmode") === "disable" ? false : { rejectUnauthorized: true } });
   try {
-    const registry = createTaskRegistry({ pool });
+    const clock = () => process.env.JARVIS_EXECUTION_TEST_CLOCK || new Date().toISOString();
+    const registry = createTaskRegistry({ pool, clock });
     let result;
     if (mode === "claim") result = await registry.claimTaskForWorker({ taskId, workerId, leaseMs: 30000 });
     else if (mode === "resource") result = await registry.acquireLease({ resourceKey: "resource:multi-process-race", ownerId: workerId, leaseMs: 30000 });
     else if (mode === "heartbeat") {
       const lease = JSON.parse(process.env.JARVIS_EXECUTION_CHILD_HEARTBEAT_LEASE || "null");
-      const kernel = createPostgresExecutionKernel({ pool });
+      const kernel = createPostgresExecutionKernel({ pool, clock });
       result = await kernel.heartbeatWorker({ workerId, lease });
     }
     else if (mode === "idempotency") {
       const input = JSON.parse(process.env.JARVIS_EXECUTION_CHILD_WRITE_INPUT || "{}");
-      const kernel = createPostgresExecutionKernel({ pool, allowedOperationScopes: ["resource.update"] });
+      const kernel = createPostgresExecutionKernel({ pool, clock, allowedOperationScopes: ["resource.update"] });
       result = await kernel.writeResource(input);
     }
     else if (mode === "rate-limit") {

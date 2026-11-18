@@ -5,6 +5,7 @@ const fs=require("node:fs");
 const path=require("node:path");
 const {createTaskRegistry}=require("./task-registry-store");
 const {createServer}=require("../server");
+const {createPostgresTaskRegistryRateLimiter}=require("./postgres-task-registry-rate-limiter");
 
 const databaseUrl=process.env.JARVIS_TASK_REGISTRY_TEST_DATABASE_URL;
 test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!databaseUrl}, async()=>{
@@ -15,7 +16,7 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
   const pool=new Pool({connectionString:databaseUrl,max:8});
   let now=Date.now();
   const clock=()=>new Date(now).toISOString();
-  const migrations=["0001_neon_event_store.sql","0002_job_approval_stores.sql","0003_append_only_event_ledger.sql","0004_task_registry.sql","0005_task_registry_scoped_dedupe.sql"];
+  const migrations=["0001_neon_event_store.sql","0002_job_approval_stores.sql","0003_append_only_event_ledger.sql","0004_task_registry.sql","0005_task_registry_scoped_dedupe.sql","0006_scheduling_reservation_store.sql","0007_execution_kernel_fencing.sql"];
   try{
     for(const file of migrations){
       const sql=fs.readFileSync(path.join(__dirname,"..","migrations",file),"utf8");
@@ -47,6 +48,27 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     const root=await a.createTask({title:"Dependency root",dedupeKey:"dependency-root:"+cryptoRandom(),status:"ready"});
     const child=await b.createTask({title:"Dependency child",dedupeKey:"dependency-child:"+cryptoRandom(),status:"ready",dependencyTaskIds:[root.task.taskId]});
     assert.deepEqual(child.task.dependencyTaskIds,[root.task.taskId]);
+
+    const parent=await a.createTask({title:"Parent aggregate",dedupeKey:"parent-aggregate:"+cryptoRandom(),status:"ready"});
+    const requiredChild=await b.createTask({title:"Required child",dedupeKey:"required-child:"+cryptoRandom(),status:"ready",parentTaskId:parent.task.taskId});
+    assert.equal(requiredChild.task.parentTaskId,parent.task.taskId);
+    const parentClaim=await a.claimTask({taskId:parent.task.taskId,ownerId:"parent-worker",leaseMs:10000});
+    const parentRunning=await a.transitionTask({taskId:parent.task.taskId,expectedVersion:parentClaim.version,lease:parentClaim.lease,status:"in_progress"});
+    await assert.rejects(a.transitionTask({taskId:parent.task.taskId,expectedVersion:parentRunning.version,lease:parentClaim.lease,status:"completed"}),/every child task is completed/);
+    const childClaim=await b.claimTask({taskId:requiredChild.task.taskId,ownerId:"child-worker",leaseMs:10000});
+    const childRunning=await b.transitionTask({taskId:requiredChild.task.taskId,expectedVersion:childClaim.version,lease:childClaim.lease,status:"in_progress"});
+    const childCompleted=await b.transitionTask({taskId:requiredChild.task.taskId,expectedVersion:childRunning.version,lease:childClaim.lease,status:"completed"});
+    assert.equal(childCompleted.task.state,"completed");
+    const parentCompleted=await a.transitionTask({taskId:parent.task.taskId,expectedVersion:parentRunning.version,lease:parentClaim.lease,status:"completed"});
+    assert.equal(parentCompleted.task.state,"completed");
+
+    const unknownTask=await a.createTask({title:"Ambiguous external action",dedupeKey:"unknown-outcome:"+cryptoRandom(),status:"ready"});
+    const unknownClaim=await a.claimTask({taskId:unknownTask.task.taskId,ownerId:"unknown-worker",leaseMs:10000});
+    const unknownRunning=await a.transitionTask({taskId:unknownTask.task.taskId,expectedVersion:unknownClaim.version,lease:unknownClaim.lease,status:"in_progress"});
+    const unknown=await a.transitionTask({taskId:unknownTask.task.taskId,expectedVersion:unknownRunning.version,lease:unknownClaim.lease,status:"outcome_unknown",patch:{outcomeUnknownReason:"provider timeout"}});
+    await assert.rejects(a.transitionTask({taskId:unknownTask.task.taskId,expectedVersion:unknown.version,lease:unknownClaim.lease,status:"completed"}),/reconciliation ID and human\/operator identity are required/);
+    const reconciled=await a.transitionTask({taskId:unknownTask.task.taskId,expectedVersion:unknown.version,lease:unknownClaim.lease,status:"completed",patch:{reconciliationId:"provider-check-001",reconciledBy:"operator-1"}});
+    assert.equal(reconciled.task.state,"completed");
     const rootLease=await a.acquireLease({resourceKey:"task:"+root.task.taskId,ownerId:"dependency-check",leaseMs:10000});
     await assert.rejects(
       a.transitionTask({taskId:root.task.taskId,expectedVersion:root.version,lease:rootLease,status:"blocked",patch:{dependencyTaskIds:[child.task.taskId]}}),
@@ -85,15 +107,13 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     await assert.rejects(a.transitionTask({taskId:created.task.taskId,expectedVersion:claim.version,lease:claim.lease,status:"review"}),/Stale task version/);
     await assert.rejects(a.transitionTask({taskId:created.task.taskId,expectedVersion:moved.version,lease:claim.lease,status:"review",patch:{taskId:"tamper"}}),/Invalid task patch/);
     now+=11000;
-    const recovered=await b.claimTask({taskId:created.task.taskId,ownerId:"worker-recovery",leaseMs:10000});
-    assert.ok(recovered,"expired in_progress task can be reclaimed");
-    assert.equal(recovered.task.status,"claimed");
-    assert.equal(recovered.task.recoveredFromStatus,"in_progress");
-    assert.ok(recovered.lease.fencingToken>claim.lease.fencingToken,"task recovery increments fencing token");
+    await assert.rejects(b.claimTask({taskId:created.task.taskId,ownerId:"worker-recovery",leaseMs:10000}),/outcome_unknown reconciliation/,"expired running task must never be automatically re-executed");
+    const afterExpiredRun=await a.getTask(created.task.taskId);
+    assert.equal(afterExpiredRun.task.state,"running","a running task remains blocked until recovery classifies its outcome");
     await assert.rejects(a.transitionTask({taskId:created.task.taskId,expectedVersion:moved.version,lease:claim.lease,status:"review"}),/expired, stale, or not owned/);
     const leaseAudit=await pool.query("SELECT event_type,payload FROM jarvis.events WHERE aggregate_type='coordination_lease' AND aggregate_id=$1 ORDER BY aggregate_version",[ "task:"+created.task.taskId ]);
     assert.ok(leaseAudit.rows.some(x=>x.event_type==="lease_acquired"));
-    assert.ok(leaseAudit.rows.some(x=>x.event_type==="lease_reclaimed"));
+    assert.equal(leaseAudit.rows.some(x=>x.event_type==="lease_reclaimed"),false,"an expired running Task is not automatically reclaimed");
     await assert.rejects(pool.query("UPDATE jarvis.events SET event_type='tampered' WHERE aggregate_type='task' AND aggregate_id=$1",[created.task.taskId]),/append-only/);
     await assert.rejects(pool.query("DELETE FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1",[created.task.taskId]),/append-only/);
     await assert.rejects(pool.query("TRUNCATE jarvis.events"),/append-only/);
@@ -119,6 +139,7 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     const api=createServer({
       token:"api-test-token-".padEnd(64,"x"),
       taskRegistry:a,
+      taskRegistryRateLimiter:createPostgresTaskRegistryRateLimiter({pool}),
       authorizeTaskRegistry:async req=>{
         if(req.headers.authorization==="Bearer agent-a")return{agentId:"api-agent-a",conversationId:"api-conversation-a",scopes:apiScopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]};
         if(req.headers.authorization==="Bearer agent-b")return{agentId:"api-agent-b",conversationId:"api-conversation-b",scopes:apiScopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]};

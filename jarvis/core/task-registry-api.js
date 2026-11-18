@@ -1,6 +1,7 @@
 "use strict";
 
-const TASK_STATES=new Set(["proposed","ready","claimed","in_progress","blocked","review","verified","completed","cancelled"]);
+const {ALL_TASK_STATES}=require("./task-state-machine");
+const TASK_STATES=ALL_TASK_STATES;
 const ACTIONS=Object.freeze({
   list:"tasks:read",get:"tasks:read",create:"tasks:write",claim:"tasks:claim",
   heartbeat:"tasks:lease",release:"tasks:lease",transition:"tasks:transition",resourceLease:"resources:lease"
@@ -22,9 +23,10 @@ function createInMemoryTaskRegistryRateLimiter({limit=120,windowMs=60000,clock=(
   }};
 }
 
-function createTaskRegistryApi({registry=null,authorize=null,json,readJson,rateLimiter=createInMemoryTaskRegistryRateLimiter()}={}){
+function createTaskRegistryApi({registry=null,authorize=null,json,readJson,rateLimiter=null}={}){
   if(typeof json!=="function"||typeof readJson!=="function")throw new Error("JSON response and request readers are required");
-  if(!rateLimiter||typeof rateLimiter.consume!=="function")throw new Error("A Task Registry rate limiter is required");
+  if(registry&&typeof authorize==="function"&&(!rateLimiter||typeof rateLimiter.consume!=="function"))throw new Error("A shared Task Registry rate limiter must be explicitly configured");
+  if(!rateLimiter)rateLimiter={async consume(){throw new Error("Rate limiter is not configured");}};
   async function principalFor(req,action,taskId){
     if(!registry||typeof authorize!=="function")return {error:"unavailable"};
     let principal;
@@ -54,7 +56,7 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson,rateL
     if(Number.isInteger(error?.statusCode)&&error.statusCode>=400&&error.statusCode<=499)return json(res,error.statusCode,{ok:false,error:error.statusCode===413?"Request body too large":"Invalid request"});
     const message=typeof error?.message==="string"?error.message:"";
     if(/Invalid task|Invalid lease|Invalid task patch|Invalid task dependencies|Dependency task does not exist/.test(message))return json(res,400,{ok:false,error:message});
-    if(/Stale task version|expired, stale|not owned|not claimable|dependency cycle|already|Lease heartbeat rejected/.test(message))return json(res,409,{ok:false,error:message});
+    if(/Stale task version|expired, stale|not owned|not claimable|dependency cycle|already|Lease heartbeat rejected|Expired running Task requires|every child task is completed|reconciliation ID and human\/operator identity/.test(message))return json(res,409,{ok:false,error:message});
     return json(res,503,{ok:false,error:"Task Registry operation failed"});
   }
   return async function handleTaskRegistryRequest(req,res,url){
@@ -105,9 +107,9 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson,rateL
         const projectId=d.projectId||auth.principal.projectIds[0];
         if(!auth.principal.projectIds.includes(projectId))return json(res,403,{ok:false,error:"Project is outside the authenticated agent scope"});
         const result=await registry.createTask({
-          title:d.title,scope:d.scope||"",acceptanceCriteria:d.acceptanceCriteria||[],dedupeKey:d.dedupeKey,
+          title:d.title,scope:d.scope||"",acceptanceCriteria:d.acceptanceCriteria||[],dedupeKey:d.dedupeKey,departmentId:d.departmentId||"general",
           projectId,priority:d.priority||"P2",
-          dependencyTaskIds:d.dependencyTaskIds||[],ownerConversation:auth.principal.conversationId||"agent:"+agentId,ownerAgent:agentId,
+          dependencyTaskIds:d.dependencyTaskIds||[],parentTaskId:d.parentTaskId||null,ownerConversation:auth.principal.conversationId||"agent:"+agentId,ownerAgent:agentId,
           ...(d.status==="ready"&&auth.principal.scopes.includes("tasks:dispatch")?{status:"ready"}:{status:"proposed"})
         });
         json(res,result.created?201:200,{ok:true,...result});return true;
@@ -158,4 +160,4 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson,rateL
     }catch(error){errorResponse(res,error);return true;}
   };
 }
-module.exports={createTaskRegistryApi};
+module.exports={createTaskRegistryApi,createInMemoryTaskRegistryRateLimiter};

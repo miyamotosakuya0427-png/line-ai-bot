@@ -24,6 +24,7 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
  const pool=new Pool({connectionString:url,max:12,ssl:parsed.searchParams.get("sslmode")==="disable"?false:{rejectUnauthorized:true}});
  let now=Date.parse("2026-11-18T00:00:00.000Z");
  const clock=()=>new Date(now).toISOString();
+ process.env.JARVIS_EXECUTION_TEST_CLOCK=clock();
  try{
   await pool.query("DROP SCHEMA IF EXISTS jarvis CASCADE");
   const fs=require("node:fs/promises"),path=require("node:path"),root=path.join(__dirname,"..","migrations");
@@ -98,10 +99,27 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   const recovery=await kernel.recoverExpiredWorker({workerId:winnerId});
   assert.equal(recovery.recovered,true,"an expired lease permits Worker recovery");
   assert.equal(recovery.expiredTaskId,first.task.taskId);
+  assert.equal(recovery.taskRecoveryState,"queued","a Task whose Worker died before execution is safely requeued");
+  assert.equal((await registry.getTask(first.task.taskId)).task.state,"queued");
   assert.equal((await kernel.getWorker(winnerId)).status,"recovering");
   const recoveryAudit=await pool.query("SELECT event_type,payload FROM jarvis.events WHERE aggregate_type='worker' AND aggregate_id=$1 ORDER BY aggregate_version DESC LIMIT 1",[winnerId]);
   assert.equal(recoveryAudit.rows[0]?.event_type,"worker_recovered","recovery must append an audit event");
   assert.equal(recoveryAudit.rows[0]?.payload.expiredTaskId,first.task.taskId);
+
+  const runningRecoveryTask=await makeTask("running-recovery",loserId);
+  const runningRecoveryClaim=await registry.claimTaskForWorker({taskId:runningRecoveryTask.task.taskId,workerId:loserId,leaseMs:5000});
+  await registry.transitionTask({taskId:runningRecoveryTask.task.taskId,expectedVersion:runningRecoveryClaim.version,lease:runningRecoveryClaim.lease,status:"running"});
+  now+=5000;
+  const ambiguousRecovery=await kernel.recoverExpiredWorker({workerId:loserId});
+  assert.equal(ambiguousRecovery.recovered,true);
+  assert.equal(ambiguousRecovery.taskRecoveryState,"outcome_unknown","a Worker lost during execution must be quarantined, not retried");
+  assert.equal((await registry.getTask(runningRecoveryTask.task.taskId)).task.state,"outcome_unknown");
+  const quarantinedEvent=await pool.query("SELECT event_type,payload FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1 ORDER BY aggregate_version DESC LIMIT 1",[runningRecoveryTask.task.taskId]);
+  assert.equal(quarantinedEvent.rows[0]?.event_type,"worker_lease_recovered");
+  assert.equal(quarantinedEvent.rows[0]?.payload.state,"outcome_unknown");
+  let recoveredLoser=await kernel.getWorker(loserId);
+  recoveredLoser=await kernel.transitionWorker({workerId:loserId,expectedVersion:Number(recoveredLoser.version),status:"idle"});
+  await assert.rejects(registry.claimTaskForWorker({taskId:runningRecoveryTask.task.taskId,workerId:loserId,leaseMs:5000}),/Task is not claimable/);
   const claimedB=await registry.claimTaskForWorker({taskId:first.task.taskId,workerId:loserId,leaseMs:60000});
   const resourceLeaseB=await registry.acquireLease({resourceKey:"resource:shared-doc",ownerId:loserId,leaseMs:60000});
   assert.ok(resourceLeaseB);
@@ -113,6 +131,13 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   assert.deepEqual(stored.rows[0].payload,{value:2});
   assert.equal(Number(stored.rows[0].version),2);
   assert.equal(Number(stored.rows[0].fencing_token),resourceLeaseB.fencingToken);
+  const bRunning=await registry.transitionTask({taskId:first.task.taskId,expectedVersion:claimedB.version,lease:claimedB.lease,status:"running"});
+  const bCompleted=await registry.transitionTask({taskId:first.task.taskId,expectedVersion:bRunning.version,lease:claimedB.lease,status:"completed"});
+  assert.equal(bCompleted.task.state,"completed");
+  const workerReleased=await kernel.completeWorkerTask({workerId:loserId,taskId:first.task.taskId,lease:claimedB.lease,finalState:"completed"});
+  assert.equal(workerReleased.status,"idle");
+  assert.equal(workerReleased.current_task_id,null);
+  assert.equal(await registry.releaseLease({lease:claimedB.lease}),true);
   await assert.rejects(kernel.writeResource({resourceId:"shared-doc",projectId:"one-jarvis",workerId:loserId,taskId:first.task.taskId,taskLease:claimedB.lease,lease:resourceLeaseB,operationId:"op-cross-scope",idempotencyKey:"idem-cross-scope",operationScope:"resource.delete",payload:{value:3},expectedVersion:2}),/Invalid or unauthorized/);
   const ops=await pool.query("SELECT count(*)::int AS count FROM jarvis.fenced_operations WHERE resource_id='shared-doc'");
   assert.equal(ops.rows[0].count,2,"only committed writes are journaled");

@@ -1,4 +1,5 @@
 name: ONE JARVIS Task Registry PostgreSQL 16
+# Stage 5: canonical Task State Machine, Dispatcher, recovery, shared API limiter and no-blind-retry validation
 
 permissions:
   contents: read
@@ -6,6 +7,13 @@ on:
   pull_request:
     paths:
       - "jarvis/core/task-registry-store.js"
+      - "jarvis/core/task-state-machine.js"
+      - "jarvis/core/task-state-machine.test.js"
+      - "jarvis/core/task-dispatcher.js"
+      - "jarvis/core/task-dispatcher.test.js"
+      - "jarvis/core/execution-recovery-scheduler.js"
+      - "jarvis/core/execution-recovery-scheduler.test.js"
+      - "jarvis/coordination/EXECUTION_KERNEL_STAGE5.md"
       - "jarvis/core/task-registry-store*.test.js"
       - "jarvis/core/task-registry-api.js"
       - "jarvis/core/task-registry-api.test.js"
