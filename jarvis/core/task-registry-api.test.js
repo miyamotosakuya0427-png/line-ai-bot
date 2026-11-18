@@ -3,17 +3,18 @@ const test=require("node:test");
 const assert=require("node:assert/strict");
 const {createServer}=require("../server");
 const {createInMemoryTaskRegistryRateLimiter}=require("./task-registry-api");
+const {canonicalTaskState}=require("./task-state-machine");
 
 function fixture({configured=true,authorize=true,rateLimiter=null}={}){
   const tasks=new Map();let sequence=0;
   const registry={
     async listTasks({status=null,limit=50,offset=0,ownerAgent=null,ownerConversation=null,projectId=null}={}){return [...tasks.values()].filter(x=>(status===null||x.task.status===status)&&(ownerAgent===null||x.task.ownerAgent===ownerAgent)&&(ownerConversation===null||x.task.ownerConversation===ownerConversation)&&(projectId===null||x.task.projectId===projectId)).slice(offset,offset+limit);},
-    async createTask(input){const id="task-"+(++sequence);const task={taskId:id,...input};const value={task,version:1};tasks.set(id,value);return{...value,created:true};},
+    async createTask(input){const id="task-"+(++sequence);const task={taskId:id,...input,state:canonicalTaskState(input.status||"proposed")};const value={task,version:1};tasks.set(id,value);return{...value,created:true};},
     async getTask(id,{ownerAgent=null,ownerConversation=null}={}){const value=tasks.get(id);if(!value)return null;if(ownerAgent!==null&&value.task.ownerAgent!==ownerAgent)return null;if(ownerConversation!==null&&value.task.ownerConversation!==ownerConversation)return null;return value;},
-    async claimTask({taskId,ownerId,leaseMs}){const current=tasks.get(taskId);if(!current||current.task.status!=="ready")return null;const lease={resourceKey:"task:"+taskId,ownerId,token:"opaque-token",fencingToken:1,expiresAt:new Date(Date.now()+leaseMs).toISOString()};const next={...current.task,status:"claimed",ownerAgent:ownerId};const value={task:next,version:current.version+1};tasks.set(taskId,value);return{...value,lease};},
+    async claimTask({taskId,ownerId,leaseMs}){const current=tasks.get(taskId);if(!current||current.task.status!=="ready")return null;const lease={resourceKey:"task:"+taskId,ownerId,token:"opaque-token",fencingToken:1,expiresAt:new Date(Date.now()+leaseMs).toISOString()};const next={...current.task,status:"claimed",state:"claimed",ownerAgent:ownerId};const value={task:next,version:current.version+1};tasks.set(taskId,value);return{...value,lease};},
     async heartbeatLease({lease,leaseMs}){return{...lease,expiresAt:new Date(Date.now()+leaseMs).toISOString()};},
     async releaseLease(){return true;},
-    async transitionTask({taskId,expectedVersion,lease,status,patch}){const current=tasks.get(taskId);if(!current)return null;if(current.version!==expectedVersion)throw new Error("Stale task version");const value={task:{...current.task,...patch,status},version:current.version+1};tasks.set(taskId,value);return value;},
+    async transitionTask({taskId,expectedVersion,lease,status,patch}){const current=tasks.get(taskId);if(!current)return null;if(current.version!==expectedVersion)throw new Error("Stale task version");const value={task:{...current.task,...patch,status,state:canonicalTaskState(status)},version:current.version+1};tasks.set(taskId,value);return value;},
     async acquireLease({resourceKey,ownerId,leaseMs}){return{resourceKey,ownerId,token:"resource-token",fencingToken:2,expiresAt:new Date(Date.now()+leaseMs).toISOString()};}
   };
   const scopes=["tasks:read","tasks:write","tasks:dispatch","tasks:claim","tasks:lease","tasks:transition","resources:lease"];
