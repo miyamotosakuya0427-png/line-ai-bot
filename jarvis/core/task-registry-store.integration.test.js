@@ -61,6 +61,14 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     assert.equal(childCompleted.task.state,"completed");
     const parentCompleted=await a.transitionTask({taskId:parent.task.taskId,expectedVersion:parentRunning.version,lease:parentClaim.lease,status:"completed"});
     assert.equal(parentCompleted.task.state,"completed");
+
+    const unknownTask=await a.createTask({title:"Ambiguous external action",dedupeKey:"unknown-outcome:"+cryptoRandom(),status:"ready"});
+    const unknownClaim=await a.claimTask({taskId:unknownTask.task.taskId,ownerId:"unknown-worker",leaseMs:10000});
+    const unknownRunning=await a.transitionTask({taskId:unknownTask.task.taskId,expectedVersion:unknownClaim.version,lease:unknownClaim.lease,status:"in_progress"});
+    const unknown=await a.transitionTask({taskId:unknownTask.task.taskId,expectedVersion:unknownRunning.version,lease:unknownClaim.lease,status:"outcome_unknown",patch:{outcomeUnknownReason:"provider timeout"}});
+    await assert.rejects(a.transitionTask({taskId:unknownTask.task.taskId,expectedVersion:unknown.version,lease:unknownClaim.lease,status:"completed"}),/reconciliation ID and human\/operator identity are required/);
+    const reconciled=await a.transitionTask({taskId:unknownTask.task.taskId,expectedVersion:unknown.version,lease:unknownClaim.lease,status:"completed",patch:{reconciliationId:"provider-check-001",reconciledBy:"operator-1"}});
+    assert.equal(reconciled.task.state,"completed");
     const rootLease=await a.acquireLease({resourceKey:"task:"+root.task.taskId,ownerId:"dependency-check",leaseMs:10000});
     await assert.rejects(
       a.transitionTask({taskId:root.task.taskId,expectedVersion:root.version,lease:rootLease,status:"blocked",patch:{dependencyTaskIds:[child.task.taskId]}}),
