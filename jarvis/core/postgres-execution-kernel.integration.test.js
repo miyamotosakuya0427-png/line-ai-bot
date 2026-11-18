@@ -113,6 +113,9 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   assert.equal(ambiguousRecovery.recovered,true);
   assert.equal(ambiguousRecovery.taskRecoveryState,"outcome_unknown","a Worker lost during execution must be quarantined, not retried");
   assert.equal((await registry.getTask(runningRecoveryTask.task.taskId)).task.state,"outcome_unknown");
+  const quarantinedEvent=await pool.query("SELECT event_type,payload FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1 ORDER BY aggregate_version DESC LIMIT 1",[runningRecoveryTask.task.taskId]);
+  assert.equal(quarantinedEvent.rows[0]?.event_type,"worker_lease_recovered");
+  assert.equal(quarantinedEvent.rows[0]?.payload.state,"outcome_unknown");
   let recoveredLoser=await kernel.getWorker(loserId);
   recoveredLoser=await kernel.transitionWorker({workerId:loserId,expectedVersion:Number(recoveredLoser.version),status:"idle"});
   await assert.rejects(registry.claimTaskForWorker({taskId:runningRecoveryTask.task.taskId,workerId:loserId,leaseMs:5000}),/Task is not claimable/);
