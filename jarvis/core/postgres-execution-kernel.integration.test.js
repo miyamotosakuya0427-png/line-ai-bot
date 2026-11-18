@@ -24,6 +24,7 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
  const pool=new Pool({connectionString:url,max:12,ssl:parsed.searchParams.get("sslmode")==="disable"?false:{rejectUnauthorized:true}});
  let now=Date.parse("2026-11-18T00:00:00.000Z");
  const clock=()=>new Date(now).toISOString();
+ process.env.JARVIS_EXECUTION_TEST_CLOCK=clock();
  try{
   await pool.query("DROP SCHEMA IF EXISTS jarvis CASCADE");
   const fs=require("node:fs/promises"),path=require("node:path"),root=path.join(__dirname,"..","migrations");
