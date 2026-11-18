@@ -107,11 +107,9 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     await assert.rejects(a.transitionTask({taskId:created.task.taskId,expectedVersion:claim.version,lease:claim.lease,status:"review"}),/Stale task version/);
     await assert.rejects(a.transitionTask({taskId:created.task.taskId,expectedVersion:moved.version,lease:claim.lease,status:"review",patch:{taskId:"tamper"}}),/Invalid task patch/);
     now+=11000;
-    const recovered=await b.claimTask({taskId:created.task.taskId,ownerId:"worker-recovery",leaseMs:10000});
-    assert.ok(recovered,"expired in_progress task can be reclaimed");
-    assert.equal(recovered.task.status,"claimed");
-    assert.equal(recovered.task.recoveredFromStatus,"in_progress");
-    assert.ok(recovered.lease.fencingToken>claim.lease.fencingToken,"task recovery increments fencing token");
+    await assert.rejects(b.claimTask({taskId:created.task.taskId,ownerId:"worker-recovery",leaseMs:10000}),/outcome_unknown reconciliation/,"expired running task must never be automatically re-executed");
+    const afterExpiredRun=await a.getTask(created.task.taskId);
+    assert.equal(afterExpiredRun.task.state,"running","a running task remains blocked until recovery classifies its outcome");
     await assert.rejects(a.transitionTask({taskId:created.task.taskId,expectedVersion:moved.version,lease:claim.lease,status:"review"}),/expired, stale, or not owned/);
     const leaseAudit=await pool.query("SELECT event_type,payload FROM jarvis.events WHERE aggregate_type='coordination_lease' AND aggregate_id=$1 ORDER BY aggregate_version",[ "task:"+created.task.taskId ]);
     assert.ok(leaseAudit.rows.some(x=>x.event_type==="lease_acquired"));
