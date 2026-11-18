@@ -21,7 +21,7 @@ function createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEli
     const eligible=await isAgentEligible({task,principal});
     if(eligible!==true)throw new Error("No eligible agent for task");
     const worker=await selectWorker({task,principal});
-    if(!worker||typeof worker.workerId!=="string"||worker.agentId!==principal.agentId||worker.departmentId!==task.departmentId)throw new Error("Worker selection is not authorized for this task");
+    if(!worker||typeof worker.workerId!=="string"||(worker.agentId!==principal.agentId&&!principal.workerAgentIds?.includes(worker.agentId))||worker.departmentId!==task.departmentId)throw new Error("Worker selection is not authorized for this task");
     const handler=handlerMap.get(task.departmentId);
     if(!handler)throw new Error("No handler is registered for task department");
     const quota=await rateLimiter.consume(principal.agentId,{projectIds:[task.projectId],conversationId,workerId:worker.workerId,operation:"dispatch"});
