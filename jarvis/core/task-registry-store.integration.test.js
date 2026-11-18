@@ -113,7 +113,7 @@ test("PostgreSQL 16 Task Registry concurrency and fencing integration", {skip:!d
     await assert.rejects(a.transitionTask({taskId:created.task.taskId,expectedVersion:moved.version,lease:claim.lease,status:"review"}),/expired, stale, or not owned/);
     const leaseAudit=await pool.query("SELECT event_type,payload FROM jarvis.events WHERE aggregate_type='coordination_lease' AND aggregate_id=$1 ORDER BY aggregate_version",[ "task:"+created.task.taskId ]);
     assert.ok(leaseAudit.rows.some(x=>x.event_type==="lease_acquired"));
-    assert.ok(leaseAudit.rows.some(x=>x.event_type==="lease_reclaimed"));
+    assert.equal(leaseAudit.rows.some(x=>x.event_type==="lease_reclaimed"),false,"an expired running Task is not automatically reclaimed");
     await assert.rejects(pool.query("UPDATE jarvis.events SET event_type='tampered' WHERE aggregate_type='task' AND aggregate_id=$1",[created.task.taskId]),/append-only/);
     await assert.rejects(pool.query("DELETE FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1",[created.task.taskId]),/append-only/);
     await assert.rejects(pool.query("TRUNCATE jarvis.events"),/append-only/);
