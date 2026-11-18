@@ -23,9 +23,10 @@ function createInMemoryTaskRegistryRateLimiter({limit=120,windowMs=60000,clock=(
   }};
 }
 
-function createTaskRegistryApi({registry=null,authorize=null,json,readJson,rateLimiter=createInMemoryTaskRegistryRateLimiter()}={}){
+function createTaskRegistryApi({registry=null,authorize=null,json,readJson,rateLimiter=null}={}){
   if(typeof json!=="function"||typeof readJson!=="function")throw new Error("JSON response and request readers are required");
-  if(!rateLimiter||typeof rateLimiter.consume!=="function")throw new Error("A Task Registry rate limiter is required");
+  if(registry&&typeof authorize==="function"&&(!rateLimiter||typeof rateLimiter.consume!=="function"))throw new Error("A shared Task Registry rate limiter must be explicitly configured");
+  if(!rateLimiter)rateLimiter={async consume(){throw new Error("Rate limiter is not configured");}};
   async function principalFor(req,action,taskId){
     if(!registry||typeof authorize!=="function")return {error:"unavailable"};
     let principal;
