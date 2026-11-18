@@ -17,6 +17,9 @@ test("state machine rejects invalid, terminal, and backward transitions",()=>{
   assert.equal(canTransitionTask("queued","claimed"),true);
   assert.equal(canTransitionTask("running","retry_wait"),true);
   assert.equal(canTransitionTask("running","completed"),true);
+  assert.equal(canTransitionTask("claimed","ready"),true,"legacy claim release remains compatible");
+  assert.equal(canTransitionTask("in_progress","ready"),true,"legacy retry release remains compatible");
+  assert.equal(canTransitionTask("verified","review"),true,"legacy verification re-review remains compatible");
   assert.equal(canTransitionTask("completed","queued"),false);
   assert.equal(canTransitionTask("outcome_unknown","queued"),false);
   assert.throws(()=>assertTaskTransition("pending","completed"),/Invalid task state transition/);
