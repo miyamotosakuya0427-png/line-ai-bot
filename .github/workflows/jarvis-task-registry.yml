@@ -1,5 +1,5 @@
 name: ONE JARVIS Task Registry PostgreSQL 16
-# Stage 5: canonical Task State Machine, Dispatcher, recovery, shared API limiter and no-blind-retry validation
+# Stage 5 + command center: Task State Machine, Dispatcher, recovery, shared API limiter, dashboard UI tests
 
 permissions:
   contents: read
