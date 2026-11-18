@@ -17,7 +17,7 @@ test("command center dashboard renders responsive network and operational panels
 test("command center dashboard does not persist credentials or invent external social metrics",()=>{
  const html=commandCenterDashboardPage();
  assert.doesNotMatch(html,/localStorage|sessionStorage|document\.cookie/);
- assert.match(html,/APIトークン（メモリ内のみ）/);
+ assert.match(html,/APIトークン（メモリ内だけ）/);
  assert.match(html,/未接続/);
  assert.match(html,/SNS実績は未接続です/);
  assert.match(html,/textContent/);
