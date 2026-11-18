@@ -10,7 +10,7 @@ This branch is stacked on PR #76 and is intentionally additive. It does not rewr
 - Parent/child relationship is represented by immutable `parentTaskId` on task creation. Parent completion is serialized against child creation/completion and rejected until every child is completed.
 - `outcome_unknown` cannot transition to retry. Resolving it as completed/failed requires explicit reconciliation ID and operator identity.
 - Dispatcher library reads tasks from Task Registry, revalidates project/conversation authorization before claim, checks eligibility, selects an authorized department Worker, applies a required shared rate limiter, then calls atomic `claimTaskForWorker`. It heartbeats the Task Lease and Worker, uses an injected fenced result writer, and quarantines ambiguous execution/persistence errors as `outcome_unknown`.
-- A non-overlapping recovery scheduler invokes the existing PostgreSQL recovery API in bounded batches.
+- A non-overlapping recovery scheduler invokes the PostgreSQL recovery API in bounded batches. Recovery atomically requeues an expired Worker that never started execution, but moves an expired running Task to `outcome_unknown` and blocks automatic re-claim. Worker binding is cleared only after a matching durable Task final state is verified.
 - Configured Task Registry API instances now require an explicitly injected limiter. In-memory limiting is exported for unit fixtures only; PostgreSQL integration uses the shared PostgreSQL limiter.
 
 ## Validation added
