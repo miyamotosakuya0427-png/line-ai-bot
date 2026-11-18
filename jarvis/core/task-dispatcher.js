@@ -1,12 +1,12 @@
 "use strict";
 
-function createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEligible,selectWorker,handlers,resultWriter,leaseMs=60000,heartbeatMs=20000}={}){
-  for(const [name,value] of Object.entries({registry,executionKernel,authorizeTask,isAgentEligible,selectWorker,handlers,resultWriter})){
+function createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEligible,selectWorker,handlers,resultWriter,rateLimiter,leaseMs=60000,heartbeatMs=20000}={}){
+  for(const [name,value] of Object.entries({registry,executionKernel,authorizeTask,isAgentEligible,selectWorker,handlers,resultWriter,rateLimiter})){
     if(!value)throw new Error("Dispatcher dependency is required: "+name);
   }
   for(const method of ["listTasks","getTask","claimTaskForWorker","transitionTask","heartbeatLease","releaseLease"])if(typeof registry[method]!=="function")throw new Error("Task Registry method is required: "+method);
   for(const method of ["heartbeatWorker","transitionWorker","getWorker"])if(typeof executionKernel[method]!=="function")throw new Error("Execution kernel method is required: "+method);
-  if(typeof authorizeTask!=="function"||typeof isAgentEligible!=="function"||typeof selectWorker!=="function"||typeof resultWriter!=="function"||!handlers||typeof handlers!=="object"||Array.isArray(handlers))throw new Error("Dispatcher callbacks are invalid");
+  if(typeof authorizeTask!=="function"||typeof isAgentEligible!=="function"||typeof selectWorker!=="function"||typeof resultWriter!=="function"||typeof rateLimiter.consume!=="function"||!handlers||typeof handlers!=="object"||Array.isArray(handlers))throw new Error("Dispatcher callbacks are invalid");
   if(!Number.isInteger(leaseMs)||leaseMs<5000||leaseMs>3600000||!Number.isInteger(heartbeatMs)||heartbeatMs<1000||heartbeatMs>=leaseMs)throw new Error("Invalid dispatcher lease configuration");
   const handlerMap=new Map(Object.entries(handlers));
   for(const [department,handler] of handlerMap)if(typeof handler!=="function")throw new Error("Invalid task handler: "+department);
@@ -24,6 +24,8 @@ function createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEli
     if(!worker||typeof worker.workerId!=="string"||worker.agentId!==principal.agentId||worker.departmentId!==task.departmentId)throw new Error("Worker selection is not authorized for this task");
     const handler=handlerMap.get(task.departmentId);
     if(!handler)throw new Error("No handler is registered for task department");
+    const quota=await rateLimiter.consume(principal.agentId,{projectIds:[task.projectId],conversationId,workerId:worker.workerId,operation:"dispatch"});
+    if(!quota||quota.allowed!==true)throw new Error("Shared PostgreSQL dispatch rate limit unavailable or exceeded");
     const revalidated=await authorizeTask({requesterAgentId,conversationId,projectId:task.projectId,task,workerId:worker.workerId});
     if(!revalidated||revalidated.allowed!==true||revalidated.agentId!==requesterAgentId||!revalidated.projectIds?.includes(task.projectId)||revalidated.conversationId!==conversationId)throw new Error("Task authorization expired before claim");
     const claim=await registry.claimTaskForWorker({taskId,workerId:worker.workerId,leaseMs});
