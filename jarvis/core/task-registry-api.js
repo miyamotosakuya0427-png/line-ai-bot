@@ -160,4 +160,4 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson,rateL
     }catch(error){errorResponse(res,error);return true;}
   };
 }
-module.exports={createTaskRegistryApi};
+module.exports={createTaskRegistryApi,createInMemoryTaskRegistryRateLimiter};
