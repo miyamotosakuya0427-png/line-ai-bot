@@ -74,8 +74,12 @@ function createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEli
       clearInterval(heartbeat);
       await heartbeatPromise.catch(()=>{});
       if(!leaseLost&&taskFinalized){
-        try{await executionKernel.completeWorkerTask({workerId:worker.workerId,taskId,lease,finalState:active.task.status==="running"?"outcome_unknown":active.task.status});}catch{}
-        try{await registry.releaseLease({lease});}catch{}
+        let workerReleased=false;
+        try{
+          await executionKernel.completeWorkerTask({workerId:worker.workerId,taskId,lease,finalState:active.task.status==="running"?"outcome_unknown":active.task.status});
+          workerReleased=true;
+        }catch{}
+        if(workerReleased){try{await registry.releaseLease({lease});}catch{}}
       }
     }
   }
