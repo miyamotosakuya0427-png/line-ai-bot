@@ -3,7 +3,7 @@ const crypto = require("node:crypto");
 
 const {ALL_TASK_STATES,canonicalTaskState,canTransitionTask}=require("./task-state-machine");
 const TASK_STATES = ALL_TASK_STATES;
-const PATCH_FIELDS = new Set(["scope","ownerConversation","ownerAgent","departmentId","priority","branch","baseBranch","headSha","pullRequest","dependencyTaskIds","changedPaths","testRunIds","verificationSummary","blockerIds","nextAction","startedAt","completedAt","outcomeUnknownReason","reconciliationId"]);
+const PATCH_FIELDS = new Set(["scope","ownerConversation","ownerAgent","departmentId","priority","branch","baseBranch","headSha","pullRequest","dependencyTaskIds","changedPaths","testRunIds","verificationSummary","blockerIds","nextAction","startedAt","completedAt","outcomeUnknownReason","reconciliationId","reconciledBy"]);
 const MAX_TITLE=240, MAX_SCOPE=12000, MAX_OWNER=128, MAX_DEDUPE=240;
 function text(value,max,required=true){return typeof value==="string"&&value.length<=max&&(!required||!!value.trim());}
 function clone(value){return JSON.parse(JSON.stringify(value));}
@@ -92,6 +92,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
     if(current.version!==expectedVersion)throw new Error("Stale task version");
     if(!canTransitionTask(current.task.state||current.task.status,status))throw new Error("Invalid task state transition");
     const nextState=canonicalTaskState(status);
+    if(canonicalTaskState(current.task.state||current.task.status)==="outcome_unknown"&&["completed","failed"].includes(nextState)&&(!text(patch.reconciliationId,128)||!text(patch.reconciledBy,128)))throw new Error("Outcome reconciliation ID and human/operator identity are required");
     if(nextState==="completed"){
       await lock(c,"task-parent:"+taskId);
       const children=await c.query("SELECT DISTINCT ON (aggregate_id) aggregate_id,payload FROM jarvis.events WHERE aggregate_type='task' ORDER BY aggregate_id,aggregate_version DESC");
