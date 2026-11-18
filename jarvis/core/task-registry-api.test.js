@@ -39,7 +39,7 @@ test("Task Registry API enforces authentication and per-agent scopes",async t=>{
   const {server}=fixture();t.after(()=>new Promise(resolve=>server.close(resolve)));
   const root=await listen(server);
   assert.equal((await fetch(root+"/v1/tasks")).status,401);
-  const denied=createServer({taskRegistry:{listTasks:async()=>[]},authorizeTaskRegistry:async()=>({agentId:"agent-readonly",scopes:[]})});
+  const denied=createServer({taskRegistry:{listTasks:async()=>[]},authorizeTaskRegistry:async()=>({agentId:"agent-readonly",scopes:[]}),taskRegistryRateLimiter:createInMemoryTaskRegistryRateLimiter()});
   t.after(()=>new Promise(resolve=>denied.close(resolve)));
   await new Promise(resolve=>denied.listen(0,"127.0.0.1",resolve));
   const response=await fetch("http://127.0.0.1:"+denied.address().port+"/v1/tasks");
@@ -52,9 +52,9 @@ test("Task Registry API creates, claims, heartbeats, transitions and releases un
   const outOfProject=await post(root,"/v1/tasks",{title:"Forbidden project task",dedupeKey:"api-task-other",projectId:"other-project"});
   assert.equal(outOfProject.status,403);
   assert.equal((await fetch(root+"/v1/tasks?projectId=other-project",{headers:{Authorization:"Bearer agent-a"}})).status,403);
-  const created=await post(root,"/v1/tasks",{title:"API task",dedupeKey:"api-task-1",status:"ready",ownerAgent:"spoofed"});
+  const created=await post(root,"/v1/tasks",{title:"API task",dedupeKey:"api-task-1",status:"ready",departmentId:"finance",ownerAgent:"spoofed"});
   assert.equal(created.status,201);
-  const body=await created.json();assert.equal(body.task.ownerAgent,"agent-a");assert.equal(body.task.status,"ready");
+  const body=await created.json();assert.equal(body.task.ownerAgent,"agent-a");assert.equal(body.task.status,"ready");assert.equal(body.task.state,"queued");assert.equal(body.task.departmentId,"finance");
   const id=body.task.taskId;
   assert.equal((await fetch(root+"/v1/tasks/"+id,{headers:{Authorization:"Bearer agent-a"}})).status,200);
   assert.equal((await fetch(root+"/v1/tasks/"+id,{headers:{Authorization:"Bearer agent-b"}})).status,404,"another agent cannot read this task");
