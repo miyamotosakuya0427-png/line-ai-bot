@@ -56,7 +56,7 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson,rateL
     if(Number.isInteger(error?.statusCode)&&error.statusCode>=400&&error.statusCode<=499)return json(res,error.statusCode,{ok:false,error:error.statusCode===413?"Request body too large":"Invalid request"});
     const message=typeof error?.message==="string"?error.message:"";
     if(/Invalid task|Invalid lease|Invalid task patch|Invalid task dependencies|Dependency task does not exist/.test(message))return json(res,400,{ok:false,error:message});
-    if(/Stale task version|expired, stale|not owned|not claimable|dependency cycle|already|Lease heartbeat rejected/.test(message))return json(res,409,{ok:false,error:message});
+    if(/Stale task version|expired, stale|not owned|not claimable|dependency cycle|already|Lease heartbeat rejected|Expired running Task requires|every child task is completed|reconciliation ID and human\/operator identity/.test(message))return json(res,409,{ok:false,error:message});
     return json(res,503,{ok:false,error:"Task Registry operation failed"});
   }
   return async function handleTaskRegistryRequest(req,res,url){
