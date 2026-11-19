@@ -166,6 +166,7 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         let principal;
         try{principal=await authorizeTaskRegistry(registryReq,{action:"list"});}catch{return json(res,503,{ok:false,error:"Task Registry authorization unavailable"});}
         if(!principal)return json(res,401,{ok:false,error:"Task Registry unauthorized"},{"WWW-Authenticate":"Bearer"});
+        if(typeof principal.agentId!=="string"||!/^[A-Za-z0-9._:-]{1,128}$/.test(principal.agentId))return json(res,403,{ok:false,error:"Invalid Task Registry identity"});
         if(!Array.isArray(principal.scopes)||!principal.scopes.includes("tasks:read"))return json(res,403,{ok:false,error:"Task Registry read scope required"});
         const projectIds=principal.projectIds===undefined?["one-jarvis"]:principal.projectIds;
         if(!Array.isArray(projectIds)||projectIds.length<1||projectIds.length>50||projectIds.some(x=>typeof x!=="string"||!/^[A-Za-z0-9._:-]{1,128}$/.test(x))||new Set(projectIds).size!==projectIds.length)return json(res,403,{ok:false,error:"Invalid project scope"});
