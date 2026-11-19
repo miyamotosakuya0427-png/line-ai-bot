@@ -229,6 +229,14 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         return {task:clone(next),version:current.version+1,lease};
       });
     },
+    async listTaskEvents({taskIds=[],limit=500}={}){
+      await init();
+      if(!Array.isArray(taskIds)||taskIds.length>200||taskIds.some(id=>!text(id,200))||new Set(taskIds).size!==taskIds.length)throw new Error("Invalid scoped Task IDs");
+      if(!Number.isInteger(limit)||limit<1||limit>2000)throw new Error("Invalid Task event limit");
+      if(taskIds.length===0)return [];
+      const r=await pool.query("SELECT event_id,aggregate_id,aggregate_version,event_type,payload,created_at FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=ANY($1::text[]) ORDER BY event_id DESC LIMIT $2",[taskIds,limit]);
+      return r.rows.map(row=>({eventId:Number(row.event_id),taskId:row.aggregate_id,version:Number(row.aggregate_version),eventType:row.event_type,payload:clone(row.payload),createdAt:row.created_at}));
+    },
     async transitionTask(input={}){
       await init();
       return tx(c=>transitionInTx(c,input));
