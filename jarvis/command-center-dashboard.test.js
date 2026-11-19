@@ -6,7 +6,7 @@ const {commandCenterDashboardPage}=require("./command-center-dashboard");
 
 test("command center dashboard renders responsive network and operational panels",()=>{
  const html=commandCenterDashboardPage();
- for(const marker of ["AGENT NETWORK","AGENT INSPECTOR","TASK STREAM","ALERTS","NEW TASK","PLATFORM HEALTH","DEVELOPMENT AGENTS","@media(max-width:520px)","/v1/command-center","/v1/departments","/v1/status","/v1/tasks?limit=50","/v1/approvals","/v1/content/workflow","15秒","未接続"]){
+ for(const marker of ["AGENT NETWORK","AGENT INSPECTOR","TASK STREAM","ALERTS","NEW TASK","PLATFORM HEALTH","DEVELOPMENT AGENTS","@media(max-width:520px)","/v1/command-center","/v1/departments","/v1/status","/v1/command-center/telemetry","/v1/approvals","/v1/content/workflow","15秒","未接続"]){
   assert.ok(html.includes(marker),"missing dashboard marker: "+marker);
  }
  const match=/<script>([\s\S]*?)<\/script>/.exec(html);
@@ -18,6 +18,8 @@ test("command center dashboard does not persist credentials or invent external s
  const html=commandCenterDashboardPage();
  assert.doesNotMatch(html,/localStorage|sessionStorage|document\.cookie/);
  assert.match(html,/APIトークン（メモリ内だけ）/);
+ assert.match(html,/Task Registryトークン（任意・メモリ内だけ）/);
+ assert.match(html,/X-Task-Registry-Authorization/);
  assert.match(html,/未接続/);
  assert.match(html,/SNS実績は未接続です/);
  assert.match(html,/textContent/);
