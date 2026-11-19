@@ -104,7 +104,7 @@ dailyForm.addEventListener("submit",async(event)=>{event.preventDefault();if(!id
 </script></body></html>`;
 }
 
-function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||"",sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,approvalStore=null,videoBatchStore=null,paperTradingStore=null,influenceEventStore=null,worker=null,departmentHandlers=null,departmentContextLoader=null,commandPlanner=null,taskRegistry=null,authorizeTaskRegistry=null,taskRegistryRateLimiter=null,schedulingRuntime=null,now=()=>new Date()}={}) {
+function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||"",sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,approvalStore=null,videoBatchStore=null,paperTradingStore=null,influenceEventStore=null,worker=null,departmentHandlers=null,departmentContextLoader=null,commandPlanner=null,taskRegistry=null,authorizeTaskRegistry=null,taskRegistryRateLimiter=null,executionKernel=null,schedulingRuntime=null,now=()=>new Date()}={}) {
   const taskRegistryApi=createTaskRegistryApi({registry:taskRegistry,authorize:authorizeTaskRegistry,json,readJson,rateLimiter:taskRegistryRateLimiter||undefined});
   let schedulingRuntimeInit=null;
   async function ensureSchedulingRuntime(){
@@ -156,6 +156,35 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
           const rejected=Number.isInteger(error?.statusCode)&&error.statusCode>=400&&error.statusCode<500;
           return json(res,rejected?error.statusCode:503,{ok:false,error:rejected?"Reservation operation rejected":"Reservation service unavailable"});
         }
+      }
+      if(req.method==="GET"&&url.pathname==="/v1/command-center/telemetry"){
+        if(!isAuthorized(req,token))return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        if(!taskRegistry||typeof authorizeTaskRegistry!=="function"||!taskRegistryRateLimiter||!executionKernel)return json(res,503,{ok:false,error:"Scoped PostgreSQL telemetry is not configured"});
+        const registryHeader=req.headers["x-task-registry-authorization"];
+        if(typeof registryHeader!=="string"||registryHeader.length>600)return json(res,401,{ok:false,error:"Task Registry credential is required"},{"WWW-Authenticate":"Bearer"});
+        const registryReq={...req,headers:{...req.headers,authorization:registryHeader}};
+        let principal;
+        try{principal=await authorizeTaskRegistry(registryReq,{action:"list"});}catch{return json(res,503,{ok:false,error:"Task Registry authorization unavailable"});}
+        if(!principal)return json(res,401,{ok:false,error:"Task Registry unauthorized"},{"WWW-Authenticate":"Bearer"});
+        if(!Array.isArray(principal.scopes)||!principal.scopes.includes("tasks:read"))return json(res,403,{ok:false,error:"Task Registry read scope required"});
+        const projectIds=principal.projectIds===undefined?["one-jarvis"]:principal.projectIds;
+        if(!Array.isArray(projectIds)||projectIds.length<1||projectIds.length>50||projectIds.some(x=>typeof x!=="string"||!/^[A-Za-z0-9._:-]{1,128}$/.test(x))||new Set(projectIds).size!==projectIds.length)return json(res,403,{ok:false,error:"Invalid project scope"});
+        const conversationId=principal.conversationId||"agent:"+principal.agentId;
+        const tasks=[];
+        for(const projectId of projectIds){
+          let quota;
+          try{quota=await taskRegistryRateLimiter.consume(principal.agentId,{projectIds:[projectId],conversationId,workerId:principal.workerId||principal.agentId,operation:"telemetry:list"});}catch{return json(res,503,{ok:false,error:"Shared telemetry rate limiter unavailable"});}
+          if(!quota||quota.allowed!==true)return json(res,429,{ok:false,error:"Telemetry rate limit exceeded"},{"Retry-After":String(Math.max(1,Number(quota?.retryAfter)||60))});
+          const page=await taskRegistry.listTasks({limit:200,offset:0,projectId,ownerAgent:principal.agentId,ownerConversation:conversationId});
+          if(Array.isArray(page))tasks.push(...page);else if(Array.isArray(page?.tasks))tasks.push(...page.tasks);
+        }
+        const workerIds=[...new Set(tasks.map(t=>t.leaseOwner).filter(x=>typeof x==="string"&&x.length<=160))].slice(0,200);
+        const workers=[];
+        for(const workerId of workerIds){
+          const worker=await executionKernel.getWorker(workerId);
+          if(worker)workers.push({workerId:worker.worker_id||workerId,agentId:worker.agent_id||null,departmentId:worker.department_id||null,status:worker.status||"unknown",currentTaskId:worker.current_task_id||null,heartbeatAt:worker.heartbeat_at||null,leaseExpiresAt:null,fencingToken:worker.fencing_token===null?null:Number(worker.fencing_token),version:Number(worker.version||0)});
+        }
+        return json(res,200,{ok:true,scope:{agentId:principal.agentId,conversationId,projectIds},tasks:tasks.slice(0,500),workers,workerCoverage:"workers associated with scoped active tasks only",generatedAt:now().toISOString()});
       }
       if (await taskRegistryApi(req,res,url)) return;
       if (req.method==="GET" && (url.pathname==="/" || url.pathname==="/command-center-ui")) {
@@ -834,7 +863,7 @@ if (require.main===module) {
       jobStore=JOB_STORE_PATH?createJobStore({filePath:JOB_STORE_PATH}):null;
       approvalStore=APPROVAL_STORE_PATH?createApprovalStore({filePath:APPROVAL_STORE_PATH}):null;
     }
-    let taskRegistry=null,authorizeTaskRegistry=null,taskRegistryRateLimiter=null,executionRecoveryScheduler=null;
+    let taskRegistry=null,authorizeTaskRegistry=null,taskRegistryRateLimiter=null,executionKernel=null,executionRecoveryScheduler=null;
     if(process.env.JARVIS_TASK_REGISTRY_API_ENABLED==="true"){
       if(!postgresPool)throw new Error("Task Registry API requires JARVIS_STORAGE_MODE=postgres.");
       const {createTaskRegistry}=require("./core/task-registry-store");
@@ -845,7 +874,7 @@ if (require.main===module) {
       const {createPostgresTaskRegistryRateLimiter}=require("./core/postgres-task-registry-rate-limiter");
       const {createPostgresExecutionKernel}=require("./core/postgres-execution-kernel");
       const {createExecutionRecoveryScheduler}=require("./core/execution-recovery-scheduler");
-      const executionKernel=createPostgresExecutionKernel({pool:postgresPool});
+      executionKernel=createPostgresExecutionKernel({pool:postgresPool});
       await executionKernel.init(); // Read-only migration 0007/schema check; never applies a migration.
       taskRegistryRateLimiter=createPostgresTaskRegistryRateLimiter({pool:postgresPool});
       if(process.env.JARVIS_EXECUTION_RECOVERY_ENABLED==="true")executionRecoveryScheduler=createExecutionRecoveryScheduler({executionKernel});
@@ -867,7 +896,7 @@ if (require.main===module) {
     const contentScheduler=worker&&process.env.JARVIS_CONTENT_AUTOPLAN_ENABLED==="true"?startDailyContentPlanner({store:jobStore}):null;
     const subsidyScheduler=worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"?startDailySubsidyMonitor({store:jobStore}):null;
     const commandPlanner=createCommandPlanner();
-    const server=createServer({jobStore,approvalStore,videoBatchStore,paperTradingStore,influenceEventStore,worker,departmentHandlers,departmentContextLoader,commandPlanner,taskRegistry,authorizeTaskRegistry,taskRegistryRateLimiter}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
+    const server=createServer({jobStore,approvalStore,videoBatchStore,paperTradingStore,influenceEventStore,worker,departmentHandlers,departmentContextLoader,commandPlanner,taskRegistry,authorizeTaskRegistry,taskRegistryRateLimiter,executionKernel}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
     const shutdown=signal=>{ console.log(`Received ${signal}; shutting down.`); if(subsidyScheduler)subsidyScheduler.stop(); if(contentScheduler)contentScheduler.stop(); if(executionRecoveryScheduler)executionRecoveryScheduler.stop(); if(worker)worker.stop(); server.close(async error=>{if(error){console.error("Graceful shutdown failed.");process.exit(1);}if(postgresPool){try{await postgresPool.end();}catch{console.error("Database pool shutdown failed.");}}process.exit(0);}); setTimeout(()=>process.exit(1),10000).unref(); };
     process.on("SIGTERM",()=>shutdown("SIGTERM")); process.on("SIGINT",()=>shutdown("SIGINT"));
     server.listen(PORT,"0.0.0.0",()=>{if(executionRecoveryScheduler)executionRecoveryScheduler.start();console.log(`ONE JARVIS running on port ${PORT}`);});
