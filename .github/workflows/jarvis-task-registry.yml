@@ -26,6 +26,7 @@ on:
       - "jarvis/command-center-dashboard.test.js"
       - "jarvis/command-center-telemetry.test.js"
       - "jarvis/coordination/COMMAND_CENTER_TELEMETRY_STAGE2.md"
+      - "jarvis/coordination/COMMAND_CENTER_STAGE3.md"
       - "jarvis/migrations/0004_task_registry.sql"
       - "jarvis/migrations/0005_task_registry_scoped_dedupe.sql"
       - "jarvis/migrations/0006_scheduling_reservation_store.sql"
