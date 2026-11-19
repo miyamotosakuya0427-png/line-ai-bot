@@ -179,6 +179,13 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
           const page=await taskRegistry.listTasks({limit:200,offset:0,projectId,ownerAgent:principal.agentId,ownerConversation:conversationId});
           if(Array.isArray(page))tasks.push(...page);else if(Array.isArray(page?.tasks))tasks.push(...page.tasks);
         }
+        const scopedTaskIds=[...new Set(tasks.map(row=>row.task?.taskId).filter(x=>typeof x==="string"&&x.length<=200))].slice(0,200);
+        let eventRows=[];
+        if(typeof taskRegistry.listTaskEvents==="function"&&scopedTaskIds.length){
+          try{eventRows=await taskRegistry.listTaskEvents({taskIds:scopedTaskIds,limit:1000});}catch{return json(res,503,{ok:false,error:"Scoped Task event history unavailable"});}
+        }
+        const events=eventRows.slice(0,1000).map(row=>({eventId:Number(row.eventId),taskId:row.taskId,version:Number(row.version),eventType:String(row.eventType||"unknown").slice(0,100),createdAt:row.createdAt||null,status:typeof row.payload?.status==="string"?row.payload.status:null,agentId:typeof row.payload?.ownerAgent==="string"?row.payload.ownerAgent:null,workerId:typeof row.payload?.leaseOwner==="string"?row.payload.leaseOwner:null,departmentId:typeof row.payload?.departmentId==="string"?row.payload.departmentId:null}));
+        const handoffs=eventRows.filter(row=>["agent_handoff","department_handoff","task_handoff"].includes(row.eventType)&&typeof row.payload?.fromAgentId==="string"&&typeof row.payload?.toAgentId==="string").map(row=>({eventId:Number(row.eventId),taskId:row.taskId,fromAgentId:row.payload.fromAgentId.slice(0,128),toAgentId:row.payload.toAgentId.slice(0,128),fromDepartmentId:typeof row.payload.fromDepartmentId==="string"?row.payload.fromDepartmentId.slice(0,128):null,toDepartmentId:typeof row.payload.toDepartmentId==="string"?row.payload.toDepartmentId.slice(0,128):null,createdAt:row.createdAt||null}));
         const workerIds=[...new Set(tasks.map(row=>row.task?.leaseOwner).filter(x=>typeof x==="string"&&x.length<=160))].slice(0,200);
         const workers=[];
         for(const workerId of workerIds){
@@ -197,7 +204,7 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
             outcomeUnknownReason:typeof task.outcomeUnknownReason==="string"?task.outcomeUnknownReason.slice(0,240):null
           }};
         });
-        return json(res,200,{ok:true,scope:{agentId:principal.agentId,conversationId,projectIds},tasks:safeTasks,workers,workerCoverage:"workers associated with scoped active tasks only",generatedAt:now().toISOString()});
+        return json(res,200,{ok:true,scope:{agentId:principal.agentId,conversationId,projectIds},tasks:safeTasks,workers,events,handoffs,workerCoverage:"workers associated with scoped active tasks only",eventCoverage:typeof taskRegistry.listTaskEvents==="function"?"persisted events for scoped Tasks":"event history unavailable",generatedAt:now().toISOString()});
       }
       if (await taskRegistryApi(req,res,url)) return;
       if (req.method==="GET" && (url.pathname==="/" || url.pathname==="/command-center-ui")) {
