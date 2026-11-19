@@ -55,3 +55,13 @@ test("command center telemetry returns only scoped Task and sanitized Worker fie
   assert.deepEqual(calls[0],{limit:200,offset:0,projectId:"project-1",ownerAgent:"agent-1",ownerConversation:"conversation-1"});
  });
 });
+
+test("command center telemetry fails closed when shared rate limit is exhausted",async()=>{
+ const {options}=telemetryOptions();
+ options.taskRegistryRateLimiter={async consume(){return{allowed:false,retryAfter:17}}};
+ await withServer(options,async url=>{
+  const response=await fetch(url+"/v1/command-center/telemetry",{headers:{Authorization:"Bearer "+apiToken,"X-Task-Registry-Authorization":"Bearer "+registryToken}});
+  assert.equal(response.status,429);
+  assert.equal(response.headers.get("retry-after"),"17");
+ });
+});
