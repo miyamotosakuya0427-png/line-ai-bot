@@ -178,11 +178,11 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
           const page=await taskRegistry.listTasks({limit:200,offset:0,projectId,ownerAgent:principal.agentId,ownerConversation:conversationId});
           if(Array.isArray(page))tasks.push(...page);else if(Array.isArray(page?.tasks))tasks.push(...page.tasks);
         }
-        const workerIds=[...new Set(tasks.map(t=>t.leaseOwner).filter(x=>typeof x==="string"&&x.length<=160))].slice(0,200);
+        const workerIds=[...new Set(tasks.map(row=>row.task?.leaseOwner).filter(x=>typeof x==="string"&&x.length<=160))].slice(0,200);
         const workers=[];
         for(const workerId of workerIds){
           const worker=await executionKernel.getWorker(workerId);
-          if(worker)workers.push({workerId:worker.worker_id||workerId,agentId:worker.agent_id||null,departmentId:worker.department_id||null,status:worker.status||"unknown",currentTaskId:worker.current_task_id||null,heartbeatAt:worker.heartbeat_at||null,leaseExpiresAt:null,fencingToken:worker.fencing_token===null?null:Number(worker.fencing_token),version:Number(worker.version||0)});
+          if(worker)workers.push({workerId:worker.worker_id||workerId,agentId:worker.agent_id||null,departmentId:worker.department_id||null,status:worker.status||"unknown",currentTaskId:worker.current_task_id||null,heartbeatAt:worker.heartbeat_at||null,leaseExpiresAt:worker.lease_expires_at||null,fencingToken:worker.fencing_token===null?null:Number(worker.fencing_token),version:Number(worker.version||0)});
         }
         return json(res,200,{ok:true,scope:{agentId:principal.agentId,conversationId,projectIds},tasks:tasks.slice(0,500),workers,workerCoverage:"workers associated with scoped active tasks only",generatedAt:now().toISOString()});
       }
