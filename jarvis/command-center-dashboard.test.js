@@ -21,6 +21,9 @@ test("command center dashboard does not persist credentials or invent external s
  assert.match(html,/Task Registryトークン（任意・メモリ内だけ）/);
  assert.match(html,/X-Task-Registry-Authorization/);
  assert.match(html,/Worker数（対象Taskに紐づく範囲）/);
+ assert.match(html,/AGENT HANDOFF/);
+ assert.match(html,/handoffs/);
+ assert.match(html,/handoff/);
  assert.match(html,/状態不明/);
  assert.match(html,/未接続/);
  assert.match(html,/SNS実績は未接続です/);
