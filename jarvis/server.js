@@ -185,7 +185,19 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
           const worker=await executionKernel.getWorker(workerId);
           if(worker)workers.push({workerId:worker.worker_id||workerId,agentId:worker.agent_id||null,departmentId:worker.department_id||null,status:worker.status||"unknown",currentTaskId:worker.current_task_id||null,heartbeatAt:worker.heartbeat_at||null,leaseExpiresAt:worker.lease_expires_at||null,fencingToken:worker.fencing_token===null?null:Number(worker.fencing_token),version:Number(worker.version||0)});
         }
-        return json(res,200,{ok:true,scope:{agentId:principal.agentId,conversationId,projectIds},tasks:tasks.slice(0,500),workers,workerCoverage:"workers associated with scoped active tasks only",generatedAt:now().toISOString()});
+        const safeTasks=tasks.slice(0,500).map(row=>{
+          const task=row.task||{};
+          return {version:Number(row.version||0),task:{
+            taskId:task.taskId||null,projectId:task.projectId||null,title:typeof task.title==="string"?task.title.slice(0,240):"",
+            departmentId:task.departmentId||null,status:task.status||null,state:task.state||null,priority:task.priority||null,
+            ownerAgent:task.ownerAgent||null,ownerConversation:task.ownerConversation||null,leaseOwner:task.leaseOwner||null,
+            leaseExpiresAt:task.leaseExpiresAt||null,fencingToken:Number.isSafeInteger(task.fencingToken)?task.fencingToken:null,
+            createdAt:task.createdAt||null,updatedAt:task.updatedAt||null,startedAt:task.startedAt||null,completedAt:task.completedAt||null,
+            blockerIds:Array.isArray(task.blockerIds)?task.blockerIds.slice(0,20):[],nextAction:typeof task.nextAction==="string"?task.nextAction.slice(0,240):null,
+            outcomeUnknownReason:typeof task.outcomeUnknownReason==="string"?task.outcomeUnknownReason.slice(0,240):null
+          }};
+        });
+        return json(res,200,{ok:true,scope:{agentId:principal.agentId,conversationId,projectIds},tasks:safeTasks,workers,workerCoverage:"workers associated with scoped active tasks only",generatedAt:now().toISOString()});
       }
       if (await taskRegistryApi(req,res,url)) return;
       if (req.method==="GET" && (url.pathname==="/" || url.pathname==="/command-center-ui")) {
