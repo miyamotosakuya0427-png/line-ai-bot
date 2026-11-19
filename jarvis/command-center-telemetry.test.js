@@ -51,6 +51,10 @@ test("command center telemetry returns only scoped Task and sanitized Worker fie
   assert.equal(body.tasks[0].task.taskId,"task-1");
   assert.equal(body.workers[0].leaseExpiresAt,"2026-11-20T00:01:00.000Z");
   assert.equal(body.workers[0].fencingToken,7);
+  assert.equal(body.events.length,2);
+  assert.equal(body.handoffs.length,1);
+  assert.equal(body.handoffs[0].fromAgentId,"agent-1");
+  assert.equal(body.handoffs[0].toDepartmentId,"construction");
   assert.equal(JSON.stringify(body).includes("must-not-leak"),false);
   assert.equal(JSON.stringify(body).includes("task-hash-must-not-leak"),false);
   assert.deepEqual(calls[0],{limit:200,offset:0,projectId:"project-1",ownerAgent:"agent-1",ownerConversation:"conversation-1"});
