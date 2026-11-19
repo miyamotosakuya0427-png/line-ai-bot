@@ -173,7 +173,7 @@ function createPostgresExecutionKernel({pool,clock=()=>new Date().toISOString(),
     },
     async getWorker(workerId){
       await init();
-      const r=await pool.query("SELECT * FROM jarvis.worker_registry WHERE worker_id=$1",[workerId]);
+      const r=await pool.query("SELECT w.*,l.expires_at AS lease_expires_at,l.owner_id AS lease_owner,l.fencing_token AS lease_fencing_token FROM jarvis.worker_registry w LEFT JOIN jarvis.coordination_leases l ON l.resource_key=w.lease_resource_key WHERE w.worker_id=$1",[workerId]);
       return r.rows[0]||null;
     },
     async writeResource(input={}){
