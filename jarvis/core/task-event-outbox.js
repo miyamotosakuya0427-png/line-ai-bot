@@ -1,0 +1,47 @@
+"use strict";
+
+// Durable scoped replay. NOTIFY is only a wake-up hint; callers always read rows
+// from the outbox, so missed notifications do not lose events.
+function createTaskEventOutbox({pool,maxBatch=500}={}) {
+  if(!pool||typeof pool.query!=="function"||typeof pool.connect!=="function")throw new Error("PostgreSQL pool is required");
+  if(!Number.isInteger(maxBatch)||maxBatch<1||maxBatch>5000)throw new Error("Invalid outbox batch size");
+  async function replay({projectId,conversationId,afterCursor=0,limit=100}={}) {
+    if(typeof projectId!=="string"||!projectId.trim()||projectId.length>128||
+       typeof conversationId!=="string"||!conversationId.trim()||conversationId.length>128||
+       !Number.isSafeInteger(afterCursor)||afterCursor<0||!Number.isInteger(limit)||limit<1||limit>maxBatch) {
+      throw new Error("Invalid scoped outbox cursor request");
+    }
+    const result=await pool.query(
+      "SELECT o.outbox_id,o.source_event_id,o.task_id,o.event_type,o.created_at,e.aggregate_version,e.payload " +
+      "FROM jarvis.task_event_outbox o JOIN jarvis.events e ON e.event_id=o.source_event_id " +
+      "WHERE o.project_id=$1 AND o.conversation_id=$2 AND o.outbox_id>$3 " +
+      "ORDER BY o.outbox_id ASC LIMIT $4",
+      [projectId,conversationId,afterCursor,limit]
+    );
+    return result.rows.map(row=>({
+      cursor:Number(row.outbox_id),eventId:Number(row.source_event_id),taskId:row.task_id,
+      version:Number(row.aggregate_version),eventType:row.event_type,createdAt:row.created_at,
+      payload:row.payload
+    }));
+  }
+  async function listen(onWake) {
+    if(typeof onWake!=="function")throw new Error("Notification callback is required");
+    const client=await pool.connect();
+    let closed=false;
+    const handler=message=>{
+      if(closed||message.channel!=="jarvis_task_events")return;
+      const cursor=Number(message.payload);
+      if(Number.isSafeInteger(cursor)&&cursor>0)Promise.resolve(onWake(cursor)).catch(()=>{});
+    };
+    client.on("notification",handler);
+    await client.query("LISTEN jarvis_task_events");
+    return async function close(){
+      if(closed)return;
+      closed=true;
+      client.removeListener("notification",handler);
+      try{await client.query("UNLISTEN jarvis_task_events");}finally{client.release();}
+    };
+  }
+  return {replay,listen};
+}
+module.exports={createTaskEventOutbox};
