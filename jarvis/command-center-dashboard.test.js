@@ -6,7 +6,7 @@ const {commandCenterDashboardPage}=require("./command-center-dashboard");
 
 test("command center dashboard renders responsive network and operational panels",()=>{
  const html=commandCenterDashboardPage();
- for(const marker of ["AGENT NETWORK","AGENT INSPECTOR","TASK STREAM","ALERTS","NEW TASK","PLATFORM HEALTH","DEVELOPMENT AGENTS","@media(max-width:520px)","/v1/command-center","/v1/departments","/v1/status","/v1/command-center/telemetry","WORKER REGISTRY","未定義部門","/ 16","/v1/approvals","/v1/content/workflow","15秒","未接続"]){
+ for(const marker of ["AGENT NETWORK","AGENT INSPECTOR","TASK STREAM","ALERTS","NEW TASK","PLATFORM HEALTH","DEVELOPMENT AGENTS","@media(max-width:520px)","/v1/command-center","/v1/departments","/v1/status","/v1/command-center/telemetry","WORKER REGISTRY","WORKER SCOPE GRANT","OWNER管理","/v1/admin/worker-scope-grants","未定義部門","/ 16","/v1/approvals","/v1/content/workflow","15秒","未接続"]){
   assert.ok(html.includes(marker),"missing dashboard marker: "+marker);
  }
  const match=/<script>([\s\S]*?)<\/script>/.exec(html);
