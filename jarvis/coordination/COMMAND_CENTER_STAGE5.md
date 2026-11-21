@@ -1,41 +1,56 @@
-# ONE JARVIS Command Center — Stage 5
+# ONE JARVIS Command Center — Stage 5 status
 
-## Implemented on the isolated PR branch
+## Implemented and verified on the isolated PR branch
 
-### Durable Event Outbox
-- Migration `0009_task_event_outbox.sql` creates a durable Task-event outbox and per-Project/Conversation cursor counter.
-- The `jarvis.events` AFTER INSERT trigger writes the outbox row and advances its scope cursor in the same transaction as the append-only Task event.
-- A transaction-scoped advisory lock serializes cursor allocation within a Project/Conversation; the counter update rolls back with the Task event, avoiding false gaps caused by sequence rollback or out-of-order commits.
-- PostgreSQL NOTIFY carries only the scoped cursor as a wake-up hint. Event bodies are read from durable `jarvis.events` joined through the Outbox.
-- Outbox replay checks future cursors and contiguous per-scope cursor progression. Outbox rows are protected against UPDATE / DELETE / TRUNCATE.
-- Replay is bounded and validates Project / Conversation scope. The listener is a wake-up optimization; polling replay remains the recovery path for lost notifications.
+### Durable Task Event Outbox
+- Migration `0009_task_event_outbox.sql` creates an Outbox row and per-Project/Conversation cursor in the same transaction as each append-only Task event.
+- Cursor allocation uses a transaction-scoped advisory lock and transactional counter, preventing committed cursor gaps from rolled-back transactions and ordering races.
+- PostgreSQL NOTIFY contains only a wake-up cursor hint; event bodies are always read from durable Outbox joined to append-only `jarvis.events`.
+- Outbox rejects UPDATE, DELETE and TRUNCATE. Replay is bounded, scope-limited, ordered, deduplicated by cursor, and rejects future cursors / detected gaps.
+- Lost notifications are recoverable by replay polling. PostgreSQL 16 integration suite also covers rollback atomicity and independent OS processes for Worker/Lease races.
 
 ### Authenticated SSE
-- `GET /v1/command-center/events` requires the Dashboard API token and a Task Registry credential in `X-Task-Registry-Authorization`.
-- Project and Conversation are checked against the authenticated principal at connection time and every 15 seconds while connected.
-- Supports `Last-Event-ID` and the `after` query parameter for fetch-stream reconnects; duplicate cursors are skipped and ordered replay is sourced from the Outbox.
-- SSE frames use an allowlist of event payload fields; credential hashes, secrets, and lease tokens are not serialized.
-- Heartbeats, bounded output batches, backpressure timeout, per-agent/global connection caps, shared rate limiting, listener cleanup and polling fallback are implemented.
-- Global connections are capped at 3 and each Agent at 1 to preserve capacity in the current PostgreSQL pool (max 5).
-- The dashboard uses fetch streaming because browser EventSource cannot attach the required authorization headers. It retains 15-second polling as fallback.
+- `GET /v1/command-center/events` requires Dashboard API token and Task Registry token.
+- Project / Conversation scope is checked on connection and rechecked during the stream.
+- Last-Event-ID replay, cursor ordering, duplicate suppression, heartbeat, connection limits, shared rate limiting, bounded batches, backpressure timeout and LISTEN cleanup are implemented.
+- SSE payload is an explicit metadata allowlist; free-form task text, credential hashes, secrets and lease tokens are excluded.
+- Because the browser EventSource API cannot set the required custom auth header, the Dashboard uses fetch streaming.
+- Authenticated 15-second polling remains the fallback.
+
+### Shared dynamic Token revocation (new)
+- Migration `0010_task_registry_agent_revocations.sql` adds an append-only PostgreSQL revocation ledger keyed by Agent ID; it blocks future authorization without process restart.
+- The authorizer checks the shared revocation store on each authorization. SSE repeats authorization every 15 seconds and terminates on revocation/expiry.
+- Owner-only `POST /v1/admin/task-registry-agents/:agentId/revoke` requires `ownerApproval: true`.
+- If migration 0010 is missing or the shared revocation store is unavailable, SSE fails closed with 503; authenticated polling remains available using the existing configured token expiry/revocation checks.
+- Agent IDs are permanently revoked in this ledger; credential rotation should use a new Agent ID. The ledger does not store raw tokens or token hashes.
 
 ### Worker Grant management
-- Owner-only `GET /v1/admin/worker-scope-grants` lists active and revoked grants, grantor/time, Worker state, current Task and Lease expiry.
-- Grant create/revoke operations require Owner authentication and `ownerApproval: true`; the dashboard additionally prompts for explicit confirmation.
-- Grant/revoke audit events remain append-only.
-- API/UI responses omit secrets, credential hashes and fencing tokens.
-- Grantor is still recorded as the role label `owner-token`, not a named human identity.
+- Owner-only Grant listing includes active/revoked Grant metadata, grantor/time, Worker status and Lease expiry.
+- Grant creation and revocation require Owner authentication and explicit `ownerApproval: true`; Dashboard UI also asks for confirmation.
+- Responses omit secrets, credential hashes and fencing tokens. Grant audit events remain append-only.
 
-### Handoff guard
-- Task Registry now rejects same-department transfers, repeated department visits and routes exceeding eight handoffs.
-- Unit tests cover same-department, cycle, maximum-hop and valid new-department routes.
-- Existing Dispatcher `handoffTask` remains explicit; automatic department-handler routing is not yet integrated.
+### Structured Handoff in the common Dispatcher (partial)
+- `createTaskDispatcher` now accepts a structured `handoffRequest` returned by a Department Handler.
+- It selects a different-department target Worker, rechecks target Agent authorization and eligibility, derives an idempotency key, and delegates the actual transfer to atomic `recordTaskHandoff`.
+- When no eligible target Worker is available, the Task moves to `waiting` and the source Worker/Lease is safely released.
+- Unit tests cover authorized Handoff and no-target waiting.
 
-## Verification boundary and remaining work
-- CI must pass on the exact latest PR Head before this stage can be called verified.
-- Migration 0009 is included only in the isolated PostgreSQL 16 CI test setup. It is not auto-applied by server startup and has not been applied to production Neon.
-- Until the migration is separately reviewed and applied through an approved production change, SSE replay fails closed with 503 and the dashboard keeps authenticated 15-second polling.
-- Task Registry token expiry is rechecked every 15 seconds. The current authorizer loads token configuration at process startup; a config-level revocation change is not dynamically visible until restart. A live revocation source remains a security follow-up.
-- Automatic department-handler handoff routing and full concurrent handoff integration tests remain incomplete.
-- Real physical iPhone and desktop browser tests have not been performed; only responsive CSS and automated DOM/script checks are included.
-- No production deployment, database migration, Render change, LINE send, Sheets write, paid API, external publication, merge, rebase or force-push is performed by this PR work.
+## Remaining / not yet complete
+- The current production Department Handler implementations still return ordinary answer objects; they do not yet emit structured `handoffRequest` envelopes by default.
+- The common Task Dispatcher is not yet wired as the execution entry point for the existing Department Handler worker pipeline / authenticated Task Registry dispatch route. Therefore end-to-end autonomous cross-department routing is **not complete**.
+- The token revocation ledger is only included in isolated PostgreSQL 16 CI. It has **not** been applied to production Neon. SSE remains disabled in environments where migration 0010 is absent.
+- Token revocation is keyed to Agent ID and is append-only. Rotation to a new Agent ID is required after revocation; a managed reactivation workflow is not implemented.
+- Full high-volume soak / notification-loss chaos tests beyond the deterministic replay and multi-process integration coverage remain outstanding.
+- Real physical iPhone and desktop browser checks have not been performed; automated tests and responsive CSS checks are not a substitute.
+
+## Latest verification
+Exact PR #78 Head: `b2f41e5bd0d298384589ecc61d85ae1256b6b7bb`
+- JARVIS tests — run 44901498851: success
+- ONE JARVIS tests — run 44901498795: success
+- ONE JARVIS Task Registry PostgreSQL 16 — run 44901498823: success
+- PostgreSQL 16 suite: **301 passed / 0 failed / 0 skipped**
+
+## Safety boundary
+- PR #78 remains Draft / Open / unmerged.
+- PR #77 and all other Worker branches remain untouched.
+- Migration 0010 is not auto-applied at startup. No production Neon migration/write, Render configuration/deploy, LINE send, Google Sheets production change, paid API, external publication, secret disclosure, force-push, rebase or merge was performed.
