@@ -1,0 +1,4 @@
+"use strict";
+function barsAvailableAtDecision(bars,decisionTime){const cutoff=Date.parse(decisionTime);if(!Number.isFinite(cutoff))throw new Error("Invalid decision timestamp");return bars.filter(b=>{const close=Date.parse(b.closeTimeUtc);if(!Number.isFinite(close))throw new Error("Invalid bar close timestamp");return close<=cutoff;});}
+function assertNoFutureBars(bars,decisionTime){const allowed=barsAvailableAtDecision(bars,decisionTime);if(allowed.length!==bars.length)throw new Error("Future or not-yet-closed market data detected");return true;}
+module.exports={barsAvailableAtDecision,assertNoFutureBars};
