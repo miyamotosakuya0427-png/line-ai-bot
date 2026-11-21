@@ -42,10 +42,10 @@ async function startEventStream(){
     const part=await reader.read();if(part.done)break;
     buffer+=decoder.decode(part.value,{stream:true});
     let split;
-    while((split=buffer.indexOf("\n\n"))>=0){
+    while((split=buffer.indexOf("\\n\\n"))>=0){
      const frame=buffer.slice(0,split);buffer=buffer.slice(split+2);
      const id=frame.match(/^id: ([0-9]+)$/m);if(id)lastEventCursor=Number(id[1]);
-     if(/^event: task$/m.test(frame)){try{const data=JSON.parse(frame.split("\n").find(line=>line.startsWith("data: "))?.slice(6)||"{}");if(Number.isSafeInteger(data.eventId))refresh().catch(()=>{})}catch{}}
+     if(/^event: task$/m.test(frame)){try{const data=JSON.parse(frame.split("\\n").find(line=>line.startsWith("data: "))?.slice(6)||"{}");if(Number.isSafeInteger(data.eventId))refresh().catch(()=>{})}catch{}}
     }
    }
   }catch(error){if(controller.signal.aborted)break}
