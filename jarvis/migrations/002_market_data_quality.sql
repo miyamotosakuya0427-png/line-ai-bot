@@ -61,9 +61,9 @@ CREATE TABLE IF NOT EXISTS market_data_audit_events (
  previous_hash CHAR(64), event_hash CHAR(64) NOT NULL UNIQUE, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS market_data_audit_resource_idx ON market_data_audit_events(resource_type,resource_id,id);
-CREATE FUNCTION reject_market_audit_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE OR REPLACE FUNCTION reject_market_audit_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN RAISE EXCEPTION 'market_data_audit_events is append-only'; END; $$;
-CREATE TRIGGER market_data_audit_no_update_delete BEFORE UPDATE OR DELETE ON market_data_audit_events
+DROP TRIGGER IF EXISTS market_data_audit_no_update_delete ON market_data_audit_events;\nCREATE TRIGGER market_data_audit_no_update_delete BEFORE UPDATE OR DELETE ON market_data_audit_events
 FOR EACH ROW EXECUTE FUNCTION reject_market_audit_mutation();
 GRANT SELECT ON market_data_sources, market_bars, market_ingest_batches, market_quality_findings, market_bar_revisions, market_execution_costs, market_data_audit_events TO jarvis_audit_readonly;
 COMMIT;
