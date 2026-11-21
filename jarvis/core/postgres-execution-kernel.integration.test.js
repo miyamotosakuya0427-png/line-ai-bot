@@ -43,6 +43,8 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   assert.deepEqual(await outbox.replay({projectId:"one-jarvis",conversationId:"another-conversation",afterCursor:0,limit:20}),[],"outbox replay cannot cross Conversation scope");
   const replayCursor=initialEvents[initialEvents.length-1].cursor;
   assert.deepEqual(await outbox.replay({projectId:"one-jarvis",conversationId:"test-conversation",afterCursor:replayCursor,limit:20}),[],"cursor replay does not duplicate acknowledged events");
+  await assert.rejects(outbox.replay({projectId:"one-jarvis",conversationId:"test-conversation",afterCursor:999999,limit:20}),/ahead of the authorized scope/);
+  await assert.rejects(pool.query("UPDATE jarvis.task_event_outbox SET event_type='tampered' WHERE source_event_id=$1",[initialEvents[0].eventId]),/append-only/);
   await registerScopedWorker({workerId:"worker-a",agentId:"agent-a",departmentId:"engineering",instanceId:"instance-a",processId:"100"});
   await registerScopedWorker({workerId:"worker-b",agentId:"agent-b",departmentId:"engineering",instanceId:"instance-b",processId:"200"});
   const scopedWorkers=await kernel.listWorkersForScope({projectId:"one-jarvis",conversationId:"test-conversation"});
@@ -98,6 +100,7 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   assert.equal(rolledBackTask.task.status,"ready","failed Worker binding must roll back the Task claim event");
   const rollbackEvents=await outbox.replay({projectId:"one-jarvis",conversationId:"test-conversation",afterCursor:0,limit:500});
   assert.equal(rollbackEvents.some(event=>event.taskId===rollbackTask.task.taskId&&event.eventType==="claimed"),false,"failed Task transaction must not leave an Outbox claim event");
+  assert.deepEqual(rollbackEvents.map(event=>event.cursor),rollbackEvents.map((_,index)=>index+1),"transaction rollback must not leave gaps in scoped cursors");
   loser=await kernel.transitionWorker({workerId:loserId,expectedVersion:Number(loser.version),status:"recovering"});
   await kernel.transitionWorker({workerId:loserId,expectedVersion:Number(loser.version),status:"idle"});
   const handoffTask=await makeTask("handoff",loserId);
