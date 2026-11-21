@@ -9,7 +9,7 @@ const principal={agentId:"agent-a",conversationId:"conversation-a",projectIds:["
 
 async function startServer(options){
   const server=createServer({token:API_TOKEN,ownerToken:"c".repeat(40),taskRegistry:{},authorizeTaskRegistry:options.authorizeTaskRegistry,
-    taskRegistryRateLimiter:{async consume(){return {allowed:true};}},executionKernel:{},taskEventOutbox:options.outbox});
+    taskRegistryRateLimiter:{async consume(){return {allowed:true};}},executionKernel:{},taskEventOutbox:options.outbox,taskRegistryRevocationStore:options.revocationStore===false?null:(options.revocationStore||{async isRevoked(){return false;}})});
   await new Promise((resolve,reject)=>{server.once("error",reject);server.listen(0,"127.0.0.1",resolve);});
   return {server,url:"http://127.0.0.1:"+server.address().port+"/v1/command-center/events?projectId=project-a&conversationId=conversation-a"};
 }
@@ -65,4 +65,13 @@ test("Command Center SSE rejects Project and Conversation scope escalation",asyn
     const conversation=await fetch(url.replace("conversation-a","conversation-b"),{headers:{Authorization:"Bearer "+API_TOKEN,"X-Task-Registry-Authorization":"Bearer "+REGISTRY_TOKEN}});
     assert.equal(conversation.status,403);
   }finally{await closeServer(server);}
+});
+
+test("Command Center SSE fails closed when shared revocation checks are unavailable",async()=>{
+ const outbox={async replay(){throw new Error("must not replay");},async listen(){throw new Error("must not listen");}};
+ const {server,url}=await startServer({outbox,revocationStore:false,authorizeTaskRegistry:async()=>principal});
+ try{
+  const response=await fetch(url,{headers:{Authorization:"Bearer "+API_TOKEN,"X-Task-Registry-Authorization":"Bearer "+REGISTRY_TOKEN}});
+  assert.equal(response.status,503);
+ }finally{await closeServer(server);}
 });
