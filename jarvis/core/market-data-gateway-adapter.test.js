@@ -28,7 +28,7 @@ test("maps only closed public candles and preserves venue/account limitation", (
   assert.equal(result.excluded.length, 1);
   assert.equal(result.bars[0].venue, PUBLIC_VENUE);
   assert.equal(result.bars[0].currency, "JPY");
-  assert.equal(result.bars[0].sourceTimezone, "UTC");
+  assert.equal(result.bars[0].sourceTimezone, "UTC_UNIX_MILLISECONDS");
   assert.equal(result.venueCompatibility, "UNVERIFIED_BINANCE_JAPAN_ACCOUNT");
   assert.match(result.bars[0].normalizedHash, /^[a-f0-9]{64}$/);
   assert.match(result.bars[0].rawPayloadHash, /^[a-f0-9]{64}$/);
