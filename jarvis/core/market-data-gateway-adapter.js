@@ -2,7 +2,8 @@
 
 // Adapter boundary for PR #79. This module never performs HTTP requests;
 // it transforms an already-fetched public snapshot into Stage 5 bars.
-const { normalizeBar, INTERVAL_MS } = require("./market-data-normalizer");
+const crypto = require("node:crypto");
+const { normalizeBar, INTERVAL_MS, stable } = require("./market-data-normalizer");
 const { auditBars, qualityGate } = require("./market-data-quality");
 
 const ALLOWED_SYMBOLS = new Set(["BTCJPY", "ETHJPY", "SOLJPY"]);
@@ -68,7 +69,8 @@ function mapSnapshotToBars(snapshot, { source, now = () => Date.now(), receivedA
       },
       receivedAt: received
     });
-    bars.push(Object.freeze({ ...normalized, currency: "JPY", licenseEvidenceRef: config.licenseEvidenceRef }));
+    const sourcePayloadHash = crypto.createHash("sha256").update(stable(candle)).digest("hex");
+    bars.push(Object.freeze({ ...normalized, sourceTimestampRaw: String(candle.openTime), sourceTimezone: "UTC_UNIX_MILLISECONDS", rawPayloadHash: sourcePayloadHash, currency: "JPY", licenseEvidenceRef: config.licenseEvidenceRef }));
   }
   const findings = auditBars(bars);
   const gate = qualityGate(findings);
