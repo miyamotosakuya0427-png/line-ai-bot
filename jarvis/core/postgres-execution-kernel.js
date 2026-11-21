@@ -188,13 +188,16 @@ function createPostgresExecutionKernel({pool,clock=()=>new Date().toISOString(),
     async revokeWorkerScope({grantId,revokedBy}={}){
       await init();
       if(typeof grantId!=="string"||!/^[0-9a-f-]{36}$/i.test(grantId)||!validId(revokedBy))throw new Error("Invalid Worker scope revocation");
+      const snapshot=await pool.query("SELECT worker_id FROM jarvis.worker_scope_grants WHERE grant_id=$1",[grantId]);
+      if(!snapshot.rows[0])return {revoked:false,reason:"grant not found"};
       const now=clock();
       return tx(async c=>{
+        // Match claim lock order: Worker row before Grant row.
+        await c.query("SELECT worker_id FROM jarvis.worker_registry WHERE worker_id=$1 FOR UPDATE",[snapshot.rows[0].worker_id]);
         const current=await c.query("SELECT grant_id,worker_id,project_id,conversation_id,revoked_at FROM jarvis.worker_scope_grants WHERE grant_id=$1 FOR UPDATE",[grantId]);
         if(!current.rows[0])return {revoked:false,reason:"grant not found"};
         if(current.rows[0].revoked_at)return {revoked:false,reason:"already revoked"};
         const g=current.rows[0];
-        await c.query("SELECT worker_id FROM jarvis.worker_registry WHERE worker_id=$1 FOR UPDATE",[g.worker_id]);
         await c.query("UPDATE jarvis.worker_scope_grants SET revoked_at=$1,revoked_by=$2,version=version+1 WHERE grant_id=$3 AND revoked_at IS NULL",[now,revokedBy,grantId]);
         await c.query("INSERT INTO jarvis.events(aggregate_type,aggregate_id,aggregate_version,event_type,payload,created_at) VALUES('worker_scope_grant',$1,2,'scope_revoked',$2::jsonb,$3)",[grantId,JSON.stringify({grantId,workerId:g.worker_id,projectId:g.project_id,conversationId:g.conversation_id,revokedBy,revokedAt:now}),now]);
         return {revoked:true,grantId,workerId:g.worker_id};
