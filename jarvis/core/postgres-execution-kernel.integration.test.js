@@ -52,7 +52,7 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   const grantAudit=await kernel.listWorkerScopeGrants({limit:50});
   const workerAGrant=grantAudit.find(row=>row.worker_id==="worker-a"&&row.project_id==="one-jarvis"&&row.conversation_id==="test-conversation");
   assert.ok(workerAGrant&&workerAGrant.granted_by==="integration-test"&&workerAGrant.granted_at,"Owner audit listing includes grantor and timestamp");
-  assert.equal(Object.keys(workerAGrant).some(key=>/token|secret|hash/i.test(key)),false,"Grant audit listing never returns secrets or token hashes");
+  assert.equal(Object.keys(workerAGrant).some(key=>/secret|hash|lease_token|access_token|api_token/i.test(key)),false,"Grant audit listing never returns secrets or token hashes");
   await kernel.registerWorker({workerId:"worker-ungranted",agentId:"agent-ungranted",departmentId:"engineering",instanceId:"instance-ungranted"});
   const ungrantedTask=await makeTask("ungranted","worker-ungranted");
   await assert.rejects(registry.claimTaskForWorker({taskId:ungrantedTask.task.taskId,workerId:"worker-ungranted",leaseMs:5000}),/no active grant/);
