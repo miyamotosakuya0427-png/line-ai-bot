@@ -18,10 +18,12 @@ CREATE TABLE jarvis_finance.technical_indicators (
 CREATE TABLE jarvis_finance.capital_allocations (
   id BIGSERIAL PRIMARY KEY, portfolio_key TEXT NOT NULL, initial_capital_jpy BIGINT NOT NULL CHECK(initial_capital_jpy=50000),
   investment_cap_jpy BIGINT NOT NULL CHECK(investment_cap_jpy=35000), reserve_jpy BIGINT NOT NULL CHECK(reserve_jpy=15000),
-  allocations JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  allocations JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(portfolio_key)
 );
 CREATE TABLE jarvis_finance.trade_proposals (
-  id UUID PRIMARY KEY, symbol TEXT NOT NULL CHECK(symbol IN ('BTCJPY','ETHJPY','SOLJPY')),
+  id UUID PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE,
+  symbol TEXT NOT NULL CHECK(symbol IN ('BTCJPY','ETHJPY','SOLJPY')),
   side TEXT NOT NULL CHECK(side IN ('BUY','SELL')), amount_jpy BIGINT NOT NULL CHECK(amount_jpy>0),
   status TEXT NOT NULL CHECK(status IN ('PAPER_ONLY','PENDING_REVIEW','REJECTED','EXPIRED')),
   rationale JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
