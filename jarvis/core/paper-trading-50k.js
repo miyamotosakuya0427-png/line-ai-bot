@@ -35,6 +35,7 @@ function validateBuy({ symbol, amountJpy, investedJpy = 0, assetInvestedJpy = 0,
   if (!Number.isInteger(stageIndex) || stageIndex < 0 || stageIndex >= policy.stageBudgetsJpy.length ||
       !Number.isFinite(stageSpentJpy) || stageSpentJpy < 0 || stageSpentJpy + amountJpy > policy.stageBudgetsJpy[stageIndex]) return { allowed: false, reason: "STAGE_LIMIT" };
   if (riskState?.halted) return { allowed: false, reason: "LOSS_LIMIT_REACHED" };
+  if (!Number.isFinite(investedJpy) || investedJpy < 0) return { allowed: false, reason: "INVALID_PORTFOLIO_STATE" };
   if (investedJpy + amountJpy > policy.investmentCapJpy) return { allowed: false, reason: "INVESTMENT_CAP" };
   if (!Number.isFinite(assetInvestedJpy) || assetInvestedJpy < 0 || assetInvestedJpy + amountJpy > policy.targetAllocationsJpy[asset]) return { allowed: false, reason: "ASSET_ALLOCATION_CAP" };
   return { allowed: true, reason: null, liveOrdersEnabled: false };
