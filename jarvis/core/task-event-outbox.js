@@ -11,15 +11,26 @@ function createTaskEventOutbox({pool,maxBatch=500}={}) {
        !Number.isSafeInteger(afterCursor)||afterCursor<0||!Number.isInteger(limit)||limit<1||limit>maxBatch) {
       throw new Error("Invalid scoped outbox cursor request");
     }
+    const bounds=await pool.query(
+      "SELECT COALESCE(MAX(scope_cursor),0)::bigint AS max_cursor FROM jarvis.task_event_outbox WHERE project_id=$1 AND conversation_id=$2",
+      [projectId,conversationId]
+    );
+    const maxCursor=Number(bounds.rows[0]?.max_cursor||0);
+    if(afterCursor>maxCursor)throw new Error("Outbox cursor is ahead of the authorized scope");
     const result=await pool.query(
-      "SELECT o.outbox_id,o.source_event_id,o.task_id,o.event_type,o.created_at,e.aggregate_version,e.payload " +
+      "SELECT o.scope_cursor,o.source_event_id,o.task_id,o.event_type,o.created_at,e.aggregate_version,e.payload " +
       "FROM jarvis.task_event_outbox o JOIN jarvis.events e ON e.event_id=o.source_event_id " +
-      "WHERE o.project_id=$1 AND o.conversation_id=$2 AND o.outbox_id>$3 " +
-      "ORDER BY o.outbox_id ASC LIMIT $4",
+      "WHERE o.project_id=$1 AND o.conversation_id=$2 AND o.scope_cursor>$3 " +
+      "ORDER BY o.scope_cursor ASC LIMIT $4",
       [projectId,conversationId,afterCursor,limit]
     );
+    let expected=afterCursor+1;
+    for(const row of result.rows){
+      if(Number(row.scope_cursor)!==expected)throw new Error("Durable outbox cursor gap detected");
+      expected++;
+    }
     return result.rows.map(row=>({
-      cursor:Number(row.outbox_id),eventId:Number(row.source_event_id),taskId:row.task_id,
+      cursor:Number(row.scope_cursor),eventId:Number(row.source_event_id),taskId:row.task_id,
       version:Number(row.aggregate_version),eventType:row.event_type,createdAt:row.created_at,
       payload:row.payload
     }));
