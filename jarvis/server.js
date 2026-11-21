@@ -157,6 +157,21 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
           return json(res,rejected?error.statusCode:503,{ok:false,error:rejected?"Reservation operation rejected":"Reservation service unavailable"});
         }
       }
+      if(req.method==="POST"&&/^\\/v1\\/admin\\/workers\\/[A-Za-z0-9._:-]{1,160}\\/scope-grants$/.test(url.pathname)){
+        if(!isAuthorized(req,ownerToken))return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Unauthorized":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
+        if(!executionKernel||typeof executionKernel.grantWorkerScope!=="function")return json(res,503,{ok:false,error:"Worker scope grants are unavailable"});
+        if(!req.headers["content-type"]?.toLowerCase().startsWith("application/json"))return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+        const workerId=url.pathname.split("/")[4],body=await readJson(req);
+        try{const result=await executionKernel.grantWorkerScope({workerId,projectId:body.projectId,conversationId:body.conversationId,grantedBy:"owner-token"});return json(res,result.created?201:200,{ok:true,...result});}
+        catch{return json(res,400,{ok:false,error:"Worker scope grant rejected"});}
+      }
+      if(req.method==="POST"&&/^\\/v1\\/admin\\/worker-scope-grants\\/[0-9a-f-]{36}\\/revoke$/.test(url.pathname)){
+        if(!isAuthorized(req,ownerToken))return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Unauthorized":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
+        if(!executionKernel||typeof executionKernel.revokeWorkerScope!=="function")return json(res,503,{ok:false,error:"Worker scope grants are unavailable"});
+        const grantId=url.pathname.split("/")[4];
+        try{const result=await executionKernel.revokeWorkerScope({grantId,revokedBy:"owner-token"});return json(res,result.revoked?200:404,{ok:result.revoked,...result});}
+        catch{return json(res,400,{ok:false,error:"Worker scope revocation rejected"});}
+      }
       if(req.method==="GET"&&url.pathname==="/v1/command-center/telemetry"){
         if(!isAuthorized(req,token))return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
         if(!taskRegistry||typeof authorizeTaskRegistry!=="function"||!taskRegistryRateLimiter||!executionKernel)return json(res,503,{ok:false,error:"Scoped PostgreSQL telemetry is not configured"});
@@ -186,12 +201,10 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         }
         const events=eventRows.slice(0,1000).map(row=>({eventId:Number(row.eventId),taskId:row.taskId,version:Number(row.version),eventType:String(row.eventType||"unknown").slice(0,100),createdAt:row.createdAt||null,status:typeof row.payload?.status==="string"?row.payload.status:null,agentId:typeof row.payload?.ownerAgent==="string"?row.payload.ownerAgent:null,workerId:typeof row.payload?.leaseOwner==="string"?row.payload.leaseOwner:null,departmentId:typeof row.payload?.departmentId==="string"?row.payload.departmentId:null}));
         const handoffs=eventRows.filter(row=>["agent_handoff","department_handoff","task_handoff"].includes(row.eventType)&&typeof row.payload?.fromAgentId==="string"&&typeof row.payload?.toAgentId==="string").map(row=>({eventId:Number(row.eventId),taskId:row.taskId,fromAgentId:row.payload.fromAgentId.slice(0,128),toAgentId:row.payload.toAgentId.slice(0,128),fromDepartmentId:typeof row.payload.fromDepartmentId==="string"?row.payload.fromDepartmentId.slice(0,128):null,toDepartmentId:typeof row.payload.toDepartmentId==="string"?row.payload.toDepartmentId.slice(0,128):null,createdAt:row.createdAt||null}));
-        const workerIds=[...new Set(tasks.map(row=>row.task?.leaseOwner).filter(x=>typeof x==="string"&&x.length<=160))].slice(0,200);
-        const workers=[];
-        for(const workerId of workerIds){
-          const worker=await executionKernel.getWorker(workerId);
-          if(worker)workers.push({workerId:worker.worker_id||workerId,agentId:worker.agent_id||null,departmentId:worker.department_id||null,status:worker.status||"unknown",currentTaskId:worker.current_task_id||null,heartbeatAt:worker.heartbeat_at||null,leaseExpiresAt:worker.lease_expires_at||null,fencingToken:worker.fencing_token===null?null:Number(worker.fencing_token),version:Number(worker.version||0)});
-        }
+        if(typeof executionKernel.listWorkersForScope!=="function")return json(res,503,{ok:false,error:"Scoped Worker Registry listing is unavailable"});
+        let scopedWorkers;
+        try{scopedWorkers=await executionKernel.listWorkersForScope({projectId:projectIds[0],conversationId});}catch{return json(res,503,{ok:false,error:"Scoped Worker Registry query failed"});}
+        const workers=scopedWorkers.slice(0,500).map(worker=>({workerId:worker.worker_id,agentId:worker.agent_id,departmentId:worker.department_id,status:worker.status||"unknown",currentTaskId:worker.current_task_id||null,heartbeatAt:worker.heartbeat_at||null,leaseExpiresAt:worker.lease_expires_at||null,fencingToken:worker.fencing_token===null?null:Number(worker.fencing_token),version:Number(worker.version||0),scopeGrantId:worker.grant_id,scopeGrantedAt:worker.grant_created_at||null}));
         const safeTasks=tasks.slice(0,500).map(row=>{
           const task=row.task||{};
           return {version:Number(row.version||0),task:{
@@ -204,7 +217,7 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
             outcomeUnknownReason:typeof task.outcomeUnknownReason==="string"?task.outcomeUnknownReason.slice(0,240):null
           }};
         });
-        return json(res,200,{ok:true,scope:{agentId:principal.agentId,conversationId,projectIds},tasks:safeTasks,workers,events,handoffs,workerCoverage:"workers associated with scoped active tasks only",eventCoverage:typeof taskRegistry.listTaskEvents==="function"?"persisted events for scoped Tasks":"event history unavailable",generatedAt:now().toISOString()});
+        return json(res,200,{ok:true,scope:{agentId:principal.agentId,conversationId,projectIds},tasks:safeTasks,workers,events,handoffs,workerCoverage:"active Worker Scope Grants for the first authorized Project and Conversation",eventCoverage:typeof taskRegistry.listTaskEvents==="function"?"persisted events for scoped Tasks":"event history unavailable",generatedAt:now().toISOString()});
       }
       if (await taskRegistryApi(req,res,url)) return;
       if (req.method==="GET" && (url.pathname==="/" || url.pathname==="/command-center-ui")) {
