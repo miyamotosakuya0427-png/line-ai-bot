@@ -209,7 +209,7 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
       }
       if(req.method==="GET"&&url.pathname==="/v1/command-center/events"){
         if(!isAuthorized(req,token))return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
-        if(!taskRegistry||typeof authorizeTaskRegistry!=="function"||!taskRegistryRateLimiter||!taskEventOutbox||typeof taskEventOutbox.replay!=="function"||typeof taskEventOutbox.listen!=="function")return json(res,503,{ok:false,error:"Secure event streaming is not configured; use authenticated polling"});
+        if(!taskRegistry||typeof authorizeTaskRegistry!=="function"||!taskRegistryRateLimiter||!taskEventOutbox||!taskRegistryRevocationStore||typeof taskEventOutbox.replay!=="function"||typeof taskEventOutbox.listen!=="function")return json(res,503,{ok:false,error:"Secure event streaming is not configured; use authenticated polling"});
         const registryHeader=req.headers["x-task-registry-authorization"];
         if(typeof registryHeader!=="string"||registryHeader.length>600)return json(res,401,{ok:false,error:"Task Registry credential is required"},{"WWW-Authenticate":"Bearer"});
         const registryReq={...req,headers:{...req.headers,authorization:registryHeader}};
@@ -1033,8 +1033,9 @@ if (require.main===module) {
       const {createPostgresTaskRegistryRevocationStore}=require("./core/postgres-task-registry-revocation-store");
       taskRegistry=createTaskRegistry({pool:postgresPool});
       await taskRegistry.init(); // Read-only schema check; migration 0004 is never applied here.
-      taskRegistryRevocationStore=createPostgresTaskRegistryRevocationStore({pool:postgresPool});
-      await taskRegistryRevocationStore.init(); // Read-only schema check; migration 0010 is never applied here.
+      const revocationStore=createPostgresTaskRegistryRevocationStore({pool:postgresPool});
+      try{await revocationStore.init();taskRegistryRevocationStore=revocationStore;}catch{taskRegistryRevocationStore=null;}
+      // Missing revocation schema keeps polling auth available, but SSE fails closed until migration 0010 exists.
       authorizeTaskRegistry=createTaskRegistryAuthorizer({revocationStore:taskRegistryRevocationStore});
       const {createPostgresTaskRegistryRateLimiter}=require("./core/postgres-task-registry-rate-limiter");
       const {createPostgresExecutionKernel}=require("./core/postgres-execution-kernel");
