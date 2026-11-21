@@ -215,9 +215,13 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         const cursorStart=Number(rawCursor);
         const agentKey=principal.agentId;
         if(activeSseConnections>=20||(sseConnectionsByAgent.get(agentKey)||0)>=3)return json(res,429,{ok:false,error:"Event stream connection limit reached"},{"Retry-After":"15"});
-        let initial;
+        activeSseConnections++;sseConnectionsByAgent.set(agentKey,(sseConnectionsByAgent.get(agentKey)||0)+1);
+        let counted=true,initial;
         try{initial=await taskEventOutbox.replay({projectId,conversationId,afterCursor:cursorStart,limit:100});}
-        catch{return json(res,503,{ok:false,error:"Durable event replay unavailable; use authenticated polling"});}
+        catch{
+          activeSseConnections--;const n=(sseConnectionsByAgent.get(agentKey)||1)-1;if(n>0)sseConnectionsByAgent.set(agentKey,n);else sseConnectionsByAgent.delete(agentKey);
+          return json(res,503,{ok:false,error:"Durable event replay unavailable; use authenticated polling"});
+        }
         let closeListener;
         let closed=false,wakeResolve=null,lastAuthAt=0,lastHeartbeatAt=Date.now(),cursor=cursorStart;
         const wake=()=>{if(wakeResolve){const resolve=wakeResolve;wakeResolve=null;resolve();}};
@@ -239,7 +243,6 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         };
         try{
           closeListener=await taskEventOutbox.listen(wake);
-          activeSseConnections++;sseConnectionsByAgent.set(agentKey,(sseConnectionsByAgent.get(agentKey)||0)+1);
           res.writeHead(200,{"Content-Type":"text/event-stream; charset=utf-8","Cache-Control":"no-store, no-transform","Connection":"keep-alive","X-Accel-Buffering":"no","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer"});
           res.write("retry: 5000\n: connected\n\n");
           const send=async(event)=>{
@@ -269,9 +272,11 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         finally{
           closed=true;wake();
           if(closeListener)await closeListener().catch(()=>{});
-          if(activeSseConnections>0)activeSseConnections--;
-          const remaining=(sseConnectionsByAgent.get(agentKey)||1)-1;
-          if(remaining>0)sseConnectionsByAgent.set(agentKey,remaining);else sseConnectionsByAgent.delete(agentKey);
+          if(counted){
+            counted=false;activeSseConnections--;
+            const remaining=(sseConnectionsByAgent.get(agentKey)||1)-1;
+            if(remaining>0)sseConnectionsByAgent.set(agentKey,remaining);else sseConnectionsByAgent.delete(agentKey);
+          }
           if(!res.destroyed)res.end();
         }
         return;
