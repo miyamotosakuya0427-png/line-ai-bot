@@ -37,6 +37,17 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   const first=await makeTask("one","worker-a");
   await registerScopedWorker({workerId:"worker-a",agentId:"agent-a",departmentId:"engineering",instanceId:"instance-a",processId:"100"});
   await registerScopedWorker({workerId:"worker-b",agentId:"agent-b",departmentId:"engineering",instanceId:"instance-b",processId:"200"});
+  const scopedWorkers=await kernel.listWorkersForScope({projectId:"one-jarvis",conversationId:"test-conversation"});
+  assert.ok(scopedWorkers.some(row=>row.worker_id==="worker-a"&&row.grant_id),"only explicitly granted Workers are returned in a scope listing");
+  await kernel.registerWorker({workerId:"worker-ungranted",agentId:"agent-ungranted",departmentId:"engineering",instanceId:"instance-ungranted"});
+  const ungrantedTask=await makeTask("ungranted","worker-ungranted");
+  await assert.rejects(registry.claimTaskForWorker({taskId:ungrantedTask.task.taskId,workerId:"worker-ungranted",leaseMs:5000}),/no active grant/);
+  await registerScopedWorker({workerId:"worker-revoked",agentId:"agent-revoked",departmentId:"engineering",instanceId:"instance-revoked"});
+  const revokedTask=await makeTask("revoked","worker-revoked");
+  const revokedRows=await kernel.listWorkersForScope({projectId:"one-jarvis",conversationId:"test-conversation"});
+  const revokedGrant=revokedRows.find(row=>row.worker_id==="worker-revoked").grant_id;
+  assert.equal((await kernel.revokeWorkerScope({grantId:revokedGrant,revokedBy:"integration-test"})).revoked,true);
+  await assert.rejects(registry.claimTaskForWorker({taskId:revokedTask.task.taskId,workerId:"worker-revoked",leaseMs:5000}),/no active grant/);
   // Exercise real OS processes with independent PostgreSQL pools.
   const processTask=await makeTask("ten-process-claim","process-worker-0");
   const processWorkers=Array.from({length:10},(_,i)=>"process-worker-"+i);
