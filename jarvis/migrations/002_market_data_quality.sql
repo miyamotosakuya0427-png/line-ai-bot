@@ -65,4 +65,5 @@ CREATE FUNCTION reject_market_audit_mutation() RETURNS trigger LANGUAGE plpgsql 
 BEGIN RAISE EXCEPTION 'market_data_audit_events is append-only'; END; $$;
 CREATE TRIGGER market_data_audit_no_update_delete BEFORE UPDATE OR DELETE ON market_data_audit_events
 FOR EACH ROW EXECUTE FUNCTION reject_market_audit_mutation();
+GRANT SELECT ON market_data_sources, market_bars, market_ingest_batches, market_quality_findings, market_bar_revisions, market_execution_costs, market_data_audit_events TO jarvis_audit_readonly;
 COMMIT;
