@@ -48,9 +48,9 @@ test("Command Center SSE closes when Task Registry authorization is revoked duri
   try{
     const response=await fetch(url,{headers:{Authorization:"Bearer "+API_TOKEN,"X-Task-Registry-Authorization":"Bearer "+REGISTRY_TOKEN}});
     assert.equal(response.status,200);
-    await response.body.cancel();
-    await new Promise(resolve=>setTimeout(resolve,40));
+    await new Promise(resolve=>setTimeout(resolve,60));
     assert.ok(authCalls>=2,"authorization must be checked again after the stream opens");
+    await response.body.cancel();
     assert.equal(listenerClosed,1);
   }finally{await closeServer(server);}
 });
