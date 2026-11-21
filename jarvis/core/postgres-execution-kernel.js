@@ -205,6 +205,18 @@ function createPostgresExecutionKernel({pool,clock=()=>new Date().toISOString(),
         return {revoked:true,grantId,workerId:g.worker_id};
       });
     },
+    async listWorkerScopeGrants({limit=200}={}) {
+      await init();
+      if(!Number.isInteger(limit)||limit<1||limit>500)throw new Error("Invalid Worker scope grant limit");
+      const r=await pool.query(
+        "SELECT g.grant_id,g.worker_id,g.project_id,g.conversation_id,g.granted_by,g.created_at AS granted_at,g.revoked_by,g.revoked_at,g.version AS grant_version,"+
+        "w.agent_id,w.department_id,w.status AS worker_status,w.current_task_id,w.heartbeat_at,"+
+        "l.expires_at AS lease_expires_at,l.fencing_token AS lease_fencing_token "+
+        "FROM jarvis.worker_scope_grants g JOIN jarvis.worker_registry w ON w.worker_id=g.worker_id "+
+        "LEFT JOIN jarvis.coordination_leases l ON l.resource_key=w.lease_resource_key "+
+        "ORDER BY g.created_at DESC,g.grant_id LIMIT $1",[limit]);
+      return r.rows;
+    },
     async listWorkersForScope({projectId,conversationId}={}){
       await init();
       if(!validId(projectId)||!validId(conversationId))throw new Error("Invalid Worker listing scope");
