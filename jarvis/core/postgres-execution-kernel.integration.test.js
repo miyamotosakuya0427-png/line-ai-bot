@@ -106,8 +106,10 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   const handoffTask=await makeTask("handoff",loserId);
   const handoffClaim=await registry.claimTaskForWorker({taskId:handoffTask.task.taskId,workerId:loserId,leaseMs:5000});
   const handoffRunning=await registry.transitionTask({taskId:handoffTask.task.taskId,expectedVersion:handoffClaim.version,lease:handoffClaim.lease,status:"running"});
-  const handoff=await registry.recordTaskHandoff({taskId:handoffTask.task.taskId,expectedVersion:handoffRunning.version,lease:handoffClaim.lease,fromAgentId:(loserId==="worker-a"?"agent-a":"agent-b"),toAgentId:"agent-target",fromDepartmentId:"engineering",toDepartmentId:"management",idempotencyKey:"handoff-once"});
-  assert.equal(handoff.created,true);
+  const handoffInput={taskId:handoffTask.task.taskId,expectedVersion:handoffRunning.version,lease:handoffClaim.lease,fromAgentId:(loserId==="worker-a"?"agent-a":"agent-b"),toAgentId:"agent-target",fromDepartmentId:"engineering",toDepartmentId:"management",idempotencyKey:"handoff-once"};
+  const handoffAttempts=await Promise.all([registry.recordTaskHandoff(handoffInput),registry.recordTaskHandoff(handoffInput)]);
+  assert.equal(handoffAttempts.filter(result=>result.created).length,1,"concurrent duplicate handoffs must commit exactly once");
+  const handoff=handoffAttempts.find(result=>result.created);
   assert.equal(handoff.task.state,"queued");
   assert.equal((await kernel.getWorker(loserId)).status,"idle");
   const handoffEvents=await registry.listTaskEvents({taskIds:[handoffTask.task.taskId],limit:10});
