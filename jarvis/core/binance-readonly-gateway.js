@@ -82,14 +82,19 @@ async function getSnapshot(symbol, options = {}) {
     request("/api/v3/klines", { symbol, interval, limit: 200 }, fetchImpl)
   ]);
   if (!exchange[symbol].listed) throw new MarketDataError(symbol + " is not listed by the configured public market-data endpoint", "PAIR_NOT_LISTED");
-  if (!Array.isArray(depth.bids) || !Array.isArray(depth.asks) || !Array.isArray(klines) || klines.length < 35) {
+  if (!Array.isArray(depth.bids) || !Array.isArray(depth.asks) || !Array.isArray(klines) || klines.length < 60) {
     throw new MarketDataError("Incomplete order book or kline data", "INCOMPLETE_DATA");
   }
   const timestamp = Date.now();
   const close = number(price.price, "price");
   const lastKline = klines[klines.length - 1];
-  const klineCloseTime = Number(lastKline[6]);
-  assertFresh(klineCloseTime, 48 * 60 * 60 * 1000, timestamp);
+  const klineOpenTime = Number(lastKline[0]);
+  const intervalMs = ({ "1m": 60_000, "5m": 300_000, "15m": 900_000, "1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000 })[interval];
+  if (!Number.isFinite(klineOpenTime) || klineOpenTime > timestamp + 30_000 || timestamp - klineOpenTime > intervalMs * 3) {
+    throw new MarketDataError("Latest kline is stale or has an invalid timestamp", "STALE_DATA");
+  }
+  if (!Number.isFinite(Number(ticker.closeTime))) throw new MarketDataError("Invalid ticker timestamp", "INVALID_RESPONSE");
+  assertFresh(Number(ticker.closeTime), 120_000, timestamp);
   return {
     source: "Binance public market-data API",
     sourceHost: "data-api.binance.vision",
