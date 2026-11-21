@@ -13,7 +13,7 @@ const PUBLIC_PROVIDER = "Binance public market-data API";
 function requireSourceConfig(config) {
   if (!config || config.enabled !== true) throw new Error("Market data source is not enabled");
   if (!config.id || !config.sourceKey || config.provider !== PUBLIC_PROVIDER) throw new Error("Provider configuration is not allowlisted");
-  if (!config.licenseId || !config.licenseEvidenceRef) throw new Error("License evidence is not registered");
+  if (!config.licenseId || !config.licenseEvidenceRef || config.licenseApproved !== true) throw new Error("License approval and evidence are not registered");
   if (!Array.isArray(config.venues) || !config.venues.includes(PUBLIC_VENUE)) throw new Error("Public venue is not allowlisted");
   if (!Array.isArray(config.currencies) || !config.currencies.includes("JPY")) throw new Error("JPY currency is not allowlisted");
   return config;
