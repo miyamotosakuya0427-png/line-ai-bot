@@ -172,7 +172,7 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
             projectId:row.project_id,conversationId:row.conversation_id,grantedBy:row.granted_by,grantedAt:row.granted_at,
             revokedBy:row.revoked_by||null,revokedAt:row.revoked_at||null,grantVersion:Number(row.grant_version||0),
             workerStatus:row.worker_status,currentTaskId:row.current_task_id||null,heartbeatAt:row.heartbeat_at||null,
-            leaseExpiresAt:row.lease_expires_at||null,leaseFencingToken:row.lease_fencing_token===null?null:Number(row.lease_fencing_token)
+            leaseExpiresAt:row.lease_expires_at||null
           }));
           return json(res,200,{ok:true,grants});
         }catch{return json(res,503,{ok:false,error:"Worker scope grant listing failed"});}
