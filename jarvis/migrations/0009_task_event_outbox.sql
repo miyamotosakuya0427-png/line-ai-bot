@@ -34,3 +34,7 @@ DROP TRIGGER IF EXISTS task_event_outbox_after_insert ON jarvis.events;
 CREATE TRIGGER task_event_outbox_after_insert
 AFTER INSERT ON jarvis.events
 FOR EACH ROW EXECUTE FUNCTION jarvis.enqueue_task_event_outbox();
+
+INSERT INTO jarvis.schema_migrations(version)
+VALUES ('0009_task_event_outbox')
+ON CONFLICT (version) DO NOTHING;
