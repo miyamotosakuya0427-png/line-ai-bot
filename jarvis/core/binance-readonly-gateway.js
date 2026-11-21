@@ -82,11 +82,13 @@ async function getSnapshot(symbol, options = {}) {
     request("/api/v3/klines", { symbol, interval, limit: 200 }, fetchImpl)
   ]);
   if (!exchange[symbol].listed) throw new MarketDataError(symbol + " is not listed by the configured public market-data endpoint", "PAIR_NOT_LISTED");
+  if (exchange[symbol].status !== "TRADING" || !exchange[symbol].spotAllowed) throw new MarketDataError(symbol + " is not marked as active spot trading by the configured public market-data endpoint", "PAIR_NOT_TRADABLE");
   if (!Array.isArray(depth.bids) || !Array.isArray(depth.asks) || !Array.isArray(klines) || klines.length < 60) {
     throw new MarketDataError("Incomplete order book or kline data", "INCOMPLETE_DATA");
   }
   const timestamp = Date.now();
   const close = number(price.price, "price");
+  if (close <= 0 || !Number.isFinite(Number(ticker.priceChangePercent))) throw new MarketDataError("Invalid ticker price or 24h change", "INVALID_MARKET_VALUE");
   const lastKline = klines[klines.length - 1];
   const klineOpenTime = Number(lastKline[0]);
   const intervalMs = ({ "1m": 60_000, "5m": 300_000, "15m": 900_000, "1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000 })[interval];
@@ -95,6 +97,9 @@ async function getSnapshot(symbol, options = {}) {
   }
   if (!Number.isFinite(Number(ticker.closeTime))) throw new MarketDataError("Invalid ticker timestamp", "INVALID_RESPONSE");
   assertFresh(Number(ticker.closeTime), 120_000, timestamp);
+  if (depth.bids.length && depth.asks.length && Number(depth.bids[0][0]) >= Number(depth.asks[0][0])) {
+    throw new MarketDataError("Order book is crossed or malformed", "INVALID_MARKET_VALUE");
+  }
   return {
     source: "Binance public market-data API",
     sourceHost: "data-api.binance.vision",
@@ -108,11 +113,15 @@ async function getSnapshot(symbol, options = {}) {
       bids: depth.bids.map(x => [number(x[0], "bidPrice"), number(x[1], "bidQty")]),
       asks: depth.asks.map(x => [number(x[0], "askPrice"), number(x[1], "askQty")])
     },
-    klines: klines.map(k => ({
-      openTime: Number(k[0]), open: number(k[1], "open"), high: number(k[2], "high"),
-      low: number(k[3], "low"), close: number(k[4], "close"), volume: number(k[5], "volume"),
-      closeTime: Number(k[6])
-    })),
+    klines: klines.map(k => {
+      const candle = { openTime: Number(k[0]), open: number(k[1], "open"), high: number(k[2], "high"),
+        low: number(k[3], "low"), close: number(k[4], "close"), volume: number(k[5], "volume"), closeTime: Number(k[6]) };
+      if (candle.open <= 0 || candle.high <= 0 || candle.low <= 0 || candle.close <= 0 || candle.high < candle.low ||
+          candle.high < Math.max(candle.open, candle.close) || candle.low > Math.min(candle.open, candle.close)) {
+        throw new MarketDataError("Invalid OHLC candle", "INVALID_MARKET_VALUE");
+      }
+      return candle;
+    }),
     exchangeRules: exchange[symbol],
     stale: false
   };
