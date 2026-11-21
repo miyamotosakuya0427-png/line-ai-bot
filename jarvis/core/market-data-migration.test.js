@@ -15,6 +15,7 @@ test("market-data base migration uses rerunnable table and index DDL", () => {
   assert.match(migration002, /CREATE OR REPLACE FUNCTION reject_market_audit_mutation/);
   assert.match(migration002, /DROP TRIGGER IF EXISTS market_data_audit_no_update_delete/);
   assert.match(migration002, /CREATE TRIGGER market_data_audit_no_update_delete/);
+  assert.ok(migration002.includes("VALUES ('002')"));
 });
 
 test("license approval and quote currency are guarded by additive migration", () => {
@@ -24,4 +25,5 @@ test("license approval and quote currency are guarded by additive migration", ()
   assert.match(migration003, /enabled = FALSE OR \(license_approved = TRUE/);
   assert.match(migration003, /ADD COLUMN IF NOT EXISTS quote_currency/);
   assert.match(migration003, /market_bars_quote_currency_format/);
+  assert.ok(migration003.includes("VALUES ('003')"));
 });
