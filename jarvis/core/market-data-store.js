@@ -33,13 +33,13 @@ class MarketDataStore {
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", ["market-ingest-idempotency:" + idempotencyKey]);
 
       const sourceResult = await client.query(
-        "SELECT id, source_key, provider, license_id, venue_allowlist, currency_allowlist, enabled FROM market_data_sources WHERE id=$1 FOR SHARE",
+        "SELECT id, source_key, provider, license_id, license_approved, license_evidence_ref, license_reviewed_at, venue_allowlist, currency_allowlist, enabled FROM market_data_sources WHERE id=$1 FOR SHARE",
         [sourceId]
       );
       if (!sourceResult.rowCount) throw new Error("Market data source is not registered");
       const source = sourceResult.rows[0];
       if (source.enabled !== true) throw new Error("Market data source is disabled");
-      if (!source.provider || !source.license_id) throw new Error("Provider and license registration are required");
+      if (!source.provider || !source.license_id || source.license_approved !== true || !source.license_evidence_ref || !source.license_reviewed_at) throw new Error("Approved provider and license evidence are required");
 
       for (const bar of bars) {
         if (!bar || bar.sourceId !== sourceId || bar.provider !== source.provider || bar.licenseId !== source.license_id) {
@@ -85,8 +85,8 @@ class MarketDataStore {
       const allFindings = [...findings, ...auditBars(bars)];
       for (const bar of bars) {
         const result = await client.query(
-          "INSERT INTO market_bars(source_id,venue,symbol,interval,open_time_utc,close_time_utc,source_timestamp_raw,source_timezone,received_at_utc,open,high,low,close,volume,quote_volume,adjustment_state,normalized_hash,raw_payload_hash,verification_status,batch_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'unverified',$19) ON CONFLICT(source_id,venue,symbol,interval,open_time_utc,adjustment_state) DO NOTHING RETURNING id",
-          [sourceId,bar.venue,bar.symbol,bar.interval,bar.openTimeUtc,bar.closeTimeUtc,bar.sourceTimestampRaw,bar.sourceTimezone,bar.receivedAtUtc,bar.open,bar.high,bar.low,bar.close,bar.volume,bar.quoteVolume,bar.adjustmentState,bar.normalizedHash,bar.rawPayloadHash||null,batchId]
+          "INSERT INTO market_bars(source_id,venue,symbol,interval,open_time_utc,close_time_utc,source_timestamp_raw,source_timezone,received_at_utc,open,high,low,close,volume,quote_volume,adjustment_state,normalized_hash,raw_payload_hash,quote_currency,verification_status,batch_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'unverified',$20) ON CONFLICT(source_id,venue,symbol,interval,open_time_utc,adjustment_state) DO NOTHING RETURNING id",
+          [sourceId,bar.venue,bar.symbol,bar.interval,bar.openTimeUtc,bar.closeTimeUtc,bar.sourceTimestampRaw,bar.sourceTimezone,bar.receivedAtUtc,bar.open,bar.high,bar.low,bar.close,bar.volume,bar.quoteVolume,bar.adjustmentState,bar.normalizedHash,bar.rawPayloadHash||null,quoteCurrency(bar, source.currency_allowlist),batchId]
         );
         if (result.rowCount) { inserted++; continue; }
 
@@ -106,8 +106,8 @@ class MarketDataStore {
             [old.rows[0].id,revisionNo,old.rows[0].normalized_hash,bar.normalizedHash,JSON.stringify(old.rows[0].prior_payload),JSON.stringify(bar),batchId]
           );
           await client.query(
-            "UPDATE market_bars SET close_time_utc=$2,source_timestamp_raw=$3,source_timezone=$4,received_at_utc=$5,open=$6,high=$7,low=$8,close=$9,volume=$10,quote_volume=$11,normalized_hash=$12,raw_payload_hash=$13,revision_no=$14,verification_status='unverified',batch_id=$15 WHERE id=$1",
-            [old.rows[0].id,bar.closeTimeUtc,bar.sourceTimestampRaw,bar.sourceTimezone,bar.receivedAtUtc,bar.open,bar.high,bar.low,bar.close,bar.volume,bar.quoteVolume,bar.normalizedHash,bar.rawPayloadHash||null,revisionNo,batchId]
+            "UPDATE market_bars SET close_time_utc=$2,source_timestamp_raw=$3,source_timezone=$4,received_at_utc=$5,open=$6,high=$7,low=$8,close=$9,volume=$10,quote_volume=$11,normalized_hash=$12,raw_payload_hash=$13,quote_currency=$14,revision_no=$15,verification_status='unverified',batch_id=$16 WHERE id=$1",
+            [old.rows[0].id,bar.closeTimeUtc,bar.sourceTimestampRaw,bar.sourceTimezone,bar.receivedAtUtc,bar.open,bar.high,bar.low,bar.close,bar.volume,bar.quoteVolume,bar.normalizedHash,bar.rawPayloadHash||null,quoteCurrency(bar, source.currency_allowlist),revisionNo,batchId]
           );
           allFindings.push({ code:"CANDLE_REVISION", severity:"high", details:{ priorHash:old.rows[0].normalized_hash, newHash:bar.normalizedHash }, barId:old.rows[0].id });
           revised++;
