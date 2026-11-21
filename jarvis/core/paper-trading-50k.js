@@ -27,13 +27,13 @@ function evaluateRisk({ realizedPnlJpy = 0, unrealizedPnlJpy = 0, feesJpy = 0, i
     remainingInvestmentCapacityJpy: Math.max(0, policy.investmentCapJpy - investedJpy),
     reserveJpy: policy.reserveJpy, liveOrdersEnabled: false };
 }
-function validateBuy({ symbol, amountJpy, investedJpy = 0, assetInvestedJpy = 0, riskState, stageIndex = 0 }, policy = POLICY) {
+function validateBuy({ symbol, amountJpy, investedJpy = 0, assetInvestedJpy = 0, stageSpentJpy = 0, riskState, stageIndex = 0 }, policy = POLICY) {
   validatePolicy(policy);
   const asset = Object.keys(policy.symbols).find(k => policy.symbols[k] === symbol);
   if (!asset) return { allowed: false, reason: "UNSUPPORTED_SYMBOL" };
   if (!Number.isInteger(amountJpy) || amountJpy <= 0) return { allowed: false, reason: "INVALID_AMOUNT" };
   if (!Number.isInteger(stageIndex) || stageIndex < 0 || stageIndex >= policy.stageBudgetsJpy.length ||
-      amountJpy > policy.stageBudgetsJpy[stageIndex]) return { allowed: false, reason: "STAGE_LIMIT" };
+      !Number.isFinite(stageSpentJpy) || stageSpentJpy < 0 || stageSpentJpy + amountJpy > policy.stageBudgetsJpy[stageIndex]) return { allowed: false, reason: "STAGE_LIMIT" };
   if (riskState?.halted) return { allowed: false, reason: "LOSS_LIMIT_REACHED" };
   if (investedJpy + amountJpy > policy.investmentCapJpy) return { allowed: false, reason: "INVESTMENT_CAP" };
   if (!Number.isFinite(assetInvestedJpy) || assetInvestedJpy < 0 || assetInvestedJpy + amountJpy > policy.targetAllocationsJpy[asset]) return { allowed: false, reason: "ASSET_ALLOCATION_CAP" };
