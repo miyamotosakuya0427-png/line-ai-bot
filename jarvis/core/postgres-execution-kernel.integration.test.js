@@ -84,6 +84,17 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   assert.equal(rolledBackTask.task.status,"ready","failed Worker binding must roll back the Task claim event");
   loser=await kernel.transitionWorker({workerId:loserId,expectedVersion:Number(loser.version),status:"recovering"});
   await kernel.transitionWorker({workerId:loserId,expectedVersion:Number(loser.version),status:"idle"});
+  const handoffTask=await makeTask("handoff",loserId);
+  const handoffClaim=await registry.claimTaskForWorker({taskId:handoffTask.task.taskId,workerId:loserId,leaseMs:5000});
+  const handoffRunning=await registry.transitionTask({taskId:handoffTask.task.taskId,expectedVersion:handoffClaim.version,lease:handoffClaim.lease,status:"running"});
+  const handoff=await registry.recordTaskHandoff({taskId:handoffTask.task.taskId,expectedVersion:handoffRunning.version,lease:handoffClaim.lease,fromAgentId:loserId,toAgentId:"agent-target",fromDepartmentId:"engineering",toDepartmentId:"management",idempotencyKey:"handoff-once"});
+  assert.equal(handoff.created,true);
+  assert.equal(handoff.task.state,"queued");
+  assert.equal((await kernel.getWorker(loserId)).status,"idle");
+  const handoffEvents=await registry.listTaskEvents({taskIds:[handoffTask.task.taskId],limit:10});
+  assert.equal(handoffEvents.filter(row=>row.eventType==="agent_handoff").length,1);
+  const handoffReplay=await registry.recordTaskHandoff({taskId:handoffTask.task.taskId,expectedVersion:handoffRunning.version,lease:handoffClaim.lease,fromAgentId:loserId,toAgentId:"agent-target",fromDepartmentId:"engineering",toDepartmentId:"management",idempotencyKey:"handoff-once"});
+  assert.equal(handoffReplay.created,false,"handoff idempotency key must prevent duplicate transfer events");
   const resourceAttempts=await Promise.all([
    registry.acquireLease({resourceKey:"resource:race",ownerId:"worker-a",leaseMs:5000}),
    registry.acquireLease({resourceKey:"resource:race",ownerId:"worker-b",leaseMs:5000})
