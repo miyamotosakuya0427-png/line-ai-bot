@@ -47,6 +47,10 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   await registerScopedWorker({workerId:"worker-b",agentId:"agent-b",departmentId:"engineering",instanceId:"instance-b",processId:"200"});
   const scopedWorkers=await kernel.listWorkersForScope({projectId:"one-jarvis",conversationId:"test-conversation"});
   assert.ok(scopedWorkers.some(row=>row.worker_id==="worker-a"&&row.grant_id),"only explicitly granted Workers are returned in a scope listing");
+  const grantAudit=await kernel.listWorkerScopeGrants({limit:50});
+  const workerAGrant=grantAudit.find(row=>row.worker_id==="worker-a"&&row.project_id==="one-jarvis"&&row.conversation_id==="test-conversation");
+  assert.ok(workerAGrant&&workerAGrant.granted_by==="integration-test"&&workerAGrant.granted_at,"Owner audit listing includes grantor and timestamp");
+  assert.equal(Object.keys(workerAGrant).some(key=>/token|secret|hash/i.test(key)),false,"Grant audit listing never returns secrets or token hashes");
   await kernel.registerWorker({workerId:"worker-ungranted",agentId:"agent-ungranted",departmentId:"engineering",instanceId:"instance-ungranted"});
   const ungrantedTask=await makeTask("ungranted","worker-ungranted");
   await assert.rejects(registry.claimTaskForWorker({taskId:ungrantedTask.task.taskId,workerId:"worker-ungranted",leaseMs:5000}),/no active grant/);
@@ -56,6 +60,8 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   const revokedGrant=revokedRows.find(row=>row.worker_id==="worker-revoked").grant_id;
   assert.equal((await kernel.revokeWorkerScope({grantId:revokedGrant,revokedBy:"integration-test"})).revoked,true);
   await assert.rejects(registry.claimTaskForWorker({taskId:revokedTask.task.taskId,workerId:"worker-revoked",leaseMs:5000}),/no active grant/);
+  const revokedAudit=await kernel.listWorkerScopeGrants({limit:50});
+  assert.ok(revokedAudit.some(row=>row.grant_id===revokedGrant&&row.revoked_by==="integration-test"&&row.revoked_at),"Revoked grant remains visible in the audit history");
   // Exercise real OS processes with independent PostgreSQL pools.
   const processTask=await makeTask("ten-process-claim","process-worker-0");
   const processWorkers=Array.from({length:10},(_,i)=>"process-worker-"+i);
@@ -90,6 +96,8 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   assert.equal(rolledBackLease.rowCount,0,"failed Worker binding must roll back the newly acquired Task Lease");
   const rolledBackTask=await registry.getTask(rollbackTask.task.taskId);
   assert.equal(rolledBackTask.task.status,"ready","failed Worker binding must roll back the Task claim event");
+  const rollbackEvents=await outbox.replay({projectId:"one-jarvis",conversationId:"test-conversation",afterCursor:0,limit:500});
+  assert.equal(rollbackEvents.some(event=>event.taskId===rollbackTask.task.taskId&&event.eventType==="claimed"),false,"failed Task transaction must not leave an Outbox claim event");
   loser=await kernel.transitionWorker({workerId:loserId,expectedVersion:Number(loser.version),status:"recovering"});
   await kernel.transitionWorker({workerId:loserId,expectedVersion:Number(loser.version),status:"idle"});
   const handoffTask=await makeTask("handoff",loserId);
