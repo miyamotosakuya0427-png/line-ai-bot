@@ -44,4 +44,4 @@ jobs:
           done
       - name: Stage 6 market-data unit tests
         run: |
-          node --test core/market-data-gateway-adapter.test.js core/market-data-store.test.js core/market-data-quality.test.js core/backtest-data-gate.test.js
+          node --test core/market-data-gateway-adapter.test.js core/market-data-store.test.js core/market-data-migration.test.js core/market-data-quality.test.js core/backtest-data-gate.test.js
