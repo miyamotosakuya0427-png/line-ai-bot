@@ -36,7 +36,8 @@ test("maps only closed public candles and preserves venue/account limitation", (
 
 test("fails closed when provider/license/venue/currency is not explicitly configured", () => {
   assert.throws(() => mapSnapshotToBars(snapshot([]), { source: { ...source, enabled: false }, now: () => now }), /not enabled/);
-  assert.throws(() => mapSnapshotToBars(snapshot([]), { source: { ...source, licenseEvidenceRef: "" }, now: () => now }), /License approval/);\n  assert.throws(() => mapSnapshotToBars(snapshot([]), { source: { ...source, licenseApproved: false }, now: () => now }), /License approval/);
+  assert.throws(() => mapSnapshotToBars(snapshot([]), { source: { ...source, licenseEvidenceRef: "" }, now: () => now }), /License approval/);
+  assert.throws(() => mapSnapshotToBars(snapshot([]), { source: { ...source, licenseApproved: false }, now: () => now }), /License approval/);
   assert.throws(() => mapSnapshotToBars(snapshot([]), { source: { ...source, venues: [] }, now: () => now }), /venue is not allowlisted/i);
   assert.throws(() => mapSnapshotToBars(snapshot([]), { source: { ...source, currencies: [] }, now: () => now }), /JPY currency/);
 });
