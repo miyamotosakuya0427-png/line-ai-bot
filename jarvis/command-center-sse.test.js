@@ -19,7 +19,7 @@ test("Command Center SSE replays scoped events and excludes sensitive payload fi
   let replayCalls=0,listenerClosed=0;
   const event={cursor:7,eventId:44,taskId:"task-1",version:3,eventType:"claimed",createdAt:"2026-11-21T10:00:00.000Z",payload:{ownerAgent:"agent-a",projectId:"project-a",ownerConversation:"conversation-a",leaseTokenHash:"must-not-leak",secret:"must-not-leak"}};
   const outbox={
-    async replay(args){assert.equal(args.projectId,"project-a");assert.equal(args.conversationId,"conversation-a");replayCalls++;return replayCalls===1?[event]:[];},
+    async replay(args){assert.equal(args.projectId,"project-a");assert.equal(args.conversationId,"conversation-a");assert.equal(args.afterCursor,6);replayCalls++;return replayCalls===1?[{...event,cursor:6},event]:[];},
     async listen(onWake){return async()=>{listenerClosed++;};}
   };
   const {server,url}=await startServer({outbox,authorizeTaskRegistry:async req=>{
@@ -27,12 +27,13 @@ test("Command Center SSE replays scoped events and excludes sensitive payload fi
   }});
   const controller=new AbortController();
   try{
-    const response=await fetch(url,{headers:{Authorization:"Bearer "+API_TOKEN,"X-Task-Registry-Authorization":"Bearer "+REGISTRY_TOKEN},signal:controller.signal});
+    const response=await fetch(url,{headers:{Authorization:"Bearer "+API_TOKEN,"X-Task-Registry-Authorization":"Bearer "+REGISTRY_TOKEN,"Last-Event-ID":"6"},signal:controller.signal});
     assert.equal(response.status,200);
     assert.match(response.headers.get("content-type"),/text\/event-stream/);
     const reader=response.body.getReader();let body="";
     while(!body.includes("event: task")){const part=await reader.read();if(part.done)break;body+=new TextDecoder().decode(part.value);}
     assert.match(body,/id: 7/);
+    assert.doesNotMatch(body,/id: 6/);
     assert.match(body,/"taskId":"task-1"/);
     assert.doesNotMatch(body,/must-not-leak|leaseTokenHash|secret/);
     controller.abort();
