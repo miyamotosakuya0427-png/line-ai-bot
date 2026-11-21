@@ -52,7 +52,7 @@ function validatePortfolioState(state) {
     if (!Number.isSafeInteger(value) || value < 0 || value > cap) throw new PersistenceError("Stage purchase cap exceeded", "STAGE_LIMIT");
     return sum + value;
   }, 0);
-  if (allocationTotal > state.investedJpy || stageTotal > state.investedJpy || allocationTotal > 35000 || stageTotal > 35000) {
+  if (allocationTotal !== state.investedJpy || stageTotal !== state.investedJpy || allocationTotal > 35000 || stageTotal > 35000) {
     throw new PersistenceError("Portfolio allocation totals are inconsistent", "PORTFOLIO_LIMIT");
   }
   const netPnl = (state.realizedPnlJpy || 0) + (state.unrealizedPnlJpy || 0) - (state.feesJpy || 0);
@@ -109,6 +109,9 @@ async function savePaperProposal(pool, proposal) {
     const portfolio = await client.query("SELECT invested_jpy,investment_cap_jpy,reserve_jpy,halted,asset_allocations,stage_spent FROM jarvis_finance.portfolios WHERE portfolio_key=$1 FOR UPDATE", [proposal.portfolioKey]);
     if (!portfolio.rows[0]) throw new PersistenceError("Portfolio does not exist", "PORTFOLIO_NOT_FOUND");
     const current = portfolio.rows[0];
+    if (Number(current.investment_cap_jpy) !== 35000 || Number(current.reserve_jpy) !== 15000) {
+      throw new PersistenceError("Stored portfolio policy does not match the approved 50,000 JPY limits", "PORTFOLIO_POLICY_MISMATCH");
+    }
     if (current.halted) throw new PersistenceError("Portfolio is halted", "LOSS_LIMIT_REACHED");
     if (proposal.side === "BUY") {
       if (Number(current.invested_jpy) + proposal.amountJpy > 35000 || 50000 - (Number(current.invested_jpy) + proposal.amountJpy) < 15000) {
