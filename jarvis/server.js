@@ -266,7 +266,8 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
             for(const event of batch)if(!(await send(event)))return false;
             return true;
           };
-          if(!(await streamBatch(initial)))closed=true;
+          if(!(await revalidate()))closed=true;
+          else{lastAuthAt=Date.now();if(!(await streamBatch(initial)))closed=true;}
           while(!closed&&!res.destroyed){
             if(Date.now()-lastAuthAt>=15000){if(!(await revalidate())){closed=true;break;}lastAuthAt=Date.now();}
             if(Date.now()-lastHeartbeatAt>=15000){if(!res.write(": heartbeat\n\n")&&!(await waitForDrain())){closed=true;break;}lastHeartbeatAt=Date.now();}
