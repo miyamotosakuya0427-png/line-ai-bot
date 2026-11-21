@@ -33,7 +33,7 @@ A placeholder license id or evidence reference is not proof that legal review is
 
 ## Candle semantics
 
-The provider's inclusive closeTime must be strictly earlier than the injected clock. Unconfirmed candles are excluded and reported. The normalizer retains original timestamp text/timezone and creates UTC timestamps plus independent normalized/raw payload SHA-256 hashes.
+The provider's inclusive closeTime must be strictly earlier than the injected clock. Unconfirmed candles are excluded and reported. The adapter retains the provider's original millisecond epoch in `sourceTimestampRaw`, labels its source encoding `UTC_UNIX_MILLISECONDS`, and creates UTC timestamps. The raw-payload hash is calculated from the parsed candle object delivered by PR #79 (not the original HTTP response bytes, which PR #79 does not expose); the normalized hash is calculated separately from canonical normalized fields.
 
 ## Quality and persistence
 
