@@ -202,7 +202,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
           if(!Number.isFinite(previousExpiry)||previousExpiry>Date.parse(now))throw new Error("Task lease recovery requires an expired recorded lease");
           await appendCoordinationEvent(c,lease.resourceKey,"lease_reclaimed",{resourceKey:lease.resourceKey,ownerId:workerId,previousOwnerId:current.task.leaseOwner||null,previousFencingToken:current.task.fencingToken,recoveredFromStatus:current.task.status,recoveredAt:now,fencingToken:lease.fencingToken});
         }
-        const next={...current.task,status:"claimed",state:"claimed",ownerAgent:workerId,updatedAt:now,startedAt:current.task.startedAt||now,leaseOwner:lease.ownerId,leaseTokenHash:hash(lease.token),leaseExpiresAt:lease.expiresAt,fencingToken:lease.fencingToken,...(reclaimable?{recoveredFromStatus:current.task.status,recoveredAt:now}:{})};
+        const next={...current.task,status:"claimed",state:"claimed",updatedAt:now,startedAt:current.task.startedAt||now,leaseOwner:lease.ownerId,leaseTokenHash:hash(lease.token),leaseExpiresAt:lease.expiresAt,fencingToken:lease.fencingToken,...(reclaimable?{recoveredFromStatus:current.task.status,recoveredAt:now}:{})};
         await append(c,taskId,reclaimable?"lease_reclaimed":"claimed",next);
         const bound=await c.query("UPDATE jarvis.worker_registry SET current_task_id=$1,lease_resource_key=$2,fencing_token=$3,status='running',heartbeat_at=$4,version=version+1,updated_at=$4 WHERE worker_id=$5 AND status IN ('idle','recovering') AND current_task_id IS NULL RETURNING *",[taskId,lease.resourceKey,lease.fencingToken,now,workerId]);
         if(bound.rowCount!==1)throw new Error("Atomic Worker binding failed");
@@ -259,7 +259,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         const current=await latest(c,taskId);
         if(!current||current.version!==expectedVersion)throw new Error("Stale Task version for handoff");
         const task=current.task;
-        if((task.state||task.status)!=="running"||task.leaseOwner!==lease.ownerId||Number(task.fencingToken)!==lease.fencingToken||worker.rows[0].agent_id!==fromAgentId||worker.rows[0].department_id!==fromDepartmentId||task.departmentId!==fromDepartmentId)throw new Error("Handoff source ownership or fencing validation failed");
+        if((task.state||task.status)!=="running"||task.leaseOwner!==lease.ownerId||Number(task.fencingToken)!==lease.fencingToken||worker.rows[0].agent_id!==fromAgentId||task.ownerAgent!==fromAgentId||worker.rows[0].department_id!==fromDepartmentId||task.departmentId!==fromDepartmentId)throw new Error("Handoff source ownership or fencing validation failed");
         const now=clock();
         const next={...task,ownerAgent:toAgentId,departmentId:toDepartmentId,status:"queued",state:"queued",leaseOwner:null,leaseTokenHash:null,leaseExpiresAt:null,fencingToken:0,updatedAt:now,nextAction:"Queued for authorized Agent handoff"};
         await c.query("UPDATE jarvis.coordination_leases SET expires_at=$1::timestamptz,updated_at=$1::timestamptz WHERE resource_key=$2 AND owner_id=$3 AND fencing_token=$4",[now,lease.resourceKey,lease.ownerId,lease.fencingToken]);
