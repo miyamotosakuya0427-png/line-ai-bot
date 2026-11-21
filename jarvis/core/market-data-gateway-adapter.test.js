@@ -6,7 +6,7 @@ const { mapSnapshotToBars, PUBLIC_PROVIDER, PUBLIC_VENUE } = require("../core/ma
 const now = Date.parse("2026-11-22T12:00:00.000Z");
 const source = {
   id: "source-1", sourceKey: "binance-public-jpy", provider: PUBLIC_PROVIDER,
-  licenseId: "license-reviewed-v1", licenseEvidenceRef: "internal-review:pending-approval",
+  licenseId: "license-reviewed-v1", licenseEvidenceRef: "test-fixture:approved-license-evidence", licenseApproved: true,
   venues: [PUBLIC_VENUE], currencies: ["JPY"], enabled: true
 };
 function snapshot(klines = []) {
@@ -36,7 +36,7 @@ test("maps only closed public candles and preserves venue/account limitation", (
 
 test("fails closed when provider/license/venue/currency is not explicitly configured", () => {
   assert.throws(() => mapSnapshotToBars(snapshot([]), { source: { ...source, enabled: false }, now: () => now }), /not enabled/);
-  assert.throws(() => mapSnapshotToBars(snapshot([]), { source: { ...source, licenseEvidenceRef: "" }, now: () => now }), /License evidence/);
+  assert.throws(() => mapSnapshotToBars(snapshot([]), { source: { ...source, licenseEvidenceRef: "" }, now: () => now }), /License approval/);\n  assert.throws(() => mapSnapshotToBars(snapshot([]), { source: { ...source, licenseApproved: false }, now: () => now }), /License approval/);
   assert.throws(() => mapSnapshotToBars(snapshot([]), { source: { ...source, venues: [] }, now: () => now }), /venue is not allowlisted/i);
   assert.throws(() => mapSnapshotToBars(snapshot([]), { source: { ...source, currencies: [] }, now: () => now }), /JPY currency/);
 });
@@ -54,6 +54,6 @@ test("rejects malformed kline boundaries", () => {
 
 test("does not infer a real license from a placeholder evidence reference", () => {
   const result = mapSnapshotToBars(snapshot([]), { source, now: () => now });
-  assert.equal(result.sourceIdentity.licenseEvidenceRef, "internal-review:pending-approval");
+  assert.equal(result.sourceIdentity.licenseEvidenceRef, "test-fixture:approved-license-evidence");
   assert.equal(result.bars.length, 0);
 });
