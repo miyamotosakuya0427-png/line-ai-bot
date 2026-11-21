@@ -93,7 +93,7 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   assert.equal((await kernel.getWorker(loserId)).status,"idle");
   const handoffEvents=await registry.listTaskEvents({taskIds:[handoffTask.task.taskId],limit:10});
   assert.equal(handoffEvents.filter(row=>row.eventType==="agent_handoff").length,1);
-  const handoffReplay=await registry.recordTaskHandoff({taskId:handoffTask.task.taskId,expectedVersion:handoffRunning.version,lease:handoffClaim.lease,fromAgentId:loserId,toAgentId:"agent-target",fromDepartmentId:"engineering",toDepartmentId:"management",idempotencyKey:"handoff-once"});
+  const handoffReplay=await registry.recordTaskHandoff({taskId:handoffTask.task.taskId,expectedVersion:handoffRunning.version,lease:handoffClaim.lease,fromAgentId:(loserId==="worker-a"?"agent-a":"agent-b"),toAgentId:"agent-target",fromDepartmentId:"engineering",toDepartmentId:"management",idempotencyKey:"handoff-once"});
   assert.equal(handoffReplay.created,false,"handoff idempotency key must prevent duplicate transfer events");
   const resourceAttempts=await Promise.all([
    registry.acquireLease({resourceKey:"resource:race",ownerId:"worker-a",leaseMs:5000}),
