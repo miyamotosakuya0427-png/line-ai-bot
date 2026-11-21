@@ -28,18 +28,19 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
  try{
   await pool.query("DROP SCHEMA IF EXISTS jarvis CASCADE");
   const fs=require("node:fs/promises"),path=require("node:path"),root=path.join(__dirname,"..","migrations");
-  for(const file of ["0001_neon_event_store.sql","0003_append_only_event_ledger.sql","0004_task_registry.sql","0005_task_registry_scoped_dedupe.sql","0006_scheduling_reservation_store.sql","0007_execution_kernel_fencing.sql"])await pool.query(await fs.readFile(path.join(root,file),"utf8"));
+  for(const file of ["0001_neon_event_store.sql","0003_append_only_event_ledger.sql","0004_task_registry.sql","0005_task_registry_scoped_dedupe.sql","0006_scheduling_reservation_store.sql","0007_execution_kernel_fencing.sql","0008_worker_scope_grants.sql"])await pool.query(await fs.readFile(path.join(root,file),"utf8"));
   const registry=createTaskRegistry({pool,clock,tokenFactory:()=>require("node:crypto").randomBytes(32).toString("hex")});
   const kernel=createPostgresExecutionKernel({pool,clock,allowedOperationScopes:["resource.update"]});
   await kernel.init();
+  const registerScopedWorker=async(input)=>{await kernel.registerWorker(input);await kernel.grantWorkerScope({workerId:input.workerId,projectId:"one-jarvis",conversationId:"test-conversation",grantedBy:"integration-test"});};
   const makeTask=async(id,worker)=>registry.createTask({title:"Synthetic "+id,dedupeKey:"dedupe-"+id,projectId:"one-jarvis",ownerConversation:"test-conversation",ownerAgent:worker,status:"ready"});
   const first=await makeTask("one","worker-a");
-  await kernel.registerWorker({workerId:"worker-a",agentId:"agent-a",departmentId:"engineering",instanceId:"instance-a",processId:"100"});
-  await kernel.registerWorker({workerId:"worker-b",agentId:"agent-b",departmentId:"engineering",instanceId:"instance-b",processId:"200"});
+  await registerScopedWorker({workerId:"worker-a",agentId:"agent-a",departmentId:"engineering",instanceId:"instance-a",processId:"100"});
+  await registerScopedWorker({workerId:"worker-b",agentId:"agent-b",departmentId:"engineering",instanceId:"instance-b",processId:"200"});
   // Exercise real OS processes with independent PostgreSQL pools.
   const processTask=await makeTask("ten-process-claim","process-worker-0");
   const processWorkers=Array.from({length:10},(_,i)=>"process-worker-"+i);
-  for(let i=0;i<processWorkers.length;i++)await kernel.registerWorker({workerId:processWorkers[i],agentId:"agent-process-"+i,departmentId:"engineering",instanceId:"process-instance-"+i,processId:String(1000+i)});
+  for(let i=0;i<processWorkers.length;i++)await registerScopedWorker({workerId:processWorkers[i],agentId:"agent-process-"+i,departmentId:"engineering",instanceId:"process-instance-"+i,processId:String(1000+i)});
   const processClaims=await Promise.all(processWorkers.map(workerId=>runWorkerProcess("claim",workerId,processTask.task.taskId)));
   assert.equal(processClaims.filter(x=>x.acquired).length,1,"exactly one of ten independent OS processes may claim the same Task");
   const processResourceLeases=await Promise.all(processWorkers.map(workerId=>runWorkerProcess("resource",workerId)));
