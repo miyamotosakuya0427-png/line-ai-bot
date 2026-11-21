@@ -129,6 +129,13 @@ async function savePaperProposal(pool, proposal) {
       [randomUUID(), idempotencyKey, hash, proposal.portfolioKey, proposal.jobId || null, proposal.approvalId || null, proposal.symbol, proposal.side, proposal.amountJpy, proposal.stageIndex ?? null, JSON.stringify(payload.rationale)]
     );
     if (inserted.rows[0]) {
+      if (proposal.side === "BUY") {
+        const asset = proposal.symbol.slice(0,3);
+        await client.query(
+          "UPDATE jarvis_finance.portfolios SET invested_jpy=invested_jpy+$2, asset_allocations=jsonb_set(asset_allocations, ARRAY[$3::text], to_jsonb(COALESCE((asset_allocations->>$3)::bigint,0)+$2), true), stage_spent=jsonb_set(stage_spent, ARRAY[$4::text], to_jsonb(COALESCE((stage_spent->>$4)::bigint,0)+$2), true), updated_at=now() WHERE portfolio_key=$1",
+          [proposal.portfolioKey, proposal.amountJpy, asset, String(proposal.stageIndex)]
+        );
+      }
       await client.query(
         "INSERT INTO public.jarvis_audit_events(event_id, actor, action, resource_type, resource_id, metadata) VALUES($1,$2,'PAPER_PROPOSAL_SAVED','finance_trade_proposal',$3,$4::jsonb) ON CONFLICT(event_id) DO NOTHING",
         [randomUUID(), proposal.actor || "one-jarvis-finance", inserted.rows[0].id, JSON.stringify({ idempotencyKey, symbol: proposal.symbol, side: proposal.side, amountJpy: proposal.amountJpy, status: "PAPER_ONLY" })]
