@@ -8,6 +8,20 @@ const MAX_TITLE=240, MAX_SCOPE=12000, MAX_OWNER=128, MAX_DEDUPE=240;
 function text(value,max,required=true){return typeof value==="string"&&value.length<=max&&(!required||!!value.trim());}
 function clone(value){return JSON.parse(JSON.stringify(value));}
 function hash(value){return crypto.createHash("sha256").update(value).digest("hex");}
+function validateHandoffRoute(history,fromDepartmentId,toDepartmentId,maxHandoffs=8){
+  if(!text(fromDepartmentId,128)||!text(toDepartmentId,128)||fromDepartmentId===toDepartmentId)throw new Error("Handoff must target a different department");
+  if(!Array.isArray(history)||!Number.isInteger(maxHandoffs)||maxHandoffs<1||maxHandoffs>32)throw new Error("Invalid handoff route history");
+  if(history.length>=maxHandoffs)throw new Error("Handoff limit exceeded");
+  const visited=new Set([fromDepartmentId]);
+  for(const row of history){
+    const payload=row?.payload||{};
+    if(typeof payload.fromDepartmentId==="string")visited.add(payload.fromDepartmentId);
+    if(typeof payload.toDepartmentId==="string")visited.add(payload.toDepartmentId);
+  }
+  if(visited.has(toDepartmentId))throw new Error("Handoff department cycle detected");
+  return true;
+}
+
 function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactory=()=>crypto.randomBytes(32).toString("base64url")}={}){
   if(!pool||typeof pool.connect!=="function")throw new Error("PostgreSQL pool is required");
   let initialized=false;
@@ -259,6 +273,8 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         const current=await latest(c,taskId);
         if(!current||current.version!==expectedVersion)throw new Error("Stale Task version for handoff");
         const task=current.task;
+        const handoffHistory=await c.query("SELECT payload FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1 AND event_type='agent_handoff' ORDER BY aggregate_version ASC",[taskId]);
+        validateHandoffRoute(handoffHistory.rows,fromDepartmentId,toDepartmentId,8);
         if((task.state||task.status)!=="running"||task.leaseOwner!==lease.ownerId||Number(task.fencingToken)!==lease.fencingToken||worker.rows[0].agent_id!==fromAgentId||task.ownerAgent!==fromAgentId||worker.rows[0].department_id!==fromDepartmentId||task.departmentId!==fromDepartmentId)throw new Error("Handoff source ownership or fencing validation failed");
         const now=clock();
         const next={...task,ownerAgent:toAgentId,departmentId:toDepartmentId,status:"queued",state:"queued",leaseOwner:null,leaseTokenHash:null,leaseExpiresAt:null,fencingToken:0,updatedAt:now,nextAction:"Queued for authorized Agent handoff"};
@@ -275,4 +291,4 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
     }
   };
 }
-module.exports={createTaskRegistry,TASK_STATES};
+module.exports={createTaskRegistry,TASK_STATES,validateHandoffRoute};
