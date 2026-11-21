@@ -13,5 +13,6 @@ BEGIN
     ALTER TABLE market_bars ADD CONSTRAINT market_bars_quote_currency_format
       CHECK (quote_currency IS NULL OR quote_currency ~ '^[A-Z]{3}$');
   END IF;
-END $$;
+END $;
+INSERT INTO schema_migrations(version) VALUES ('003') ON CONFLICT (version) DO NOTHING;
 COMMIT;
