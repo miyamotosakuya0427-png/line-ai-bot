@@ -245,6 +245,7 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
           closeListener=await taskEventOutbox.listen(wake);
           res.writeHead(200,{"Content-Type":"text/event-stream; charset=utf-8","Cache-Control":"no-store, no-transform","Connection":"keep-alive","X-Accel-Buffering":"no","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer"});
           res.write("retry: 5000\n: connected\n\n");
+          res.on("close",()=>{closed=true;wake();});
           const send=async(event)=>{
             if(event.cursor<=cursor)return true;
             const p=event.payload||{};
