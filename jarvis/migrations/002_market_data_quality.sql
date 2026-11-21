@@ -67,4 +67,5 @@ DROP TRIGGER IF EXISTS market_data_audit_no_update_delete ON market_data_audit_e
 CREATE TRIGGER market_data_audit_no_update_delete BEFORE UPDATE OR DELETE ON market_data_audit_events
 FOR EACH ROW EXECUTE FUNCTION reject_market_audit_mutation();
 GRANT SELECT ON market_data_sources, market_bars, market_ingest_batches, market_quality_findings, market_bar_revisions, market_execution_costs, market_data_audit_events TO jarvis_audit_readonly;
+INSERT INTO schema_migrations(version) VALUES ('002') ON CONFLICT (version) DO NOTHING;
 COMMIT;
