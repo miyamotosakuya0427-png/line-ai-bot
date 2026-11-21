@@ -214,7 +214,11 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         if(typeof rawCursor!=="string"||!/^(0|[1-9][0-9]{0,15})$/.test(rawCursor)||!Number.isSafeInteger(Number(rawCursor)))return json(res,400,{ok:false,error:"Invalid Last-Event-ID cursor"});
         const cursorStart=Number(rawCursor);
         const agentKey=principal.agentId;
-        if(activeSseConnections>=20||(sseConnectionsByAgent.get(agentKey)||0)>=3)return json(res,429,{ok:false,error:"Event stream connection limit reached"},{"Retry-After":"15"});
+        if(activeSseConnections>=3||(sseConnectionsByAgent.get(agentKey)||0)>=1)return json(res,429,{ok:false,error:"Event stream connection limit reached"},{"Retry-After":"15"});
+        let quota;
+        try{quota=await taskRegistryRateLimiter.consume(principal.agentId,{projectIds:[projectId],conversationId,workerId:principal.workerId||principal.agentId,operation:"telemetry:sse"});}
+        catch{return json(res,503,{ok:false,error:"Event stream rate limiter unavailable"});}
+        if(!quota||quota.allowed!==true)return json(res,429,{ok:false,error:"Event stream rate limit exceeded"},{"Retry-After":String(Math.max(1,Number(quota?.retryAfter)||60))});
         activeSseConnections++;sseConnectionsByAgent.set(agentKey,(sseConnectionsByAgent.get(agentKey)||0)+1);
         let counted=true,initial;
         try{initial=await taskEventOutbox.replay({projectId,conversationId,afterCursor:cursorStart,limit:100});}
