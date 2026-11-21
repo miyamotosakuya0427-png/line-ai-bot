@@ -160,6 +160,16 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
           return json(res,rejected?error.statusCode:503,{ok:false,error:rejected?"Reservation operation rejected":"Reservation service unavailable"});
         }
       }
+      if(req.method==="POST"&&url.pathname.startsWith("/v1/admin/task-registry-agents/")&&url.pathname.endsWith("/revoke")){
+        if(!isAuthorized(req,ownerToken))return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Unauthorized":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
+        if(!taskRegistryRevocationStore)return json(res,503,{ok:false,error:"Shared token revocation is not configured"});
+        if(!req.headers["content-type"]?.toLowerCase().startsWith("application/json"))return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+        const parts=url.pathname.split("/"),agentId=parts[4],body=await readJson(req);
+        if(parts.length!==6||!/^[A-Za-z0-9._:-]{1,128}$/.test(agentId))return json(res,400,{ok:false,error:"Invalid Agent ID"});
+        if(body.ownerApproval!==true)return json(res,403,{ok:false,error:"Explicit Owner approval is required"});
+        try{const result=await taskRegistryRevocationStore.revoke({agentId,revokedBy:"owner-token"});return json(res,result.revoked?201:200,{ok:true,...result});}
+        catch{return json(res,503,{ok:false,error:"Agent token revocation failed"});}
+      }
       if(req.method==="GET"&&url.pathname==="/v1/admin/worker-scope-grants"){
         if(!isAuthorized(req,ownerToken))return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Unauthorized":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
         if(!executionKernel||typeof executionKernel.listWorkerScopeGrants!=="function")return json(res,503,{ok:false,error:"Worker scope grant listing is unavailable"});
@@ -1015,14 +1025,17 @@ if (require.main===module) {
       jobStore=JOB_STORE_PATH?createJobStore({filePath:JOB_STORE_PATH}):null;
       approvalStore=APPROVAL_STORE_PATH?createApprovalStore({filePath:APPROVAL_STORE_PATH}):null;
     }
-    let taskRegistry=null,authorizeTaskRegistry=null,taskRegistryRateLimiter=null,executionKernel=null,taskEventOutbox=null,executionRecoveryScheduler=null;
+    let taskRegistry=null,authorizeTaskRegistry=null,taskRegistryRateLimiter=null,executionKernel=null,taskEventOutbox=null,taskRegistryRevocationStore=null,executionRecoveryScheduler=null;
     if(process.env.JARVIS_TASK_REGISTRY_API_ENABLED==="true"){
       if(!postgresPool)throw new Error("Task Registry API requires JARVIS_STORAGE_MODE=postgres.");
       const {createTaskRegistry}=require("./core/task-registry-store");
       const {createTaskRegistryAuthorizer}=require("./core/task-registry-auth");
+      const {createPostgresTaskRegistryRevocationStore}=require("./core/postgres-task-registry-revocation-store");
       taskRegistry=createTaskRegistry({pool:postgresPool});
       await taskRegistry.init(); // Read-only schema check; migration 0004 is never applied here.
-      authorizeTaskRegistry=createTaskRegistryAuthorizer();
+      taskRegistryRevocationStore=createPostgresTaskRegistryRevocationStore({pool:postgresPool});
+      await taskRegistryRevocationStore.init(); // Read-only schema check; migration 0010 is never applied here.
+      authorizeTaskRegistry=createTaskRegistryAuthorizer({revocationStore:taskRegistryRevocationStore});
       const {createPostgresTaskRegistryRateLimiter}=require("./core/postgres-task-registry-rate-limiter");
       const {createPostgresExecutionKernel}=require("./core/postgres-execution-kernel");
       const {createTaskEventOutbox}=require("./core/task-event-outbox");
