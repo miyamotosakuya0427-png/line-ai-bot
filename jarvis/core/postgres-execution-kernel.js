@@ -199,6 +199,8 @@ function createPostgresExecutionKernel({pool,clock=()=>new Date().toISOString(),
         if(current.rows[0].revoked_at)return {revoked:false,reason:"already revoked"};
         const g=current.rows[0];
         await c.query("UPDATE jarvis.worker_scope_grants SET revoked_at=$1,revoked_by=$2,version=version+1 WHERE grant_id=$3 AND revoked_at IS NULL",[now,revokedBy,grantId]);
+        const stopping=await c.query("UPDATE jarvis.worker_registry SET status=CASE WHEN current_task_id IS NULL THEN status ELSE 'stopping' END,version=version+1,updated_at=$1 WHERE worker_id=$2 AND current_task_id IS NOT NULL RETURNING current_task_id,version",[now,g.worker_id]);
+        if(stopping.rows[0])await appendWorkerEvent(c,g.worker_id,"worker_scope_revoked",{workerId:g.worker_id,grantId,activeTaskId:stopping.rows[0].current_task_id,revokedAt:now,workerVersion:Number(stopping.rows[0].version)});
         await c.query("INSERT INTO jarvis.events(aggregate_type,aggregate_id,aggregate_version,event_type,payload,created_at) VALUES('worker_scope_grant',$1,2,'scope_revoked',$2::jsonb,$3)",[grantId,JSON.stringify({grantId,workerId:g.worker_id,projectId:g.project_id,conversationId:g.conversation_id,revokedBy,revokedAt:now}),now]);
         return {revoked:true,grantId,workerId:g.worker_id};
       });
@@ -230,6 +232,8 @@ function createPostgresExecutionKernel({pool,clock=()=>new Date().toISOString(),
         const task=await c.query("SELECT payload FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1 ORDER BY aggregate_version DESC LIMIT 1 FOR SHARE",[taskId]);
         const taskState=task.rows[0]?.payload;
         if(!taskState||!["claimed","running","in_progress"].includes(taskState.state||taskState.status)||taskState.leaseOwner!==workerId||Number(taskState.fencingToken)!==taskLease.fencingToken||taskState.projectId!==projectId)throw new Error("Task is not actively owned by this worker");
+        const grant=await c.query("SELECT grant_id FROM jarvis.worker_scope_grants WHERE worker_id=$1 AND project_id=$2 AND conversation_id=$3 AND revoked_at IS NULL FOR SHARE",[workerId,projectId,taskState.ownerConversation]);
+        if(!grant.rows[0])throw new Error("Worker Project/Conversation scope grant is missing or revoked");
         // Serialize both operation-ID and idempotency-key races before reading
         // the journal. Sorted advisory locks avoid lock-order inversion.
         const operationLocks=["fenced-operation:"+operationId,"fenced-idempotency:"+idempotencyKey].sort();
