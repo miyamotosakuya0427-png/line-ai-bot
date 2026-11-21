@@ -13,9 +13,9 @@ function createPostgresExecutionKernel({pool,clock=()=>new Date().toISOString(),
   let initialized=false;
   async function init(){
     if(initialized)return {ok:true};
-    const r=await pool.query("SELECT to_regclass('jarvis.coordination_leases') AS leases,to_regclass('jarvis.worker_registry') AS workers,to_regclass('jarvis.fenced_resources') AS resources,to_regclass('jarvis.fenced_operations') AS operations,EXISTS(SELECT 1 FROM jarvis.schema_migrations WHERE version='0007_execution_kernel_fencing') AS migration");
+    const r=await pool.query("SELECT to_regclass('jarvis.coordination_leases') AS leases,to_regclass('jarvis.worker_registry') AS workers,to_regclass('jarvis.fenced_resources') AS resources,to_regclass('jarvis.fenced_operations') AS operations,EXISTS(SELECT 1 FROM jarvis.schema_migrations WHERE version='0007_execution_kernel_fencing') AS migration,EXISTS(SELECT 1 FROM jarvis.schema_migrations WHERE version='0008_worker_scope_grants') AS scope_grants");
     const x=r.rows[0]||{};
-    if(!x.leases||!x.workers||!x.resources||!x.operations||x.migration!==true)throw new Error("Execution kernel migration 0007 is not installed");
+    if(!x.leases||!x.workers||!x.resources||!x.operations||x.migration!==true||x.scope_grants!==true)throw new Error("Execution kernel migration 0007 is not installed");
     initialized=true;return {ok:true};
   }
   async function tx(fn){
@@ -127,7 +127,7 @@ function createPostgresExecutionKernel({pool,clock=()=>new Date().toISOString(),
     async listExpiredWorkers({limit=50}={}){
       await init();
       if(!Number.isInteger(limit)||limit<1||limit>500)throw new Error("Invalid recovery candidate limit");
-      const r=await pool.query("SELECT w.worker_id,w.current_task_id,w.lease_resource_key,w.fencing_token,w.heartbeat_at,l.expires_at FROM jarvis.worker_registry w JOIN jarvis.coordination_leases l ON l.resource_key=w.lease_resource_key WHERE w.current_task_id IS NOT NULL AND w.lease_resource_key IS NOT NULL AND w.status IN ('assigned','running','waiting','retrying') AND l.expires_at<=$1::timestamptz ORDER BY l.expires_at ASC,w.worker_id ASC LIMIT $2",[clock(),limit]);
+      const r=await pool.query("SELECT w.worker_id,w.current_task_id,w.lease_resource_key,w.fencing_token,w.heartbeat_at,l.expires_at FROM jarvis.worker_registry w JOIN jarvis.coordination_leases l ON l.resource_key=w.lease_resource_key WHERE w.current_task_id IS NOT NULL AND w.lease_resource_key IS NOT NULL AND w.status IN ('assigned','running','waiting','retrying','stopping') AND l.expires_at<=$1::timestamptz ORDER BY l.expires_at ASC,w.worker_id ASC LIMIT $2",[clock(),limit]);
       return r.rows;
     },
     async recoverExpiredWorkers({limit=50}={}){
@@ -171,9 +171,61 @@ function createPostgresExecutionKernel({pool,clock=()=>new Date().toISOString(),
         return r.rows[0];
       });
     },
+    async grantWorkerScope({workerId,projectId,conversationId,grantedBy}={}){
+      await init();
+      if(![workerId,projectId,conversationId,grantedBy].every(validId))throw new Error("Invalid Worker scope grant");
+      const grantId=crypto.randomUUID(),now=clock();
+      return tx(async c=>{
+        const w=await c.query("SELECT worker_id FROM jarvis.worker_registry WHERE worker_id=$1 FOR UPDATE",[workerId]);
+        if(!w.rows[0])throw new Error("Worker is not registered");
+        const prior=await c.query("SELECT grant_id FROM jarvis.worker_scope_grants WHERE worker_id=$1 AND project_id=$2 AND conversation_id=$3 AND revoked_at IS NULL FOR UPDATE",[workerId,projectId,conversationId]);
+        if(prior.rows[0])return {created:false,grantId:prior.rows[0].grant_id};
+        await c.query("INSERT INTO jarvis.worker_scope_grants(grant_id,worker_id,project_id,conversation_id,granted_by,created_at) VALUES($1,$2,$3,$4,$5,$6)",[grantId,workerId,projectId,conversationId,grantedBy,now]);
+        await c.query("INSERT INTO jarvis.events(aggregate_type,aggregate_id,aggregate_version,event_type,payload,created_at) VALUES('worker_scope_grant',$1,1,'scope_granted',$2::jsonb,$3)",[grantId,JSON.stringify({grantId,workerId,projectId,conversationId,grantedBy,createdAt:now}),now]);
+        return {created:true,grantId};
+      });
+    },
+    async revokeWorkerScope({grantId,revokedBy}={}){
+      await init();
+      if(typeof grantId!=="string"||!/^[0-9a-f-]{36}$/i.test(grantId)||!validId(revokedBy))throw new Error("Invalid Worker scope revocation");
+      const snapshot=await pool.query("SELECT worker_id FROM jarvis.worker_scope_grants WHERE grant_id=$1",[grantId]);
+      if(!snapshot.rows[0])return {revoked:false,reason:"grant not found"};
+      const now=clock();
+      return tx(async c=>{
+        // Match claim lock order: Worker row before Grant row.
+        await c.query("SELECT worker_id FROM jarvis.worker_registry WHERE worker_id=$1 FOR UPDATE",[snapshot.rows[0].worker_id]);
+        const current=await c.query("SELECT grant_id,worker_id,project_id,conversation_id,revoked_at FROM jarvis.worker_scope_grants WHERE grant_id=$1 FOR UPDATE",[grantId]);
+        if(!current.rows[0])return {revoked:false,reason:"grant not found"};
+        if(current.rows[0].revoked_at)return {revoked:false,reason:"already revoked"};
+        const g=current.rows[0];
+        await c.query("UPDATE jarvis.worker_scope_grants SET revoked_at=$1,revoked_by=$2,version=version+1 WHERE grant_id=$3 AND revoked_at IS NULL",[now,revokedBy,grantId]);
+        const stopping=await c.query("UPDATE jarvis.worker_registry SET status=CASE WHEN current_task_id IS NULL THEN status ELSE 'stopping' END,version=version+1,updated_at=$1 WHERE worker_id=$2 AND current_task_id IS NOT NULL RETURNING current_task_id,version",[now,g.worker_id]);
+        if(stopping.rows[0])await appendWorkerEvent(c,g.worker_id,"worker_scope_revoked",{workerId:g.worker_id,grantId,activeTaskId:stopping.rows[0].current_task_id,revokedAt:now,workerVersion:Number(stopping.rows[0].version)});
+        await c.query("INSERT INTO jarvis.events(aggregate_type,aggregate_id,aggregate_version,event_type,payload,created_at) VALUES('worker_scope_grant',$1,2,'scope_revoked',$2::jsonb,$3)",[grantId,JSON.stringify({grantId,workerId:g.worker_id,projectId:g.project_id,conversationId:g.conversation_id,revokedBy,revokedAt:now}),now]);
+        return {revoked:true,grantId,workerId:g.worker_id};
+      });
+    },
+    async listWorkerScopeGrants({limit=200}={}) {
+      await init();
+      if(!Number.isInteger(limit)||limit<1||limit>500)throw new Error("Invalid Worker scope grant limit");
+      const r=await pool.query(
+        "SELECT g.grant_id,g.worker_id,g.project_id,g.conversation_id,g.granted_by,g.created_at AS granted_at,g.revoked_by,g.revoked_at,g.version AS grant_version,"+
+        "w.agent_id,w.department_id,w.status AS worker_status,w.current_task_id,w.heartbeat_at,"+
+        "l.expires_at AS lease_expires_at,l.fencing_token AS lease_fencing_token "+
+        "FROM jarvis.worker_scope_grants g JOIN jarvis.worker_registry w ON w.worker_id=g.worker_id "+
+        "LEFT JOIN jarvis.coordination_leases l ON l.resource_key=w.lease_resource_key "+
+        "ORDER BY g.created_at DESC,g.grant_id LIMIT $1",[limit]);
+      return r.rows;
+    },
+    async listWorkersForScope({projectId,conversationId}={}){
+      await init();
+      if(!validId(projectId)||!validId(conversationId))throw new Error("Invalid Worker listing scope");
+      const r=await pool.query("SELECT w.*,l.expires_at AS lease_expires_at,l.owner_id AS lease_owner,l.fencing_token AS lease_fencing_token,g.grant_id,g.granted_by,g.created_at AS grant_created_at FROM jarvis.worker_scope_grants g JOIN jarvis.worker_registry w ON w.worker_id=g.worker_id LEFT JOIN jarvis.coordination_leases l ON l.resource_key=w.lease_resource_key WHERE g.project_id=$1 AND g.conversation_id=$2 AND g.revoked_at IS NULL ORDER BY w.worker_id",[projectId,conversationId]);
+      return r.rows;
+    },
     async getWorker(workerId){
       await init();
-      const r=await pool.query("SELECT * FROM jarvis.worker_registry WHERE worker_id=$1",[workerId]);
+      const r=await pool.query("SELECT w.*,l.expires_at AS lease_expires_at,l.owner_id AS lease_owner,l.fencing_token AS lease_fencing_token FROM jarvis.worker_registry w LEFT JOIN jarvis.coordination_leases l ON l.resource_key=w.lease_resource_key WHERE w.worker_id=$1",[workerId]);
       return r.rows[0]||null;
     },
     async writeResource(input={}){
@@ -192,6 +244,8 @@ function createPostgresExecutionKernel({pool,clock=()=>new Date().toISOString(),
         const task=await c.query("SELECT payload FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1 ORDER BY aggregate_version DESC LIMIT 1 FOR SHARE",[taskId]);
         const taskState=task.rows[0]?.payload;
         if(!taskState||!["claimed","running","in_progress"].includes(taskState.state||taskState.status)||taskState.leaseOwner!==workerId||Number(taskState.fencingToken)!==taskLease.fencingToken||taskState.projectId!==projectId)throw new Error("Task is not actively owned by this worker");
+        const grant=await c.query("SELECT grant_id FROM jarvis.worker_scope_grants WHERE worker_id=$1 AND project_id=$2 AND conversation_id=$3 AND revoked_at IS NULL FOR SHARE",[workerId,projectId,taskState.ownerConversation]);
+        if(!grant.rows[0])throw new Error("Worker Project/Conversation scope grant is missing or revoked");
         // Serialize both operation-ID and idempotency-key races before reading
         // the journal. Sorted advisory locks avoid lock-order inversion.
         const operationLocks=["fenced-operation:"+operationId,"fenced-idempotency:"+idempotencyKey].sort();

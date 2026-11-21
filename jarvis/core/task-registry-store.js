@@ -8,6 +8,20 @@ const MAX_TITLE=240, MAX_SCOPE=12000, MAX_OWNER=128, MAX_DEDUPE=240;
 function text(value,max,required=true){return typeof value==="string"&&value.length<=max&&(!required||!!value.trim());}
 function clone(value){return JSON.parse(JSON.stringify(value));}
 function hash(value){return crypto.createHash("sha256").update(value).digest("hex");}
+function validateHandoffRoute(history,fromDepartmentId,toDepartmentId,maxHandoffs=8){
+  if(!text(fromDepartmentId,128)||!text(toDepartmentId,128)||fromDepartmentId===toDepartmentId)throw new Error("Handoff must target a different department");
+  if(!Array.isArray(history)||!Number.isInteger(maxHandoffs)||maxHandoffs<1||maxHandoffs>32)throw new Error("Invalid handoff route history");
+  if(history.length>=maxHandoffs)throw new Error("Handoff limit exceeded");
+  const visited=new Set([fromDepartmentId]);
+  for(const row of history){
+    const payload=row?.payload||{};
+    if(typeof payload.fromDepartmentId==="string")visited.add(payload.fromDepartmentId);
+    if(typeof payload.toDepartmentId==="string")visited.add(payload.toDepartmentId);
+  }
+  if(visited.has(toDepartmentId))throw new Error("Handoff department cycle detected");
+  return true;
+}
+
 function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactory=()=>crypto.randomBytes(32).toString("base64url")}={}){
   if(!pool||typeof pool.connect!=="function")throw new Error("PostgreSQL pool is required");
   let initialized=false;
@@ -190,6 +204,8 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         if(!["idle","recovering"].includes(worker.rows[0].status)||worker.rows[0].current_task_id)throw new Error("Worker is not available for task claim");
         const current=await latest(c,taskId);
         if(!current)throw new Error("Task does not exist");
+        const scopeGrant=await c.query("SELECT grant_id FROM jarvis.worker_scope_grants WHERE worker_id=$1 AND project_id=$2 AND conversation_id=$3 AND revoked_at IS NULL FOR SHARE",[workerId,current.task.projectId,current.task.ownerConversation]);
+        if(!scopeGrant.rows[0])throw new Error("Worker has no active grant for this Project and Conversation");
         const now=clock();
         const currentState=canonicalTaskState(current.task.state||current.task.status);
         const reclaimable=currentState==="claimed";
@@ -200,7 +216,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
           if(!Number.isFinite(previousExpiry)||previousExpiry>Date.parse(now))throw new Error("Task lease recovery requires an expired recorded lease");
           await appendCoordinationEvent(c,lease.resourceKey,"lease_reclaimed",{resourceKey:lease.resourceKey,ownerId:workerId,previousOwnerId:current.task.leaseOwner||null,previousFencingToken:current.task.fencingToken,recoveredFromStatus:current.task.status,recoveredAt:now,fencingToken:lease.fencingToken});
         }
-        const next={...current.task,status:"claimed",state:"claimed",ownerAgent:workerId,updatedAt:now,startedAt:current.task.startedAt||now,leaseOwner:lease.ownerId,leaseTokenHash:hash(lease.token),leaseExpiresAt:lease.expiresAt,fencingToken:lease.fencingToken,...(reclaimable?{recoveredFromStatus:current.task.status,recoveredAt:now}:{})};
+        const next={...current.task,status:"claimed",state:"claimed",updatedAt:now,startedAt:current.task.startedAt||now,leaseOwner:lease.ownerId,leaseTokenHash:hash(lease.token),leaseExpiresAt:lease.expiresAt,fencingToken:lease.fencingToken,...(reclaimable?{recoveredFromStatus:current.task.status,recoveredAt:now}:{})};
         await append(c,taskId,reclaimable?"lease_reclaimed":"claimed",next);
         const bound=await c.query("UPDATE jarvis.worker_registry SET current_task_id=$1,lease_resource_key=$2,fencing_token=$3,status='running',heartbeat_at=$4,version=version+1,updated_at=$4 WHERE worker_id=$5 AND status IN ('idle','recovering') AND current_task_id IS NULL RETURNING *",[taskId,lease.resourceKey,lease.fencingToken,now,workerId]);
         if(bound.rowCount!==1)throw new Error("Atomic Worker binding failed");
@@ -229,10 +245,50 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         return {task:clone(next),version:current.version+1,lease};
       });
     },
+    async listTaskEvents({taskIds=[],limit=500}={}){
+      await init();
+      if(!Array.isArray(taskIds)||taskIds.length>200||taskIds.some(id=>!text(id,200))||new Set(taskIds).size!==taskIds.length)throw new Error("Invalid scoped Task IDs");
+      if(!Number.isInteger(limit)||limit<1||limit>2000)throw new Error("Invalid Task event limit");
+      if(taskIds.length===0)return [];
+      const r=await pool.query("SELECT event_id,aggregate_id,aggregate_version,event_type,payload,created_at FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=ANY($1::text[]) ORDER BY event_id DESC LIMIT $2",[taskIds,limit]);
+      return r.rows.map(row=>({eventId:Number(row.event_id),taskId:row.aggregate_id,version:Number(row.aggregate_version),eventType:row.event_type,payload:clone(row.payload),createdAt:row.created_at}));
+    },
+    async recordTaskHandoff({taskId,expectedVersion,lease,fromAgentId,toAgentId,fromDepartmentId,toDepartmentId,idempotencyKey}={}){
+      await init();
+      if(!text(taskId,200)||!Number.isSafeInteger(expectedVersion)||![fromAgentId,toAgentId,fromDepartmentId,toDepartmentId].every(x=>text(x,128))||!text(idempotencyKey,240))throw new Error("Invalid Task handoff request");
+      const keyHash=hash("task-handoff:"+idempotencyKey);
+      return tx(async c=>{
+        await lock(c,"task-handoff:"+keyHash);
+        const prior=await c.query("SELECT aggregate_version,payload FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1 AND idempotency_key=$2 LIMIT 1",[taskId,keyHash]);
+        if(prior.rows[0]){
+          const p=prior.rows[0].payload;
+          if(p.fromAgentId!==fromAgentId||p.toAgentId!==toAgentId||p.fromDepartmentId!==fromDepartmentId||p.toDepartmentId!==toDepartmentId)throw new Error("Handoff idempotency key replayed with different target");
+          return {created:false,task:clone(p),version:Number(prior.rows[0].aggregate_version)};
+        }
+        await assertLease(c,lease);
+        if(lease.resourceKey!=="task:"+taskId)throw new Error("Handoff Task Lease mismatch");
+        const worker=await c.query("SELECT worker_id,agent_id,department_id,current_task_id,lease_resource_key,fencing_token,version FROM jarvis.worker_registry WHERE worker_id=$1 FOR UPDATE",[lease.ownerId]);
+        if(!worker.rows[0]||worker.rows[0].current_task_id!==taskId||worker.rows[0].lease_resource_key!==lease.resourceKey||Number(worker.rows[0].fencing_token)!==lease.fencingToken)throw new Error("Handoff Worker binding is stale");
+        await lock(c,"task:"+taskId);
+        const current=await latest(c,taskId);
+        if(!current||current.version!==expectedVersion)throw new Error("Stale Task version for handoff");
+        const task=current.task;
+        const handoffHistory=await c.query("SELECT payload FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1 AND event_type='agent_handoff' ORDER BY aggregate_version ASC",[taskId]);
+        validateHandoffRoute(handoffHistory.rows,fromDepartmentId,toDepartmentId,8);
+        if((task.state||task.status)!=="running"||task.leaseOwner!==lease.ownerId||Number(task.fencingToken)!==lease.fencingToken||worker.rows[0].agent_id!==fromAgentId||task.ownerAgent!==fromAgentId||worker.rows[0].department_id!==fromDepartmentId||task.departmentId!==fromDepartmentId)throw new Error("Handoff source ownership or fencing validation failed");
+        const now=clock();
+        const next={...task,ownerAgent:toAgentId,departmentId:toDepartmentId,status:"queued",state:"queued",leaseOwner:null,leaseTokenHash:null,leaseExpiresAt:null,fencingToken:0,updatedAt:now,nextAction:"Queued for authorized Agent handoff"};
+        await c.query("UPDATE jarvis.coordination_leases SET expires_at=$1::timestamptz,updated_at=$1::timestamptz WHERE resource_key=$2 AND owner_id=$3 AND fencing_token=$4",[now,lease.resourceKey,lease.ownerId,lease.fencingToken]);
+        const released=await c.query("UPDATE jarvis.worker_registry SET status='idle',current_task_id=NULL,lease_resource_key=NULL,fencing_token=NULL,version=version+1,updated_at=$1 WHERE worker_id=$2 AND version=$3 RETURNING worker_id",[now,lease.ownerId,Number(worker.rows[0].version)]);
+        if(released.rowCount!==1)throw new Error("Handoff Worker release lost concurrency race");
+        await append(c,taskId,"agent_handoff",{...next,fromAgentId,toAgentId,fromDepartmentId,toDepartmentId,fromWorkerId:lease.ownerId,handoffAt:now},keyHash);
+        return {created:true,task:clone(next),version:current.version+1,event:{eventType:"agent_handoff",fromAgentId,toAgentId,fromDepartmentId,toDepartmentId,workerId:lease.ownerId,createdAt:now}};
+      });
+    },
     async transitionTask(input={}){
       await init();
       return tx(c=>transitionInTx(c,input));
     }
   };
 }
-module.exports={createTaskRegistry,TASK_STATES};
+module.exports={createTaskRegistry,TASK_STATES,validateHandoffRoute};

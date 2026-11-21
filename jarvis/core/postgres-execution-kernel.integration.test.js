@@ -13,6 +13,7 @@ async function runWorkerProcess(mode,workerId,taskId="",extraEnv={}){
 }
 const {createTaskRegistry}=require("./task-registry-store");
 const {createPostgresExecutionKernel}=require("./postgres-execution-kernel");
+const {createTaskEventOutbox}=require("./task-event-outbox");
 const url=process.env.JARVIS_EXECUTION_TEST_DATABASE_URL||"";
 const enabled=Boolean(url)&&process.env.JARVIS_ALLOW_TEST_SCHEMA_RESET==="yes";
 
@@ -28,18 +29,50 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
  try{
   await pool.query("DROP SCHEMA IF EXISTS jarvis CASCADE");
   const fs=require("node:fs/promises"),path=require("node:path"),root=path.join(__dirname,"..","migrations");
-  for(const file of ["0001_neon_event_store.sql","0003_append_only_event_ledger.sql","0004_task_registry.sql","0005_task_registry_scoped_dedupe.sql","0006_scheduling_reservation_store.sql","0007_execution_kernel_fencing.sql"])await pool.query(await fs.readFile(path.join(root,file),"utf8"));
+  for(const file of ["0001_neon_event_store.sql","0003_append_only_event_ledger.sql","0004_task_registry.sql","0005_task_registry_scoped_dedupe.sql","0006_scheduling_reservation_store.sql","0007_execution_kernel_fencing.sql","0008_worker_scope_grants.sql","0009_task_event_outbox.sql","0010_task_registry_agent_revocations.sql"])await pool.query(await fs.readFile(path.join(root,file),"utf8"));
   const registry=createTaskRegistry({pool,clock,tokenFactory:()=>require("node:crypto").randomBytes(32).toString("hex")});
   const kernel=createPostgresExecutionKernel({pool,clock,allowedOperationScopes:["resource.update"]});
   await kernel.init();
-  const makeTask=async(id,worker)=>registry.createTask({title:"Synthetic "+id,dedupeKey:"dedupe-"+id,projectId:"one-jarvis",ownerConversation:"test-conversation",ownerAgent:worker,status:"ready"});
+  const registerScopedWorker=async(input)=>{await kernel.registerWorker(input);await kernel.grantWorkerScope({workerId:input.workerId,projectId:"one-jarvis",conversationId:"test-conversation",grantedBy:"integration-test"});};
+  const makeTask=async(id,worker)=>registry.createTask({title:"Synthetic "+id,dedupeKey:"dedupe-"+id,projectId:"one-jarvis",ownerConversation:"test-conversation",ownerAgent:worker==="worker-a"?"agent-a":worker==="worker-b"?"agent-b":worker,departmentId:"engineering",status:"ready"});
   const first=await makeTask("one","worker-a");
-  await kernel.registerWorker({workerId:"worker-a",agentId:"agent-a",departmentId:"engineering",instanceId:"instance-a",processId:"100"});
-  await kernel.registerWorker({workerId:"worker-b",agentId:"agent-b",departmentId:"engineering",instanceId:"instance-b",processId:"200"});
+  const outbox=createTaskEventOutbox({pool});
+  const {createPostgresTaskRegistryRevocationStore}=require("./postgres-task-registry-revocation-store");
+  const revocations=createPostgresTaskRegistryRevocationStore({pool,clock});
+  await revocations.init();
+  assert.equal((await revocations.revoke({agentId:"agent-revoked-live",revokedBy:"integration-test"})).revoked,true);
+  assert.equal(await revocations.isRevoked("agent-revoked-live"),true,"shared token revocation must be visible through PostgreSQL");
+  const initialEvents=await outbox.replay({projectId:"one-jarvis",conversationId:"test-conversation",afterCursor:0,limit:20});
+  assert.ok(initialEvents.some(event=>event.taskId===first.task.taskId&&event.eventType==="created"),"Task creation and durable outbox row commit together");
+  assert.deepEqual(await outbox.replay({projectId:"another-project",conversationId:"test-conversation",afterCursor:0,limit:20}),[],"outbox replay cannot cross Project scope");
+  assert.deepEqual(await outbox.replay({projectId:"one-jarvis",conversationId:"another-conversation",afterCursor:0,limit:20}),[],"outbox replay cannot cross Conversation scope");
+  const replayCursor=initialEvents[initialEvents.length-1].cursor;
+  assert.deepEqual(await outbox.replay({projectId:"one-jarvis",conversationId:"test-conversation",afterCursor:replayCursor,limit:20}),[],"cursor replay does not duplicate acknowledged events");
+  await assert.rejects(outbox.replay({projectId:"one-jarvis",conversationId:"test-conversation",afterCursor:999999,limit:20}),/ahead of the authorized scope/);
+  await assert.rejects(pool.query("UPDATE jarvis.task_event_outbox SET event_type='tampered' WHERE source_event_id=$1",[initialEvents[0].eventId]),/append-only/);
+  await registerScopedWorker({workerId:"worker-a",agentId:"agent-a",departmentId:"engineering",instanceId:"instance-a",processId:"100"});
+  await registerScopedWorker({workerId:"worker-b",agentId:"agent-b",departmentId:"engineering",instanceId:"instance-b",processId:"200"});
+  const scopedWorkers=await kernel.listWorkersForScope({projectId:"one-jarvis",conversationId:"test-conversation"});
+  assert.ok(scopedWorkers.some(row=>row.worker_id==="worker-a"&&row.grant_id),"only explicitly granted Workers are returned in a scope listing");
+  const grantAudit=await kernel.listWorkerScopeGrants({limit:50});
+  const workerAGrant=grantAudit.find(row=>row.worker_id==="worker-a"&&row.project_id==="one-jarvis"&&row.conversation_id==="test-conversation");
+  assert.ok(workerAGrant&&workerAGrant.granted_by==="integration-test"&&workerAGrant.granted_at,"Owner audit listing includes grantor and timestamp");
+  assert.equal(Object.keys(workerAGrant).some(key=>/secret|hash|lease_token|access_token|api_token/i.test(key)),false,"Grant audit listing never returns secrets or token hashes");
+  await kernel.registerWorker({workerId:"worker-ungranted",agentId:"agent-ungranted",departmentId:"engineering",instanceId:"instance-ungranted"});
+  const ungrantedTask=await makeTask("ungranted","worker-ungranted");
+  await assert.rejects(registry.claimTaskForWorker({taskId:ungrantedTask.task.taskId,workerId:"worker-ungranted",leaseMs:5000}),/no active grant/);
+  await registerScopedWorker({workerId:"worker-revoked",agentId:"agent-revoked",departmentId:"engineering",instanceId:"instance-revoked"});
+  const revokedTask=await makeTask("revoked","worker-revoked");
+  const revokedRows=await kernel.listWorkersForScope({projectId:"one-jarvis",conversationId:"test-conversation"});
+  const revokedGrant=revokedRows.find(row=>row.worker_id==="worker-revoked").grant_id;
+  assert.equal((await kernel.revokeWorkerScope({grantId:revokedGrant,revokedBy:"integration-test"})).revoked,true);
+  await assert.rejects(registry.claimTaskForWorker({taskId:revokedTask.task.taskId,workerId:"worker-revoked",leaseMs:5000}),/no active grant/);
+  const revokedAudit=await kernel.listWorkerScopeGrants({limit:50});
+  assert.ok(revokedAudit.some(row=>row.grant_id===revokedGrant&&row.revoked_by==="integration-test"&&row.revoked_at),"Revoked grant remains visible in the audit history");
   // Exercise real OS processes with independent PostgreSQL pools.
   const processTask=await makeTask("ten-process-claim","process-worker-0");
   const processWorkers=Array.from({length:10},(_,i)=>"process-worker-"+i);
-  for(let i=0;i<processWorkers.length;i++)await kernel.registerWorker({workerId:processWorkers[i],agentId:"agent-process-"+i,departmentId:"engineering",instanceId:"process-instance-"+i,processId:String(1000+i)});
+  for(let i=0;i<processWorkers.length;i++)await registerScopedWorker({workerId:processWorkers[i],agentId:"agent-process-"+i,departmentId:"engineering",instanceId:"process-instance-"+i,processId:String(1000+i)});
   const processClaims=await Promise.all(processWorkers.map(workerId=>runWorkerProcess("claim",workerId,processTask.task.taskId)));
   assert.equal(processClaims.filter(x=>x.acquired).length,1,"exactly one of ten independent OS processes may claim the same Task");
   const processResourceLeases=await Promise.all(processWorkers.map(workerId=>runWorkerProcess("resource",workerId)));
@@ -70,8 +103,24 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   assert.equal(rolledBackLease.rowCount,0,"failed Worker binding must roll back the newly acquired Task Lease");
   const rolledBackTask=await registry.getTask(rollbackTask.task.taskId);
   assert.equal(rolledBackTask.task.status,"ready","failed Worker binding must roll back the Task claim event");
+  const rollbackEvents=await outbox.replay({projectId:"one-jarvis",conversationId:"test-conversation",afterCursor:0,limit:500});
+  assert.equal(rollbackEvents.some(event=>event.taskId===rollbackTask.task.taskId&&event.eventType==="claimed"),false,"failed Task transaction must not leave an Outbox claim event");
+  assert.deepEqual(rollbackEvents.map(event=>event.cursor),rollbackEvents.map((_,index)=>index+1),"transaction rollback must not leave gaps in scoped cursors");
   loser=await kernel.transitionWorker({workerId:loserId,expectedVersion:Number(loser.version),status:"recovering"});
   await kernel.transitionWorker({workerId:loserId,expectedVersion:Number(loser.version),status:"idle"});
+  const handoffTask=await makeTask("handoff",loserId);
+  const handoffClaim=await registry.claimTaskForWorker({taskId:handoffTask.task.taskId,workerId:loserId,leaseMs:5000});
+  const handoffRunning=await registry.transitionTask({taskId:handoffTask.task.taskId,expectedVersion:handoffClaim.version,lease:handoffClaim.lease,status:"running"});
+  const handoffInput={taskId:handoffTask.task.taskId,expectedVersion:handoffRunning.version,lease:handoffClaim.lease,fromAgentId:(loserId==="worker-a"?"agent-a":"agent-b"),toAgentId:"agent-target",fromDepartmentId:"engineering",toDepartmentId:"management",idempotencyKey:"handoff-once"};
+  const handoffAttempts=await Promise.all([registry.recordTaskHandoff(handoffInput),registry.recordTaskHandoff(handoffInput)]);
+  assert.equal(handoffAttempts.filter(result=>result.created).length,1,"concurrent duplicate handoffs must commit exactly once");
+  const handoff=handoffAttempts.find(result=>result.created);
+  assert.equal(handoff.task.state,"queued");
+  assert.equal((await kernel.getWorker(loserId)).status,"idle");
+  const handoffEvents=await registry.listTaskEvents({taskIds:[handoffTask.task.taskId],limit:10});
+  assert.equal(handoffEvents.filter(row=>row.eventType==="agent_handoff").length,1);
+  const handoffReplay=await registry.recordTaskHandoff({taskId:handoffTask.task.taskId,expectedVersion:handoffRunning.version,lease:handoffClaim.lease,fromAgentId:(loserId==="worker-a"?"agent-a":"agent-b"),toAgentId:"agent-target",fromDepartmentId:"engineering",toDepartmentId:"management",idempotencyKey:"handoff-once"});
+  assert.equal(handoffReplay.created,false,"handoff idempotency key must prevent duplicate transfer events");
   const resourceAttempts=await Promise.all([
    registry.acquireLease({resourceKey:"resource:race",ownerId:"worker-a",leaseMs:5000}),
    registry.acquireLease({resourceKey:"resource:race",ownerId:"worker-b",leaseMs:5000})

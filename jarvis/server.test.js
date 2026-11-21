@@ -632,8 +632,21 @@ test("JARVIS dashboard is served with restrictive security headers and no server
     assert.match(response.headers.get("content-security-policy"),/default-src 'self'/);
     assert.equal(response.headers.get("x-frame-options"),"DENY");
     assert.match(html,/ONE JARVIS/);
+    assert.match(html,/AGENT NETWORK/);
     assert.match(html,/メモリ内だけ/);
     assert.doesNotMatch(html,new RegExp(token));
+  } finally { await new Promise(resolve=>app.close(resolve)); }
+});
+
+test("legacy dashboard remains available at /legacy",async()=>{
+  const app=createServer({token});
+  await new Promise(resolve=>app.listen(0,"127.0.0.1",resolve));
+  try {
+    const response=await fetch(`http://127.0.0.1:${app.address().port}/legacy`);
+    const html=await response.text();
+    assert.equal(response.status,200);
+    assert.match(html,/JARVISに依頼する/);
+    assert.match(html,/SpeechRecognition/);
   } finally { await new Promise(resolve=>app.close(resolve)); }
 });
 
