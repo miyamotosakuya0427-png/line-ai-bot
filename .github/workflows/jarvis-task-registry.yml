@@ -38,6 +38,10 @@ on:
       - "jarvis/core/postgres-task-registry-rate-limiter.js"
       - "jarvis/migrations/0007_execution_kernel_fencing.sql"
       - "jarvis/migrations/0008_worker_scope_grants.sql"
+      - "jarvis/migrations/0009_task_event_outbox.sql"
+      - "jarvis/core/task-event-outbox.js"
+      - "jarvis/core/postgres-execution-kernel.integration.test.js"
+      - "jarvis/coordination/COMMAND_CENTER_STAGE5.md"
       - ".github/workflows/jarvis-task-registry.yml"
   push:
     branches:
