@@ -12,7 +12,7 @@ async function withServer(executionKernel,run){
   finally{await new Promise(resolve=>server.close(resolve));}
 }
 test("Worker Grant audit listing is Owner-only and strips credential material",async()=>{
-  await withServer({async listWorkerScopeGrants(){return [{grant_id:grantId,worker_id:"worker-a",agent_id:"agent-a",department_id:"engineering",project_id:"project-a",conversation_id:"conversation-a",granted_by:"owner-token",granted_at:"2026-11-21T00:00:00Z",revoked_by:null,revoked_at:null,grant_version:1,worker_status:"idle",current_task_id:null,heartbeat_at:null,lease_expires_at:null,token_hash:"secret-hash",lease_token:"secret"}];}},async grantWorkerScope(){},async revokeWorkerScope(){}},async base=>{
+  await withServer({async listWorkerScopeGrants(){return [{grant_id:grantId,worker_id:"worker-a",agent_id:"agent-a",department_id:"engineering",project_id:"project-a",conversation_id:"conversation-a",granted_by:"owner-token",granted_at:"2026-11-21T00:00:00Z",revoked_by:null,revoked_at:null,grant_version:1,worker_status:"idle",current_task_id:null,heartbeat_at:null,lease_expires_at:null,token_hash:"secret-hash",lease_token:"secret"}];},async grantWorkerScope(){},async revokeWorkerScope(){}},async base=>{
     const denied=await fetch(base+"/v1/admin/worker-scope-grants");
     assert.equal(denied.status,401);
     const response=await fetch(base+"/v1/admin/worker-scope-grants",{headers:{Authorization:"Bearer "+OWNER}});
