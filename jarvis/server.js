@@ -183,14 +183,17 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         if(!req.headers["content-type"]?.toLowerCase().startsWith("application/json"))return json(res,415,{ok:false,error:"Content-Type must be application/json"});
         const parts=url.pathname.split("/"),workerId=parts[4],body=await readJson(req);
         if(parts.length!==6||!/^[A-Za-z0-9._:-]{1,160}$/.test(workerId))return json(res,400,{ok:false,error:"Invalid Worker ID"});
+        if(body.ownerApproval!==true)return json(res,403,{ok:false,error:"Explicit Owner approval is required"});
         try{const result=await executionKernel.grantWorkerScope({workerId,projectId:body.projectId,conversationId:body.conversationId,grantedBy:"owner-token"});return json(res,result.created?201:200,{ok:true,...result});}
         catch{return json(res,400,{ok:false,error:"Worker scope grant rejected"});}
       }
       if(req.method==="POST"&&url.pathname.startsWith("/v1/admin/worker-scope-grants/")&&url.pathname.endsWith("/revoke")){
         if(!isAuthorized(req,ownerToken))return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Unauthorized":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
         if(!executionKernel||typeof executionKernel.revokeWorkerScope!=="function")return json(res,503,{ok:false,error:"Worker scope grants are unavailable"});
-        const parts=url.pathname.split("/"),grantId=parts[4];
+        if(!req.headers["content-type"]?.toLowerCase().startsWith("application/json"))return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+        const parts=url.pathname.split("/"),grantId=parts[4],body=await readJson(req);
         if(parts.length!==6||!/^[0-9a-f-]{36}$/i.test(grantId))return json(res,400,{ok:false,error:"Invalid grant ID"});
+        if(body.ownerApproval!==true)return json(res,403,{ok:false,error:"Explicit Owner approval is required"});
         try{const result=await executionKernel.revokeWorkerScope({grantId,revokedBy:"owner-token"});return json(res,result.revoked?200:404,{ok:result.revoked,...result});}
         catch{return json(res,400,{ok:false,error:"Worker scope revocation rejected"});}
       }
