@@ -244,12 +244,16 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
       if(!text(taskId,200)||!Number.isSafeInteger(expectedVersion)||![fromAgentId,toAgentId,fromDepartmentId,toDepartmentId].every(x=>text(x,128))||!text(idempotencyKey,240))throw new Error("Invalid Task handoff request");
       const keyHash=hash("task-handoff:"+idempotencyKey);
       return tx(async c=>{
+        await lock(c,"task-handoff:"+keyHash);
+        const prior=await c.query("SELECT aggregate_version,payload FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1 AND idempotency_key=$2 LIMIT 1",[taskId,keyHash]);
+        if(prior.rows[0]){
+          const p=prior.rows[0].payload;
+          if(p.fromAgentId!==fromAgentId||p.toAgentId!==toAgentId||p.fromDepartmentId!==fromDepartmentId||p.toDepartmentId!==toDepartmentId)throw new Error("Handoff idempotency key replayed with different target");
+          return {created:false,task:clone(p),version:Number(prior.rows[0].aggregate_version)};
+        }
         await assertLease(c,lease);
         if(lease.resourceKey!=="task:"+taskId)throw new Error("Handoff Task Lease mismatch");
         await lock(c,"task:"+taskId);
-        await lock(c,"task-handoff:"+keyHash);
-        const prior=await c.query("SELECT aggregate_version,payload FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1 AND idempotency_key=$2 LIMIT 1",[taskId,keyHash]);
-        if(prior.rows[0])return {created:false,task:clone(prior.rows[0].payload),version:Number(prior.rows[0].aggregate_version)};
         const current=await latest(c,taskId);
         if(!current||current.version!==expectedVersion)throw new Error("Stale Task version for handoff");
         const task=current.task;
