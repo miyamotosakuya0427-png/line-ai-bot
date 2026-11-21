@@ -8,6 +8,11 @@ function finitePositive(value, field) {
   if (!Number.isFinite(n) || n <= 0) throw new TradingRuleError("Invalid " + field, "INVALID_FILTER");
   return n;
 }
+function nonNegativeBound(value, field, unboundedValue) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) throw new TradingRuleError("Invalid " + field, "INVALID_FILTER");
+  return n === 0 ? unboundedValue : n;
+}
 function normalizeFilters(symbolInfo, provenance = {}) {
   if (!symbolInfo || !Array.isArray(symbolInfo.filters)) throw new TradingRuleError("Missing exchange filters", "UNVERIFIED_FILTERS");
   const byType = Object.fromEntries(symbolInfo.filters.map(f => [f.filterType, f]));
@@ -30,18 +35,18 @@ function normalizeFilters(symbolInfo, provenance = {}) {
     },
     verification: verified ? "VERIFIED" : "UNVERIFIED",
     price: price ? {
-      min: finitePositive(price.minPrice, "PRICE_FILTER.minPrice"),
-      max: finitePositive(price.maxPrice, "PRICE_FILTER.maxPrice"),
+      min: nonNegativeBound(price.minPrice, "PRICE_FILTER.minPrice", 0),
+      max: nonNegativeBound(price.maxPrice, "PRICE_FILTER.maxPrice", Number.POSITIVE_INFINITY),
       tickSize: finitePositive(price.tickSize, "PRICE_FILTER.tickSize")
     } : null,
     lot: lot ? {
-      min: finitePositive(lot.minQty, "LOT_SIZE.minQty"),
-      max: finitePositive(lot.maxQty, "LOT_SIZE.maxQty"),
+      min: nonNegativeBound(lot.minQty, "LOT_SIZE.minQty", 0),
+      max: nonNegativeBound(lot.maxQty, "LOT_SIZE.maxQty", Number.POSITIVE_INFINITY),
       stepSize: finitePositive(lot.stepSize, "LOT_SIZE.stepSize")
     } : null,
     marketLot: marketLot ? {
-      min: finitePositive(marketLot.minQty, "MARKET_LOT_SIZE.minQty"),
-      max: finitePositive(marketLot.maxQty, "MARKET_LOT_SIZE.maxQty"),
+      min: nonNegativeBound(marketLot.minQty, "MARKET_LOT_SIZE.minQty", 0),
+      max: nonNegativeBound(marketLot.maxQty, "MARKET_LOT_SIZE.maxQty", Number.POSITIVE_INFINITY),
       stepSize: finitePositive(marketLot.stepSize, "MARKET_LOT_SIZE.stepSize")
     } : null,
     notional: notional ? {
@@ -72,7 +77,7 @@ function aligned(value, step) {
   const bv = b.digits * (10n ** BigInt(scale - b.scale));
   return bv > 0n && av % bv === 0n;
 }
-function validateOrder({ side, type, price, quantity }, rules) {
+function validateOrder({ side, type, price, quantity, referencePrice }, rules) {
   if (!rules || rules.verification !== "VERIFIED") throw new TradingRuleError("Binance Japan account-specific trading rules are unverified", "UNVERIFIED_JAPAN_RULES");
   if (rules.status !== "TRADING" || !rules.spotAllowed) throw new TradingRuleError("Pair is not active spot trading", "PAIR_NOT_TRADABLE");
   if (!["BUY", "SELL"].includes(side) || !["LIMIT", "MARKET"].includes(type)) throw new TradingRuleError("Unsupported order intent", "UNSUPPORTED_ORDER");
@@ -90,13 +95,13 @@ function validateOrder({ side, type, price, quantity }, rules) {
   } else if (price !== undefined && price !== null) {
     throw new TradingRuleError("Market order must not supply a limit price", "UNSUPPORTED_ORDER");
   }
-  if (type === "LIMIT" || rules.notional.applyToMarket) {
-    const notional = (p || 0) * q;
+  if (type === "LIMIT" || rules.notional.applyToMarket || rules.notional.applyMaxToMarket) {
+    const valuationPrice = p ?? (referencePrice === undefined ? null : finitePositive(referencePrice, "referencePrice"));
+    if (valuationPrice === null) throw new TradingRuleError("Verified reference price is required for market notional validation", "UNVERIFIED_REFERENCE_PRICE");
+    const notional = valuationPrice * q;
     if (notional < rules.notional.min || (rules.notional.max !== null && notional > rules.notional.max)) {
       throw new TradingRuleError("Order violates notional filter", "NOTIONAL_VIOLATION");
     }
-  } else if (type === "MARKET" && !rules.notional.applyToMarket) {
-    // A market order whose notional filter is not applicable is not blocked by that filter.
   }
   return { valid: true, symbol: rules.symbol, side, type, quantity: q, estimatedNotional: p === null ? null : p * q, executionEnabled: false };
 }
