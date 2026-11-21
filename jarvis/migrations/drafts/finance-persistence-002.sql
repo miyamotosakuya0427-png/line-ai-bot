@@ -22,14 +22,19 @@ CREATE TABLE jarvis_finance.portfolios (
  invested_jpy BIGINT NOT NULL DEFAULT 0 CHECK(invested_jpy>=0 AND invested_jpy<=investment_cap_jpy),
  realized_pnl_jpy BIGINT NOT NULL DEFAULT 0, unrealized_pnl_jpy BIGINT NOT NULL DEFAULT 0,
  fees_jpy BIGINT NOT NULL DEFAULT 0 CHECK(fees_jpy>=0),
- halted BOOLEAN NOT NULL DEFAULT false, updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+ halted BOOLEAN NOT NULL DEFAULT false,
+ asset_allocations JSONB NOT NULL DEFAULT '{"BTC":0,"ETH":0,"SOL":0}'::jsonb,
+ stage_spent JSONB NOT NULL DEFAULT '[0,0,0]'::jsonb,
+ updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE TABLE jarvis_finance.trade_proposals (
  id UUID PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE, request_hash TEXT NOT NULL,
+ portfolio_key TEXT NOT NULL REFERENCES jarvis_finance.portfolios(portfolio_key) ON DELETE RESTRICT,
  job_id UUID NULL REFERENCES public.jarvis_jobs(id) ON DELETE SET NULL,
  approval_id UUID NULL REFERENCES public.jarvis_approvals(id) ON DELETE SET NULL,
  symbol TEXT NOT NULL CHECK(symbol IN ('BTCJPY','ETHJPY','SOLJPY')),
  side TEXT NOT NULL CHECK(side IN ('BUY','SELL')), amount_jpy BIGINT NOT NULL CHECK(amount_jpy>0),
+ stage_index SMALLINT NULL CHECK(stage_index BETWEEN 0 AND 2),
  status TEXT NOT NULL CHECK(status IN ('PAPER_ONLY','REJECTED','EXPIRED')),
  rationale JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
