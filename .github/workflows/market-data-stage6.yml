@@ -1,0 +1,49 @@
+name: ONE JARVIS market-data Stage 6
+on:
+  push:
+    branches:
+      - feature/one-jarvis-market-data-quality-stage6
+    paths:
+      - "jarvis/core/market-data-*.js"
+      - "jarvis/core/market-data-*.test.js"
+      - "jarvis/core/market-data-quality.test.js"
+      - "jarvis/core/backtest-data-gate*.js"
+      - "jarvis/core/execution-cost-model*.js"
+      - "jarvis/migrations/**"
+      - ".github/workflows/market-data-stage6.yml"
+  pull_request:
+    branches:
+      - feature/one-jarvis-market-data-quality-stage6
+    paths:
+      - "jarvis/core/market-data-*.js"
+      - "jarvis/core/market-data-*.test.js"
+      - "jarvis/core/market-data-quality.test.js"
+      - "jarvis/core/backtest-data-gate*.js"
+      - "jarvis/core/execution-cost-model*.js"
+      - "jarvis/migrations/**"
+      - ".github/workflows/market-data-stage6.yml"
+permissions:
+  contents: read
+jobs:
+  market-data-stage6:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: jarvis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: jarvis/package-lock.json
+      - name: Install JARVIS dependencies
+        run: npm install --ignore-scripts
+      - name: Syntax checks
+        run: |
+          for file in core/market-data-*.js core/backtest-data-gate.js core/execution-cost-model.js; do
+            node --check "$file"
+          done
+      - name: Stage 6 market-data unit tests
+        run: |
+          node --test core/market-data-gateway-adapter.test.js core/market-data-quality.test.js core/backtest-data-gate.test.js
