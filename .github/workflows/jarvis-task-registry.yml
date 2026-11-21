@@ -17,6 +17,7 @@ on:
       - "jarvis/core/task-registry-store*.test.js"
       - "jarvis/command-center-sse.test.js"
       - "jarvis/task-handoff-route.test.js"
+      - "jarvis/worker-scope-grants-api.test.js"
       - "jarvis/command-center-dashboard.test.js"
       - "jarvis/core/task-registry-api.js"
       - "jarvis/core/task-registry-api.test.js"
