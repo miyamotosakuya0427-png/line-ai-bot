@@ -3,7 +3,7 @@ const crypto=require("node:crypto");
 const ALLOWED_SCOPES=new Set(["tasks:read","tasks:write","tasks:dispatch","tasks:claim","tasks:lease","tasks:transition","resources:lease"]);
 const AGENT_ID=/^[A-Za-z0-9._:-]{1,128}$/;
 const RESOURCE_PREFIX=/^(branch|path|database|migration|deployment|external|media|publication):[A-Za-z0-9._-]{1,128}:$/;
-function createTaskRegistryAuthorizer({config=process.env.JARVIS_TASK_REGISTRY_AGENT_TOKENS,clock=()=>Date.now()}={}){
+function createTaskRegistryAuthorizer({config=process.env.JARVIS_TASK_REGISTRY_AGENT_TOKENS,clock=()=>Date.now(),revocationStore=null}={}){
   if(typeof config!=="string"||!config.trim())throw new Error("Task Registry agent token configuration is required");
   let parsed;
   try{parsed=JSON.parse(config);}catch{throw new Error("Task Registry agent token configuration is invalid");}
@@ -35,6 +35,10 @@ function createTaskRegistryAuthorizer({config=process.env.JARVIS_TASK_REGISTRY_A
       if(agent.revoked||now>=agent.expiresAt)continue;
       const expected=Buffer.from(agent.tokenHash,"hex");
       if(supplied.length===expected.length&&crypto.timingSafeEqual(supplied,expected)){
+        if(revocationStore){
+          if(typeof revocationStore.isRevoked!=="function")throw new Error("Task Registry revocation store is unavailable");
+          if(await revocationStore.isRevoked(agent.agentId))return null;
+        }
         return {agentId:agent.agentId,conversationId:agent.conversationId,scopes:[...agent.scopes],projectIds:[...agent.projectIds],resourcePrefixes:[...agent.resourcePrefixes]};
       }
     }
