@@ -13,6 +13,7 @@ async function runWorkerProcess(mode,workerId,taskId="",extraEnv={}){
 }
 const {createTaskRegistry}=require("./task-registry-store");
 const {createPostgresExecutionKernel}=require("./postgres-execution-kernel");
+const {createTaskEventOutbox}=require("./task-event-outbox");
 const url=process.env.JARVIS_EXECUTION_TEST_DATABASE_URL||"";
 const enabled=Boolean(url)&&process.env.JARVIS_ALLOW_TEST_SCHEMA_RESET==="yes";
 
@@ -28,13 +29,20 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
  try{
   await pool.query("DROP SCHEMA IF EXISTS jarvis CASCADE");
   const fs=require("node:fs/promises"),path=require("node:path"),root=path.join(__dirname,"..","migrations");
-  for(const file of ["0001_neon_event_store.sql","0003_append_only_event_ledger.sql","0004_task_registry.sql","0005_task_registry_scoped_dedupe.sql","0006_scheduling_reservation_store.sql","0007_execution_kernel_fencing.sql","0008_worker_scope_grants.sql"])await pool.query(await fs.readFile(path.join(root,file),"utf8"));
+  for(const file of ["0001_neon_event_store.sql","0003_append_only_event_ledger.sql","0004_task_registry.sql","0005_task_registry_scoped_dedupe.sql","0006_scheduling_reservation_store.sql","0007_execution_kernel_fencing.sql","0008_worker_scope_grants.sql","0009_task_event_outbox.sql"])await pool.query(await fs.readFile(path.join(root,file),"utf8"));
   const registry=createTaskRegistry({pool,clock,tokenFactory:()=>require("node:crypto").randomBytes(32).toString("hex")});
   const kernel=createPostgresExecutionKernel({pool,clock,allowedOperationScopes:["resource.update"]});
   await kernel.init();
   const registerScopedWorker=async(input)=>{await kernel.registerWorker(input);await kernel.grantWorkerScope({workerId:input.workerId,projectId:"one-jarvis",conversationId:"test-conversation",grantedBy:"integration-test"});};
   const makeTask=async(id,worker)=>registry.createTask({title:"Synthetic "+id,dedupeKey:"dedupe-"+id,projectId:"one-jarvis",ownerConversation:"test-conversation",ownerAgent:worker==="worker-a"?"agent-a":worker==="worker-b"?"agent-b":worker,departmentId:"engineering",status:"ready"});
   const first=await makeTask("one","worker-a");
+  const outbox=createTaskEventOutbox({pool});
+  const initialEvents=await outbox.replay({projectId:"one-jarvis",conversationId:"test-conversation",afterCursor:0,limit:20});
+  assert.ok(initialEvents.some(event=>event.taskId===first.task.taskId&&event.eventType==="created"),"Task creation and durable outbox row commit together");
+  assert.deepEqual(await outbox.replay({projectId:"another-project",conversationId:"test-conversation",afterCursor:0,limit:20}),[],"outbox replay cannot cross Project scope");
+  assert.deepEqual(await outbox.replay({projectId:"one-jarvis",conversationId:"another-conversation",afterCursor:0,limit:20}),[],"outbox replay cannot cross Conversation scope");
+  const replayCursor=initialEvents[initialEvents.length-1].cursor;
+  assert.deepEqual(await outbox.replay({projectId:"one-jarvis",conversationId:"test-conversation",afterCursor:replayCursor,limit:20}),[],"cursor replay does not duplicate acknowledged events");
   await registerScopedWorker({workerId:"worker-a",agentId:"agent-a",departmentId:"engineering",instanceId:"instance-a",processId:"100"});
   await registerScopedWorker({workerId:"worker-b",agentId:"agent-b",departmentId:"engineering",instanceId:"instance-b",processId:"200"});
   const scopedWorkers=await kernel.listWorkersForScope({projectId:"one-jarvis",conversationId:"test-conversation"});
