@@ -69,3 +69,17 @@ test("rejects zero-quantity order book levels", async () => {
   const depth = { bids: [["99", "0"]], asks: [["101", "1"]] };
   await assert.rejects(() => getSnapshot("BTCJPY", { fetchImpl: mockFetch({ "/api/v3/depth": depth }) }), e => e.code === "INVALID_MARKET_VALUE");
 });
+
+test("rejects stale latest kline", async () => {
+  const base=mockFetch();
+  const fetchImpl=async (url,init)=>{if(new URL(url).pathname.endsWith("/klines")){const data=await base(url,init);const rows=await data.json();rows[rows.length-1][0]=Date.now()-4*60*60*1000;return new Response(JSON.stringify(rows),{status:200});}return base(url,init);};
+  await assert.rejects(()=>getSnapshot("BTCJPY",{fetchImpl,interval:"1h"}),e=>e.code==="STALE_DATA");
+});
+test("rejects future latest kline", async () => {
+  const base=mockFetch();
+  const fetchImpl=async (url,init)=>{if(new URL(url).pathname.endsWith("/klines")){const data=await base(url,init);const rows=await data.json();rows[rows.length-1][0]=Date.now()+60000;return new Response(JSON.stringify(rows),{status:200});}return base(url,init);};
+  await assert.rejects(()=>getSnapshot("BTCJPY",{fetchImpl,interval:"1h"}),e=>e.code==="STALE_DATA");
+});
+test("rejects unsupported quote assets", async () => {
+  await assert.rejects(()=>getSnapshot("BTCUSDT",{fetchImpl:mockFetch()}),e=>e.code==="UNSUPPORTED_SYMBOL");
+});
