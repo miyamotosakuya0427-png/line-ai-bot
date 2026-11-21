@@ -27,6 +27,7 @@ const { createInfluenceEventStore } = require("./core/influence-event-store");
 const { createCommandCenter } = require("./core/command-center");
 const { createCommandPlanner } = require("./core/command-center-planner");
 const { createTaskRegistryApi } = require("./core/task-registry-api");
+const { createTaskEventOutbox } = require("./core/task-event-outbox");
 const PORT = Number(process.env.PORT || 3000);
 const MAX_BODY_BYTES = 24 * 1024;
 const TOKEN = process.env.JARVIS_API_TOKEN || "";
@@ -104,9 +105,11 @@ dailyForm.addEventListener("submit",async(event)=>{event.preventDefault();if(!id
 </script></body></html>`;
 }
 
-function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||"",sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,approvalStore=null,videoBatchStore=null,paperTradingStore=null,influenceEventStore=null,worker=null,departmentHandlers=null,departmentContextLoader=null,commandPlanner=null,taskRegistry=null,authorizeTaskRegistry=null,taskRegistryRateLimiter=null,executionKernel=null,schedulingRuntime=null,now=()=>new Date()}={}) {
+function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||"",sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,approvalStore=null,videoBatchStore=null,paperTradingStore=null,influenceEventStore=null,worker=null,departmentHandlers=null,departmentContextLoader=null,commandPlanner=null,taskRegistry=null,authorizeTaskRegistry=null,taskRegistryRateLimiter=null,executionKernel=null,taskEventOutbox=null,schedulingRuntime=null,now=()=>new Date()}={}) {
   const taskRegistryApi=createTaskRegistryApi({registry:taskRegistry,authorize:authorizeTaskRegistry,json,readJson,rateLimiter:taskRegistryRateLimiter||undefined});
   let schedulingRuntimeInit=null;
+  let activeSseConnections=0;
+  const sseConnectionsByAgent=new Map();
   async function ensureSchedulingRuntime(){
     if(!schedulingRuntime||!schedulingRuntime.agent||typeof schedulingRuntime.init!=="function")throw Object.assign(new Error("Scheduling runtime is not configured"),{statusCode:503});
     if(!schedulingRuntimeInit)schedulingRuntimeInit=Promise.resolve().then(()=>schedulingRuntime.init()).catch(error=>{schedulingRuntimeInit=null;throw error;});
@@ -190,6 +193,88 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         if(parts.length!==6||!/^[0-9a-f-]{36}$/i.test(grantId))return json(res,400,{ok:false,error:"Invalid grant ID"});
         try{const result=await executionKernel.revokeWorkerScope({grantId,revokedBy:"owner-token"});return json(res,result.revoked?200:404,{ok:result.revoked,...result});}
         catch{return json(res,400,{ok:false,error:"Worker scope revocation rejected"});}
+      }
+      if(req.method==="GET"&&url.pathname==="/v1/command-center/events"){
+        if(!isAuthorized(req,token))return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
+        if(!taskRegistry||typeof authorizeTaskRegistry!=="function"||!taskRegistryRateLimiter||!taskEventOutbox||typeof taskEventOutbox.replay!=="function"||typeof taskEventOutbox.listen!=="function")return json(res,503,{ok:false,error:"Secure event streaming is not configured; use authenticated polling"});
+        const registryHeader=req.headers["x-task-registry-authorization"];
+        if(typeof registryHeader!=="string"||registryHeader.length>600)return json(res,401,{ok:false,error:"Task Registry credential is required"},{"WWW-Authenticate":"Bearer"});
+        const registryReq={...req,headers:{...req.headers,authorization:registryHeader}};
+        let principal;
+        try{principal=await authorizeTaskRegistry(registryReq,{action:"list"});}catch{return json(res,503,{ok:false,error:"Task Registry authorization unavailable"});}
+        if(!principal)return json(res,401,{ok:false,error:"Task Registry unauthorized"},{"WWW-Authenticate":"Bearer"});
+        const projectIds=principal.projectIds===undefined?["one-jarvis"]:principal.projectIds;
+        const conversationId=principal.conversationId||"agent:"+principal.agentId;
+        const projectId=url.searchParams.get("projectId")|| (Array.isArray(projectIds)&&projectIds.length===1?projectIds[0]:"");
+        const requestedConversation=url.searchParams.get("conversationId")||conversationId;
+        if(typeof principal.agentId!=="string"||!Array.isArray(principal.scopes)||!principal.scopes.includes("tasks:read")||
+           !Array.isArray(projectIds)||!projectIds.includes(projectId)||requestedConversation!==conversationId||
+           !/^[A-Za-z0-9._:-]{1,128}$/.test(projectId)||!/^[A-Za-z0-9._:-]{1,128}$/.test(conversationId))return json(res,403,{ok:false,error:"Event stream scope is not authorized"});
+        const rawCursor=req.headers["last-event-id"]||url.searchParams.get("after")||"0";
+        if(typeof rawCursor!=="string"||!/^(0|[1-9][0-9]{0,15})$/.test(rawCursor)||!Number.isSafeInteger(Number(rawCursor)))return json(res,400,{ok:false,error:"Invalid Last-Event-ID cursor"});
+        const cursorStart=Number(rawCursor);
+        const agentKey=principal.agentId;
+        if(activeSseConnections>=20||(sseConnectionsByAgent.get(agentKey)||0)>=3)return json(res,429,{ok:false,error:"Event stream connection limit reached"},{"Retry-After":"15"});
+        let initial;
+        try{initial=await taskEventOutbox.replay({projectId,conversationId,afterCursor:cursorStart,limit:100});}
+        catch{return json(res,503,{ok:false,error:"Durable event replay unavailable; use authenticated polling"});}
+        let closeListener;
+        let closed=false,wakeResolve=null,lastAuthAt=0,lastHeartbeatAt=Date.now(),cursor=cursorStart;
+        const wake=()=>{if(wakeResolve){const resolve=wakeResolve;wakeResolve=null;resolve();}};
+        const waitForWake=()=>new Promise(resolve=>{const timer=setTimeout(()=>{wakeResolve=null;resolve();},5000);wakeResolve=()=>{clearTimeout(timer);wakeResolve=null;resolve();};});
+        const waitForDrain=()=>new Promise(resolve=>{
+          let settled=false;
+          const finish=()=>{if(settled)return;settled=true;clearTimeout(timer);res.removeListener("drain",finish);res.removeListener("close",finish);resolve(!closed&&!res.destroyed);};
+          const timer=setTimeout(()=>{closed=true;finish();},10000);
+          res.once("drain",finish);res.once("close",finish);
+        });
+        const revalidate=async()=>{
+          if(!isAuthorized(req,token))return false;
+          let refreshed;
+          try{refreshed=await authorizeTaskRegistry(registryReq,{action:"list"});}catch{return false;}
+          return !!refreshed&&refreshed.agentId===principal.agentId&&
+            (refreshed.conversationId||"agent:"+refreshed.agentId)===conversationId&&
+            Array.isArray(refreshed.scopes)&&refreshed.scopes.includes("tasks:read")&&
+            (refreshed.projectIds===undefined?["one-jarvis"]:refreshed.projectIds).includes(projectId);
+        };
+        try{
+          closeListener=await taskEventOutbox.listen(wake);
+          activeSseConnections++;sseConnectionsByAgent.set(agentKey,(sseConnectionsByAgent.get(agentKey)||0)+1);
+          res.writeHead(200,{"Content-Type":"text/event-stream; charset=utf-8","Cache-Control":"no-store, no-transform","Connection":"keep-alive","X-Accel-Buffering":"no","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer"});
+          res.write("retry: 5000\n: connected\n\n");
+          const send=async(event)=>{
+            if(event.cursor<=cursor)return true;
+            const p=event.payload||{};
+            const safePayload={};
+            for(const key of ["status","state","ownerAgent","departmentId","leaseOwner","projectId","ownerConversation","title","nextAction","fromAgentId","toAgentId","fromDepartmentId","toDepartmentId","workerId","handoffAt"])if(typeof p[key]==="string"||typeof p[key]==="number")safePayload[key]=String(p[key]).slice(0,240);
+            const frame="id: "+event.cursor+"\nevent: task\ndata: "+JSON.stringify({eventId:event.eventId,taskId:event.taskId,version:event.version,eventType:event.eventType,createdAt:event.createdAt,payload:safePayload})+"\n\n";
+            if(!res.write(frame)&&!(await waitForDrain()))return false;
+            cursor=event.cursor;return true;
+          };
+          const streamBatch=async(batch)=>{
+            for(const event of batch)if(!(await send(event)))return false;
+            return true;
+          };
+          if(!(await streamBatch(initial)))closed=true;
+          while(!closed&&!res.destroyed){
+            if(Date.now()-lastAuthAt>=15000){if(!(await revalidate())){closed=true;break;}lastAuthAt=Date.now();}
+            if(Date.now()-lastHeartbeatAt>=15000){if(!res.write(": heartbeat\n\n")&&!(await waitForDrain())){closed=true;break;}lastHeartbeatAt=Date.now();}
+            let batch;
+            try{batch=await taskEventOutbox.replay({projectId,conversationId,afterCursor:cursor,limit:100});}
+            catch{closed=true;break;}
+            if(batch.length){if(!(await streamBatch(batch))){closed=true;break;}continue;}
+            await waitForWake();
+          }
+        }catch(error){if(!res.headersSent)return json(res,503,{ok:false,error:"Secure event stream unavailable; use authenticated polling"});closed=true;}
+        finally{
+          closed=true;wake();
+          if(closeListener)await closeListener().catch(()=>{});
+          if(activeSseConnections>0)activeSseConnections--;
+          const remaining=(sseConnectionsByAgent.get(agentKey)||1)-1;
+          if(remaining>0)sseConnectionsByAgent.set(agentKey,remaining);else sseConnectionsByAgent.delete(agentKey);
+          if(!res.destroyed)res.end();
+        }
+        return;
       }
       if(req.method==="GET"&&url.pathname==="/v1/command-center/telemetry"){
         if(!isAuthorized(req,token))return json(res,token?401:503,{ok:false,error:token?"Unauthorized":"Authentication is not configured"},token?{"WWW-Authenticate":"Bearer"}:{});
@@ -916,7 +1001,7 @@ if (require.main===module) {
       jobStore=JOB_STORE_PATH?createJobStore({filePath:JOB_STORE_PATH}):null;
       approvalStore=APPROVAL_STORE_PATH?createApprovalStore({filePath:APPROVAL_STORE_PATH}):null;
     }
-    let taskRegistry=null,authorizeTaskRegistry=null,taskRegistryRateLimiter=null,executionKernel=null,executionRecoveryScheduler=null;
+    let taskRegistry=null,authorizeTaskRegistry=null,taskRegistryRateLimiter=null,executionKernel=null,taskEventOutbox=null,executionRecoveryScheduler=null;
     if(process.env.JARVIS_TASK_REGISTRY_API_ENABLED==="true"){
       if(!postgresPool)throw new Error("Task Registry API requires JARVIS_STORAGE_MODE=postgres.");
       const {createTaskRegistry}=require("./core/task-registry-store");
@@ -926,8 +1011,10 @@ if (require.main===module) {
       authorizeTaskRegistry=createTaskRegistryAuthorizer();
       const {createPostgresTaskRegistryRateLimiter}=require("./core/postgres-task-registry-rate-limiter");
       const {createPostgresExecutionKernel}=require("./core/postgres-execution-kernel");
+      const {createTaskEventOutbox}=require("./core/task-event-outbox");
       const {createExecutionRecoveryScheduler}=require("./core/execution-recovery-scheduler");
       executionKernel=createPostgresExecutionKernel({pool:postgresPool});
+      taskEventOutbox=createTaskEventOutbox({pool:postgresPool});
       await executionKernel.init(); // Read-only migration 0007/schema check; never applies a migration.
       taskRegistryRateLimiter=createPostgresTaskRegistryRateLimiter({pool:postgresPool});
       if(process.env.JARVIS_EXECUTION_RECOVERY_ENABLED==="true")executionRecoveryScheduler=createExecutionRecoveryScheduler({executionKernel});
@@ -949,7 +1036,7 @@ if (require.main===module) {
     const contentScheduler=worker&&process.env.JARVIS_CONTENT_AUTOPLAN_ENABLED==="true"?startDailyContentPlanner({store:jobStore}):null;
     const subsidyScheduler=worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"?startDailySubsidyMonitor({store:jobStore}):null;
     const commandPlanner=createCommandPlanner();
-    const server=createServer({jobStore,approvalStore,videoBatchStore,paperTradingStore,influenceEventStore,worker,departmentHandlers,departmentContextLoader,commandPlanner,taskRegistry,authorizeTaskRegistry,taskRegistryRateLimiter,executionKernel}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
+    const server=createServer({jobStore,approvalStore,videoBatchStore,paperTradingStore,influenceEventStore,worker,departmentHandlers,departmentContextLoader,commandPlanner,taskRegistry,authorizeTaskRegistry,taskRegistryRateLimiter,executionKernel,taskEventOutbox}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
     const shutdown=signal=>{ console.log(`Received ${signal}; shutting down.`); if(subsidyScheduler)subsidyScheduler.stop(); if(contentScheduler)contentScheduler.stop(); if(executionRecoveryScheduler)executionRecoveryScheduler.stop(); if(worker)worker.stop(); server.close(async error=>{if(error){console.error("Graceful shutdown failed.");process.exit(1);}if(postgresPool){try{await postgresPool.end();}catch{console.error("Database pool shutdown failed.");}}process.exit(0);}); setTimeout(()=>process.exit(1),10000).unref(); };
     process.on("SIGTERM",()=>shutdown("SIGTERM")); process.on("SIGINT",()=>shutdown("SIGINT"));
     server.listen(PORT,"0.0.0.0",()=>{if(executionRecoveryScheduler)executionRecoveryScheduler.start();console.log(`ONE JARVIS running on port ${PORT}`);});
