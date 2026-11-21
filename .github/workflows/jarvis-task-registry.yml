@@ -25,6 +25,7 @@ on:
       - "jarvis/core/task-registry-auth.test.js"
       - "jarvis/core/postgres-task-registry-revocation-store.js"
       - "jarvis/core/postgres-task-registry-revocation-store.test.js"
+      - "jarvis/task-registry-revocation-api.test.js"
       - "jarvis/migrations/0010_task_registry_agent_revocations.sql"
       - "jarvis/server.js"
       - "jarvis/dashboard.js"
