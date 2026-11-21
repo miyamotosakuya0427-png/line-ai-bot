@@ -31,7 +31,7 @@ test("Dispatcher uses Task Registry as source and orders auth eligibility select
  const {dispatcher,calls}=fixture();
  const result=await dispatcher.dispatchTask({taskId:"task-1",requesterAgentId:"agent-1",conversationId:"conversation-1",projectId:"project-1"});
  assert.equal(result.outcome,"completed");
- assert.deepEqual(calls,["get","authorize","eligible","select-worker","rate-limit","authorize","atomic-claim","transition:running","execute","fenced-write","transition:completed","worker-release","release"]);
+ assert.deepEqual(calls,["get","authorize:agent-1","eligible","select-worker:finance","rate-limit","authorize:agent-1","atomic-claim","transition:running","execute","fenced-write","transition:completed","worker-release","release"]);
 });
 test("Dispatcher fails closed before claim when authorization is denied",async()=>{
  const {dispatcher,calls}=fixture({authorized:false});
