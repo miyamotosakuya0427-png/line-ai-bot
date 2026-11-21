@@ -19,7 +19,7 @@ test("Command Center SSE replays scoped events and excludes sensitive payload fi
   let replayCalls=0,listenerClosed=0;
   const event={cursor:7,eventId:44,taskId:"task-1",version:3,eventType:"claimed",createdAt:"2026-11-21T10:00:00.000Z",payload:{ownerAgent:"agent-a",projectId:"project-a",ownerConversation:"conversation-a",leaseTokenHash:"must-not-leak",secret:"must-not-leak"}};
   const outbox={
-    async replay(args){assert.equal(args.projectId,"project-a");assert.equal(args.conversationId,"conversation-a");assert.equal(args.afterCursor,6);replayCalls++;return replayCalls===1?[{...event,cursor:6},event]:[];},
+    async replay(args){assert.equal(args.projectId,"project-a");assert.equal(args.conversationId,"conversation-a");replayCalls++;assert.equal(args.afterCursor,replayCalls===1?6:7);return replayCalls===1?[{...event,cursor:6},event]:[];},
     async listen(onWake){return async()=>{listenerClosed++;};}
   };
   const {server,url}=await startServer({outbox,authorizeTaskRegistry:async req=>{
