@@ -8,7 +8,6 @@ on:
       - "apps-script/**"
       - ".github/workflows/jarvis-ci.yml"
   pull_request:
-    branches: [one-jarvis-foundation]
     paths:
       - "jarvis/**"
       - "apps-script/**"
@@ -36,6 +35,9 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false
-      - run: npm test
+      - name: Install JARVIS dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund --no-package-lock
+      - name: Run JARVIS tests
+        run: npm test
       - run: node --check < ../apps-script/Code.gs
       - run: node --test ../apps-script/Code.test.js

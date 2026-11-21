@@ -33,4 +33,7 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false
-      - run: npm test
+      - name: Install JARVIS dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund --no-package-lock
+      - name: Run JARVIS tests
+        run: npm test
