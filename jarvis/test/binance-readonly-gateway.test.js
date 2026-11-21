@@ -14,7 +14,7 @@ test("analysis rejects stale snapshots", () => { assert.throws(() => analyze({st
 
 function mockFetch(overrides = {}) {
   const now = Date.now();
-  const rows = Array.from({length:60},(_,i)=>[now-60*60*1000*(60-i), "100", "105", "95", String(100+i), "2", now-60*60*1000*(59-i)+3599999]);
+  const rows = Array.from({length:60},(_,i)=>[now-60*60*1000*(60-i), String(100+i), String(105+i), String(95+i), String(100+i), "2", now-60*60*1000*(59-i)+3599999]);
   return async (url) => {
     const path = new URL(url).pathname;
     let data;
@@ -47,4 +47,9 @@ test("fails closed on malformed price and upstream errors", async () => {
   await assert.rejects(()=>getSnapshot("BTCJPY",{fetchImpl:badPrice}),e=>e.code==="INVALID_MARKET_VALUE");
   const failed=async()=>new Response("unavailable",{status:503});
   await assert.rejects(()=>getSnapshot("BTCJPY",{fetchImpl:failed}),e=>e.code==="UPSTREAM_HTTP_ERROR");
+});
+
+test("rejects a pair not in TRADING spot status", async () => {
+  const halted={symbols:[{symbol:"BTCJPY",status:"HALT",isSpotTradingAllowed:true,filters:[]}]};
+  await assert.rejects(()=>getSnapshot("BTCJPY",{fetchImpl:mockFetch({"/api/v3/exchangeInfo":halted})}),e=>e.code==="PAIR_NOT_TRADABLE");
 });
