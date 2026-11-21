@@ -257,7 +257,7 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
             if(event.cursor<=cursor)return true;
             const p=event.payload||{};
             const safePayload={};
-            for(const key of ["status","state","ownerAgent","departmentId","leaseOwner","projectId","ownerConversation","title","nextAction","fromAgentId","toAgentId","fromDepartmentId","toDepartmentId","workerId","handoffAt"])if(typeof p[key]==="string"||typeof p[key]==="number")safePayload[key]=String(p[key]).slice(0,240);
+            for(const key of ["status","state","ownerAgent","departmentId","leaseOwner","projectId","ownerConversation","fromAgentId","toAgentId","fromDepartmentId","toDepartmentId","workerId","handoffAt"])if(typeof p[key]==="string"||typeof p[key]==="number")safePayload[key]=String(p[key]).slice(0,240);
             const frame="id: "+event.cursor+"\nevent: task\ndata: "+JSON.stringify({eventId:event.eventId,taskId:event.taskId,version:event.version,eventType:event.eventType,createdAt:event.createdAt,payload:safePayload})+"\n\n";
             if(!res.write(frame)&&!(await waitForDrain()))return false;
             cursor=event.cursor;return true;
