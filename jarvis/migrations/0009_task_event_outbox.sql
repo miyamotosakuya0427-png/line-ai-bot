@@ -16,6 +16,7 @@ RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
   p_project text;
   p_conversation text;
+  v_cursor bigint;
 BEGIN
   IF NEW.aggregate_type <> 'task' THEN RETURN NEW; END IF;
   p_project := NEW.payload->>'projectId';
@@ -24,10 +25,16 @@ BEGIN
      OR length(p_conversation) NOT BETWEEN 1 AND 128 THEN
     RETURN NEW;
   END IF;
+  -- Serialize commits within each Project/Conversation so a later cursor cannot
+  -- become visible before an earlier cursor in the same replay scope.
+  PERFORM pg_advisory_xact_lock(hashtextextended(p_project || ':' || p_conversation, 0));
   INSERT INTO jarvis.task_event_outbox(source_event_id,project_id,conversation_id,task_id,event_type,created_at)
   VALUES(NEW.event_id,p_project,p_conversation,NEW.aggregate_id,NEW.event_type,NEW.created_at)
-  ON CONFLICT(source_event_id) DO NOTHING;
-  PERFORM pg_notify('jarvis_task_events', currval(pg_get_serial_sequence('jarvis.task_event_outbox','outbox_id'))::text);
+  ON CONFLICT(source_event_id) DO NOTHING
+  RETURNING outbox_id INTO v_cursor;
+  IF v_cursor IS NOT NULL THEN
+    PERFORM pg_notify('jarvis_task_events', v_cursor::text);
+  END IF;
   RETURN NEW;
 END $$;
 DROP TRIGGER IF EXISTS task_event_outbox_after_insert ON jarvis.events;
