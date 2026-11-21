@@ -27,7 +27,7 @@ function evaluateRisk({ realizedPnlJpy = 0, unrealizedPnlJpy = 0, feesJpy = 0, i
     remainingInvestmentCapacityJpy: Math.max(0, policy.investmentCapJpy - investedJpy),
     reserveJpy: policy.reserveJpy, liveOrdersEnabled: false };
 }
-function validateBuy({ symbol, amountJpy, investedJpy = 0, riskState, stageIndex = 0 }, policy = POLICY) {
+function validateBuy({ symbol, amountJpy, investedJpy = 0, assetInvestedJpy = 0, riskState, stageIndex = 0 }, policy = POLICY) {
   validatePolicy(policy);
   const asset = Object.keys(policy.symbols).find(k => policy.symbols[k] === symbol);
   if (!asset) return { allowed: false, reason: "UNSUPPORTED_SYMBOL" };
@@ -36,6 +36,7 @@ function validateBuy({ symbol, amountJpy, investedJpy = 0, riskState, stageIndex
       amountJpy > policy.stageBudgetsJpy[stageIndex]) return { allowed: false, reason: "STAGE_LIMIT" };
   if (riskState?.halted) return { allowed: false, reason: "LOSS_LIMIT_REACHED" };
   if (investedJpy + amountJpy > policy.investmentCapJpy) return { allowed: false, reason: "INVESTMENT_CAP" };
+  if (!Number.isFinite(assetInvestedJpy) || assetInvestedJpy < 0 || assetInvestedJpy + amountJpy > policy.targetAllocationsJpy[asset]) return { allowed: false, reason: "ASSET_ALLOCATION_CAP" };
   return { allowed: true, reason: null, liveOrdersEnabled: false };
 }
 module.exports = { POLICY, validatePolicy, evaluateRisk, validateBuy };
