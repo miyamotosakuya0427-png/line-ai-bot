@@ -7,6 +7,7 @@ function mockPool({failAt=null,duplicate=false,existingHash=null}={}){
  if(sql.includes("SELECT id, request_hash"))return {rows:duplicate?[{id:"proposal-old",request_hash:existingHash || "different"}]:[]};
  if(sql.includes("SELECT invested_jpy"))return {rows:[{invested_jpy:0,investment_cap_jpy:35000,reserve_jpy:15000,halted:false,asset_allocations:{BTC:0,ETH:0,SOL:0},stage_spent:[0,0,0]}]};
  if(sql.includes("INSERT INTO jarvis_finance.trade_proposals"))return {rows:[{id:"proposal-1"}]};
+ if(sql.includes("INSERT INTO jarvis_finance.portfolios"))return {rows:[{portfolio_key:"paper-portfolio",halted:false}]};
  if(sql.includes("INSERT INTO jarvis_finance.market_snapshots"))return {rows:[{id:7}]};
  if(sql.includes("INSERT INTO jarvis_finance.risk_events"))return {rows:[{id:9}]};
  return {rows:[]};},release(){calls.push({release:true});}};}};
