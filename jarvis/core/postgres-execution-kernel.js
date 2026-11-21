@@ -127,7 +127,7 @@ function createPostgresExecutionKernel({pool,clock=()=>new Date().toISOString(),
     async listExpiredWorkers({limit=50}={}){
       await init();
       if(!Number.isInteger(limit)||limit<1||limit>500)throw new Error("Invalid recovery candidate limit");
-      const r=await pool.query("SELECT w.worker_id,w.current_task_id,w.lease_resource_key,w.fencing_token,w.heartbeat_at,l.expires_at FROM jarvis.worker_registry w JOIN jarvis.coordination_leases l ON l.resource_key=w.lease_resource_key WHERE w.current_task_id IS NOT NULL AND w.lease_resource_key IS NOT NULL AND w.status IN ('assigned','running','waiting','retrying') AND l.expires_at<=$1::timestamptz ORDER BY l.expires_at ASC,w.worker_id ASC LIMIT $2",[clock(),limit]);
+      const r=await pool.query("SELECT w.worker_id,w.current_task_id,w.lease_resource_key,w.fencing_token,w.heartbeat_at,l.expires_at FROM jarvis.worker_registry w JOIN jarvis.coordination_leases l ON l.resource_key=w.lease_resource_key WHERE w.current_task_id IS NOT NULL AND w.lease_resource_key IS NOT NULL AND w.status IN ('assigned','running','waiting','retrying','stopping') AND l.expires_at<=$1::timestamptz ORDER BY l.expires_at ASC,w.worker_id ASC LIMIT $2",[clock(),limit]);
       return r.rows;
     },
     async recoverExpiredWorkers({limit=50}={}){
