@@ -63,7 +63,7 @@ async function getExchangeInfo(fetchImpl = fetch) {
     return [symbol, item ? {
       listed: true,
       status: item.status || item.symbolStatus || "UNKNOWN",
-      spotAllowed: item.isSpotTradingAllowed === true || (Array.isArray(item.permissions) && item.permissions.includes("SPOT")),
+      spotAllowed: item.isSpotTradingAllowed === true,
       filters: Array.isArray(item.filters) ? item.filters : []
     } : { listed: false, status: "NOT_FOUND", spotAllowed: false, filters: [] }];
   }));
@@ -97,6 +97,11 @@ async function getSnapshot(symbol, options = {}) {
   }
   if (!Number.isFinite(Number(ticker.closeTime))) throw new MarketDataError("Invalid ticker timestamp", "INVALID_RESPONSE");
   assertFresh(Number(ticker.closeTime), 120_000, timestamp);
+  for (const [priceLevel, quantityLevel] of [...depth.bids, ...depth.asks]) {
+    if (number(priceLevel, "depthPrice") <= 0 || number(quantityLevel, "depthQuantity") <= 0) {
+      throw new MarketDataError("Order book contains a zero or invalid level", "INVALID_MARKET_VALUE");
+    }
+  }
   if (depth.bids.length && depth.asks.length && Number(depth.bids[0][0]) >= Number(depth.asks[0][0])) {
     throw new MarketDataError("Order book is crossed or malformed", "INVALID_MARKET_VALUE");
   }
