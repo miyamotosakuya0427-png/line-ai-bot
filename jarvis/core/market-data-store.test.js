@@ -100,5 +100,5 @@ test("provider candle revisions become high-severity quarantine findings", async
   assert.equal(result.revised,1);
   assert.equal(result.quality,"quarantined");
   assert.ok(f.calls.some(c=>c.sql.includes("INSERT INTO market_bar_revisions")));
-  assert.ok(f.calls.some(c=>c.sql.includes("CANDLE_REVISION")));
+  assert.ok(f.calls.some(c=>c.params.includes("CANDLE_REVISION")));
 });
