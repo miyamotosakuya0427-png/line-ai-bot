@@ -1,7 +1,7 @@
 "use strict";
 const test=require("node:test");
 const assert=require("node:assert/strict");
-const {validateHandoffRoute}=require("./task-registry-store");
+const {validateHandoffRoute}=require("./core/task-registry-store");
 
 test("handoff route rejects same-department transfer",()=>{
   assert.throws(()=>validateHandoffRoute([],"engineering","engineering"),/different department/);
