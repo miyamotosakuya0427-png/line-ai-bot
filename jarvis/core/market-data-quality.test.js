@@ -1,0 +1,16 @@
+"use strict";
+const test=require("node:test");const assert=require("node:assert/strict");
+const {normalizeTimestamp,normalizeBar}=require("./market-data-normalizer");
+const {auditBars,qualityGate}=require("./market-data-quality");
+const {hashEvent,verifyChain}=require("./market-data-audit");
+const {estimateExecutionCost}=require("./execution-cost-model");
+const source={id:"src1",provider:"fixture",licenseId:"synthetic-test"};
+const base={venue:"BINANCE_JP",symbol:"BTCJPY",interval:"1m",openTime:"2026-11-21T00:00:00+09:00",open:"100",high:"110",low:"90",close:"105",volume:"2"};
+test("normalizes offset timestamps to UTC while retaining raw value and offset",()=>{const t=normalizeTimestamp(base.openTime);assert.equal(t.utc,"2026-11-20T15:00:00.000Z");assert.equal(t.raw,base.openTime);assert.equal(t.timezone,"+09:00");});
+test("rejects missing timezone and off-boundary bars",()=>{assert.throws(()=>normalizeTimestamp("2026-11-21T00:00:00"),/timezone/);assert.throws(()=>normalizeBar({...base,openTime:"2026-11-21T00:00:30Z"},{source}),/boundary/);});
+test("normalizes numeric strings and computes stable SHA-256",()=>{const a=normalizeBar(base,{source,receivedAt:"2026-11-21T00:01:00Z"});const b=normalizeBar({...base,openTime:"2026-11-20T15:00:00Z"},{source,receivedAt:"2026-11-21T00:01:00Z"});assert.equal(a.openTimeUtc,b.openTimeUtc);assert.equal(a.normalizedHash,b.normalizedHash);assert.equal(a.sourceTimezone,"+09:00");});
+test("rejects invalid OHLCV",()=>{assert.throws(()=>normalizeBar({...base,high:"80"},{source}),/OHLC/);assert.throws(()=>normalizeBar({...base,volume:"-1"},{source}),/decimal/);});
+test("detects duplicates and missing candles",()=>{const a=normalizeBar(base,{source,receivedAt:"2026-11-21T00:01:00Z"});const b=normalizeBar({...base,openTime:"2026-11-21T00:02:00Z"},{source,receivedAt:"2026-11-21T00:03:00Z"});const f=auditBars([a,a,b]);assert(f.some(x=>x.code==="DUPLICATE_BAR"));assert(f.some(x=>x.code==="MISSING_BARS"));assert.equal(qualityGate(f).accepted,false);});
+test("detects price and volume anomalies",()=>{const a=normalizeBar(base,{source,receivedAt:"2026-11-21T00:01:00Z"});const b=normalizeBar({...base,openTime:"2026-11-21T00:01:00Z",open:"150",high:"160",low:"140",close:"155",volume:"100"},{source,receivedAt:"2026-11-21T00:02:00Z"});const f=auditBars([a,b]);assert(f.some(x=>x.code==="PRICE_JUMP"));assert(f.some(x=>x.code==="VOLUME_SPIKE"));});
+test("verifies append-only hash chain and detects tampering",()=>{const p1={a:1},h1=hashEvent(p1,null),p2={b:2},h2=hashEvent(p2,h1);assert.equal(verifyChain([{payload:p1,previousHash:null,eventHash:h1},{payload:p2,previousHash:h1,eventHash:h2}]).valid,true);assert.equal(verifyChain([{payload:{a:9},previousHash:null,eventHash:h1}]).valid,false);});
+test("does not treat unknown execution costs as zero",()=>{const r=estimateExecutionCost({side:"buy",quantity:1,referencePrice:100});assert.equal(r.complete,false);assert(r.unknown.length>0);assert.equal(r.zeroCostAssumed,false);});
