@@ -83,12 +83,25 @@ function createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEli
       }
     }
   }
+  async function handoffTask({taskId,requesterAgentId,conversationId,projectId,toAgentId,toDepartmentId,workerId,lease,expectedVersion,idempotencyKey}={}){
+    if(typeof registry.recordTaskHandoff!=="function")throw new Error("Task Registry handoff event support is unavailable");
+    const snapshot=await registry.getTask(taskId,{ownerAgent:requesterAgentId,ownerConversation:conversationId,projectId});
+    if(!snapshot||snapshot.version!==expectedVersion)return {handedOff:false,reason:"TASK_NOT_FOUND_OR_STALE"};
+    const task=snapshot.task;
+    const principal=await authorizeTask({requesterAgentId,conversationId,projectId,task,workerId});
+    if(!principal||principal.allowed!==true||principal.agentId!==requesterAgentId||principal.conversationId!==conversationId||!principal.projectIds?.includes(task.projectId))throw new Error("Task handoff authorization failed");
+    const targetEligible=await isAgentEligible({task:{...task,ownerAgent:toAgentId,departmentId:toDepartmentId},principal,targetAgentId:toAgentId});
+    if(targetEligible!==true||typeof toAgentId!=="string"||typeof toDepartmentId!=="string")throw new Error("Handoff target Agent is not eligible");
+    if(!lease||lease.ownerId!==workerId)throw new Error("Current Worker Lease is required for handoff");
+    const result=await registry.recordTaskHandoff({taskId,expectedVersion,lease,fromAgentId:requesterAgentId,toAgentId,fromDepartmentId:task.departmentId,toDepartmentId,idempotencyKey});
+    return {handedOff:result.created,task:result.task,version:result.version,event:result.event||null};
+  }
   async function dispatchNext({requesterAgentId,conversationId,projectId,limit=20}={}){
     const tasks=await registry.listTasks({status:"queued",limit,ownerAgent:requesterAgentId,ownerConversation:conversationId,projectId});
     const results=[];
     for(const item of tasks)results.push(await dispatchTask({taskId:item.task.taskId,requesterAgentId,conversationId,projectId}));
     return results;
   }
-  return {dispatchTask,dispatchNext};
+  return {dispatchTask,dispatchNext,handoffTask};
 }
 module.exports={createTaskDispatcher};
