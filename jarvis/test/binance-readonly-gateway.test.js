@@ -53,3 +53,19 @@ test("rejects a pair not in TRADING spot status", async () => {
   const halted={symbols:[{symbol:"BTCJPY",status:"HALT",isSpotTradingAllowed:true,filters:[]}]};
   await assert.rejects(()=>getSnapshot("BTCJPY",{fetchImpl:mockFetch({"/api/v3/exchangeInfo":halted})}),e=>e.code==="PAIR_NOT_TRADABLE");
 });
+
+test("builds snapshots for BTCJPY, ETHJPY and SOLJPY", async () => {
+  for (const symbol of ["BTCJPY", "ETHJPY", "SOLJPY"]) {
+    const snapshot = await getSnapshot(symbol, { fetchImpl: mockFetch() });
+    assert.equal(snapshot.symbol, symbol);
+    assert.equal(snapshot.exchangeRules.status, "TRADING");
+  }
+});
+test("rejects explicit spot=false even if permissions includes SPOT", async () => {
+  const info = { symbols: [{ symbol: "BTCJPY", status: "TRADING", isSpotTradingAllowed: false, permissions: ["SPOT"] }] };
+  await assert.rejects(() => getSnapshot("BTCJPY", { fetchImpl: mockFetch({ "/api/v3/exchangeInfo": info }) }), e => e.code === "PAIR_NOT_TRADABLE");
+});
+test("rejects zero-quantity order book levels", async () => {
+  const depth = { bids: [["99", "0"]], asks: [["101", "1"]] };
+  await assert.rejects(() => getSnapshot("BTCJPY", { fetchImpl: mockFetch({ "/api/v3/depth": depth }) }), e => e.code === "INVALID_MARKET_VALUE");
+});
