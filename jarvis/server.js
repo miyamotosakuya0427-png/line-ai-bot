@@ -157,6 +157,23 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
           return json(res,rejected?error.statusCode:503,{ok:false,error:rejected?"Reservation operation rejected":"Reservation service unavailable"});
         }
       }
+      if(req.method==="GET"&&url.pathname==="/v1/admin/worker-scope-grants"){
+        if(!isAuthorized(req,ownerToken))return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Unauthorized":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
+        if(!executionKernel||typeof executionKernel.listWorkerScopeGrants!=="function")return json(res,503,{ok:false,error:"Worker scope grant listing is unavailable"});
+        const limit=Number(url.searchParams.get("limit")||200);
+        if(!Number.isInteger(limit)||limit<1||limit>500)return json(res,400,{ok:false,error:"Invalid grant list limit"});
+        try{
+          const rows=await executionKernel.listWorkerScopeGrants({limit});
+          const grants=rows.map(row=>({
+            grantId:row.grant_id,workerId:row.worker_id,agentId:row.agent_id,departmentId:row.department_id,
+            projectId:row.project_id,conversationId:row.conversation_id,grantedBy:row.granted_by,grantedAt:row.granted_at,
+            revokedBy:row.revoked_by||null,revokedAt:row.revoked_at||null,grantVersion:Number(row.grant_version||0),
+            workerStatus:row.worker_status,currentTaskId:row.current_task_id||null,heartbeatAt:row.heartbeat_at||null,
+            leaseExpiresAt:row.lease_expires_at||null,leaseFencingToken:row.lease_fencing_token===null?null:Number(row.lease_fencing_token)
+          }));
+          return json(res,200,{ok:true,grants});
+        }catch{return json(res,503,{ok:false,error:"Worker scope grant listing failed"});}
+      }
       if(req.method==="POST"&&url.pathname.startsWith("/v1/admin/workers/")&&url.pathname.endsWith("/scope-grants")){
         if(!isAuthorized(req,ownerToken))return json(res,ownerToken?401:503,{ok:false,error:ownerToken?"Unauthorized":"Owner authentication is not configured"},ownerToken?{"WWW-Authenticate":"Bearer"}:{});
         if(!executionKernel||typeof executionKernel.grantWorkerScope!=="function")return json(res,503,{ok:false,error:"Worker scope grants are unavailable"});
