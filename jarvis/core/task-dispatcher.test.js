@@ -51,7 +51,7 @@ test("Dispatcher requires an explicit fenced result writer",()=>{
 
 test("structured Department Handler Handoff is authorized and committed through the common Dispatcher",async()=>{
  const target={workerId:"worker-2",agentId:"agent-2",departmentId:"management"};
- const {dispatcher,calls}=fixture({handlerResult:{handoffRequest:{departmentId:"management",reason:"経営部門の専門確認が必要です",deliverables:["KPI分析"],acceptanceCriteria:["出典付きで確認"],actionClass:"analyze"}},targetWorker:target});
+ const {dispatcher,calls}=fixture({handlerResult:{answer:"経営部門の確認が必要です",handoffRequest:{departmentId:"management",reason:"経営部門の専門確認が必要です",deliverables:["KPI分析"],acceptanceCriteria:["出典付きで確認"],actionClass:"analyze"}},targetWorker:target});
  const result=await dispatcher.dispatchTask({taskId:"task-1",requesterAgentId:"agent-1",conversationId:"conversation-1",projectId:"project-1"});
  assert.equal(result.outcome,"handed_off");
  assert.equal(result.task.ownerAgent,"agent-2");
