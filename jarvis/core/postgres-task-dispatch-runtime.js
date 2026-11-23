@@ -25,8 +25,11 @@ function createPostgresTaskDispatchRuntime({registry,executionKernel,authorizeAg
       (!!row.heartbeat_at&&Number.isFinite(Date.parse(row.heartbeat_at))&&now-Date.parse(row.heartbeat_at)<=120000));
     if(!eligible.length)return null;
     eligible.sort((a,b)=>String(a.worker_id).localeCompare(String(b.worker_id)));
-    const row=eligible[0];
-    return {workerId:row.worker_id,agentId:row.agent_id,departmentId:row.department_id};
+    for(const row of eligible){
+      const targetPrincipal=await authorizeAgent(row.agent_id,{projectId:task.projectId,conversationId:principal.conversationId,requiredScopes:["tasks:dispatch","tasks:claim"]});
+      if(targetPrincipal)return {workerId:row.worker_id,agentId:row.agent_id,departmentId:row.department_id};
+    }
+    return null;
   }
   async function resultWriter({task,version,worker,lease,result}={}){
     const resourceId=("task-result-"+task.taskId).slice(0,160);
