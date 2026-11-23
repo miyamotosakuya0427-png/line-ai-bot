@@ -16,7 +16,7 @@ function fixture(handler,authorizeAgentImpl=null){
   async heartbeatLease({lease}){return lease;},
   async releaseLease({lease}){calls.push("release:"+lease.resourceKey);return true;},
   async acquireLease({resourceKey,ownerId}){calls.push("acquire:"+resourceKey);return{resourceKey,ownerId,token:"opaque-resource-lease",fencingToken:1};},
-  async recordTaskHandoff(input){calls.push("record-handoff");assert.equal(input.handoffRequest.reason,"経営判断の専門確認が必要です");return{created:true,task:{...current.task,ownerAgent:input.toAgentId,departmentId:input.toDepartmentId,status:"queued",state:"queued"},version:current.version+1};}
+  async recordTaskHandoff(input){calls.push("record-handoff");assert.equal(input.handoffRequest.reason,"経営判断の専門確認が必要です");return{created:true,task:{...current.task,ownerAgent:input.toAgentId,departmentId:input.toDepartmentId,resultResourceId:input.resultResourceId,status:"queued",state:"queued"},version:current.version+1};}
  };
  const rows=[
   {worker_id:"worker-a",agent_id:"agent-a",department_id:"construction",status:"idle",current_task_id:null,grant_id:"grant-a",heartbeat_at:new Date().toISOString()},
