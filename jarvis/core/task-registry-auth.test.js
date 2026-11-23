@@ -54,3 +54,24 @@ test("missing or malformed token expiry fails closed at configuration time",()=>
   assert.throws(()=>createTaskRegistryAuthorizer({config:JSON.stringify({"worker-a":{tokenHash:hash(token),scopes:["tasks:read"]}})}),/agent entry is invalid/);
   assert.throws(()=>createTaskRegistryAuthorizer({config:JSON.stringify({"worker-a":{tokenHash:hash(token),expiresAt:"not-a-date",scopes:["tasks:read"]}})}),/agent entry is invalid/);
 });
+
+test("internal target Agent authorization rechecks expiry, project, conversation, scopes and shared revocation",async()=>{
+ const token="target-agent-token".padEnd(48,"x");
+ let revoked=false;
+ const authorize=createTaskRegistryAuthorizer({
+  config:JSON.stringify({"target-agent":{tokenHash:hash(token),expiresAt:"2099-01-01T00:00:00.000Z",conversationId:"conversation-a",projectIds:["project-a"],scopes:["tasks:dispatch","tasks:claim"]}}),
+  revocationStore:{async isRevoked(){return revoked;}}
+ });
+ const principal=await authorize.authorizeAgent("target-agent",{projectId:"project-a",conversationId:"conversation-a",requiredScopes:["tasks:dispatch","tasks:claim"]});
+ assert.equal(principal.agentId,"target-agent");
+ assert.equal(await authorize.authorizeAgent("target-agent",{projectId:"other",conversationId:"conversation-a"}),null);
+ assert.equal(await authorize.authorizeAgent("target-agent",{projectId:"project-a",conversationId:"other"}),null);
+ assert.equal(await authorize.authorizeAgent("target-agent",{projectId:"project-a",conversationId:"conversation-a",requiredScopes:["tasks:write"]}),null);
+ revoked=true;
+ assert.equal(await authorize.authorizeAgent("target-agent",{projectId:"project-a",conversationId:"conversation-a"}),null);
+});
+test("internal target Agent authorization fails closed without the shared revocation store",async()=>{
+ const token="target-agent-token".padEnd(48,"x");
+ const authorize=createTaskRegistryAuthorizer({config:JSON.stringify({"target-agent":{tokenHash:hash(token),expiresAt:"2099-01-01T00:00:00.000Z",conversationId:"conversation-a",scopes:["tasks:dispatch","tasks:claim"]}})});
+ await assert.rejects(()=>authorize.authorizeAgent("target-agent",{projectId:"one-jarvis",conversationId:"conversation-a"}),/Shared Task Registry revocation store/);
+});
