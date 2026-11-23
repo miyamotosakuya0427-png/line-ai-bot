@@ -19,6 +19,7 @@ on:
       - "jarvis/core/market-data-*.js"
       - "jarvis/core/market-data-*.test.js"
       - "jarvis/core/market-data-quality.test.js"
+      - "jarvis/core/paper-trading-jsonl-parity*.js"
       - "jarvis/core/backtest-data-gate*.js"
       - "jarvis/core/execution-cost-model*.js"
       - "jarvis/migrations/**"
