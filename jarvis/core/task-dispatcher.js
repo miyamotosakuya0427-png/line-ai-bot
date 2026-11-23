@@ -69,7 +69,7 @@ function createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEli
       }
       const saved=await resultWriter({task:active.task,version:active.version,worker,lease,principal,result});
       savedResult=saved;
-      if(!saved||saved.fenced!==true)throw new Error("Fenced result writer did not confirm a durable write");
+      if(!saved||saved.fenced!==true||typeof saved.resourceId!=="string"||!saved.resourceId.trim())throw new Error("Fenced result writer did not confirm a durable result reference");
       if(result?.handoffRequest!==undefined){
         const request=result.handoffRequest;
         const targetDepartment=getDepartment(request?.departmentId);
