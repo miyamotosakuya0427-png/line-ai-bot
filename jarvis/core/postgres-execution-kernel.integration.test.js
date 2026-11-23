@@ -115,11 +115,11 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   const handoffTask=await makeTask("handoff",loserId);
   const handoffClaim=await registry.claimTaskForWorker({taskId:handoffTask.task.taskId,workerId:loserId,leaseMs:5000});
   const handoffRunning=await registry.transitionTask({taskId:handoffTask.task.taskId,expectedVersion:handoffClaim.version,lease:handoffClaim.lease,status:"running"});
-  const handoffInput={taskId:handoffTask.task.taskId,expectedVersion:handoffRunning.version,lease:handoffClaim.lease,fromAgentId:(loserId==="worker-a"?"agent-a":"agent-b"),toAgentId:"agent-target",fromDepartmentId:"engineering",toDepartmentId:"management",idempotencyKey:"handoff-once",handoffRequest:{reason:"経営部門の専門確認が必要です",deliverables:["KPI分析"],acceptanceCriteria:["根拠資料を明記"],actionClass:"analyze"}};
+  const handoffInput={taskId:handoffTask.task.taskId,expectedVersion:handoffRunning.version,lease:handoffClaim.lease,fromAgentId:(loserId==="worker-a"?"agent-a":"agent-b"),toAgentId:"agent-target",fromDepartmentId:"engineering",toDepartmentId:"management",idempotencyKey:"handoff-once",resultResourceId:"task-result-handoff",handoffRequest:{reason:"経営部門の専門確認が必要です",deliverables:["KPI分析"],acceptanceCriteria:["根拠資料を明記"],actionClass:"analyze"}};
   const handoffAttempts=await Promise.all([registry.recordTaskHandoff(handoffInput),registry.recordTaskHandoff(handoffInput)]);
   assert.equal(handoffAttempts.filter(result=>result.created).length,1,"concurrent duplicate handoffs must commit exactly once");
   const handoff=handoffAttempts.find(result=>result.created);
-  assert.equal(handoff.task.state,"queued");
+  assert.equal(handoff.task.state,"queued");\n   assert.equal(handoff.task.resultResourceId,"task-result-handoff");
   assert.equal((await kernel.getWorker(loserId)).status,"idle");
   const handoffEvents=await registry.listTaskEvents({taskIds:[handoffTask.task.taskId],limit:10});
   assert.equal(handoffEvents.filter(row=>row.eventType==="agent_handoff").length,1);
