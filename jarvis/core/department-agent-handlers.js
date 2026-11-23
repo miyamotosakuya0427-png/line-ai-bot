@@ -28,7 +28,7 @@ const INSTRUCTIONS=Object.freeze({
  trader:"あなたはONE TRADERトレード研究部の独立AIエージェントです。相場分析、バックテスト、ペーパートレードとリスク監視を行い、実資金注文・レバレッジ変更はしません。"
 });
 function parseStructuredHandoff(answer,sourceDepartmentId){
- const marker=/\\s*<!--\\s*ONE_JARVIS_HANDOFF:\\s*(\\{[\\s\\S]*?\\})\\s*-->\\s*$/;
+ const marker=/\s*<!--\s*ONE_JARVIS_HANDOFF:\s*(\{[\s\S]*?\})\s*-->\s*$/;
  const match=marker.exec(answer);
  if(!match)return {answer,handoffRequest:null};
  let request;try{request=JSON.parse(match[1]);}catch{throw new Error("Department Handler returned malformed structured Handoff JSON");}
