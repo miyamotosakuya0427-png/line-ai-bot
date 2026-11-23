@@ -44,6 +44,6 @@ function createPostgresTaskDispatchRuntime({registry,executionKernel,authorizeAg
       return {fenced:true,summary:"Task result persisted with Worker and Task Lease fencing",version:saved.version,replayed:saved.replayed===true};
     }finally{await registry.releaseLease({lease:resourceLease}).catch(()=>{});}
   }
-  return createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEligible,selectWorker,handlers,resultWriter,rateLimiter,leaseMs,heartbeatMs});
+  const departmentHandlers=Object.fromEntries(Object.entries(handlers).filter(([key,value])=>key.startsWith("department.")&&typeof value==="function").map(([key,value])=>[key.slice("department.".length),value]));\n  if(Object.keys(departmentHandlers).length!==13)throw new Error("All 13 formal Department Handlers must be registered");\n  return createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEligible,selectWorker,handlers:departmentHandlers,resultWriter,rateLimiter,leaseMs,heartbeatMs});
 }
 module.exports={createPostgresTaskDispatchRuntime};
