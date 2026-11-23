@@ -12,7 +12,7 @@ function fixture({authorized=true,handlerResult={success:true},targetWorker=null
   async transitionTask(input){calls.push("transition:"+input.status);return{task:{...task,status:input.status,state:input.status},version:input.expectedVersion+1};},
   async heartbeatLease({lease}){return lease;},
   async releaseLease(){calls.push("release");return true;},
-  async recordTaskHandoff(input){calls.push("record-handoff");assert.equal(input.fromAgentId,"agent-1");assert.equal(input.toAgentId,"agent-2");assert.equal(input.toDepartmentId,"management");assert.ok(input.idempotencyKey);return{created:true,task:{...task,ownerAgent:input.toAgentId,departmentId:input.toDepartmentId,status:"queued",state:"queued"},version:4};}
+  async recordTaskHandoff(input){calls.push("record-handoff");assert.equal(input.fromAgentId,"agent-1");assert.equal(input.toAgentId,"agent-2");assert.equal(input.toDepartmentId,"management");assert.ok(input.idempotencyKey);return{created:true,task:{...task,ownerAgent:input.toAgentId,departmentId:input.toDepartmentId,resultResourceId:input.resultResourceId,status:"queued",state:"queued"},version:4};}
  };
  const executionKernel={async heartbeatWorker(){},async completeWorkerTask(){calls.push("worker-release");}};
  const dispatcher=createTaskDispatcher({
@@ -22,7 +22,7 @@ function fixture({authorized=true,handlerResult={success:true},targetWorker=null
   async selectWorker({task:targetTask}){calls.push("select-worker:"+targetTask.departmentId);return targetTask.departmentId==="construction"?{workerId:"worker-1",agentId:"agent-1",departmentId:"construction"}:targetWorker;},
   handlers:{construction:async(payload)=>{assert.match(payload.request,/依頼：Task 1/);assert.match(payload.request,/対象範囲：Scope 1/);assert.match(payload.request,/条件1/);calls.push("execute");return handlerResult;}},
   rateLimiter:{async consume(agentId,context){calls.push("rate-limit");assert.equal(agentId,"agent-1");assert.equal(context.operation,"dispatch");return{allowed:true};}},
-  async resultWriter(input){calls.push("fenced-write");return resultWriterImpl?resultWriterImpl(input):{fenced:true,summary:"saved"};},
+  async resultWriter(input){calls.push("fenced-write");return resultWriterImpl?resultWriterImpl(input):{fenced:true,resourceId:"task-result-task-1",summary:"saved"};},
   heartbeatMs:1000,leaseMs:5000
  });
  return{dispatcher,calls};
