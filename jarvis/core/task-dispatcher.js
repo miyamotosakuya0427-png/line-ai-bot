@@ -62,7 +62,7 @@ function createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEli
         taskFinalized=true;
         return {dispatched:true,outcome:"outcome_unknown",task:active.task};
       }
-      if(result?.success!==true&&typeof result?.answer!=="string"){
+      if(result?.success===false||(result?.success!==true&&typeof result?.answer!=="string")){
         active=await registry.transitionTask({taskId,expectedVersion:active.version,lease,status:"failed",patch:{nextAction:String(result?.reason||"Worker reported failure").slice(0,500)}});
         taskFinalized=true;
         return {dispatched:true,outcome:"failed",task:active.task};
