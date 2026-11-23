@@ -35,7 +35,7 @@ function createTaskRegistryAuthorizer({config=process.env.JARVIS_TASK_REGISTRY_A
     if(requiredScopes.some(scope=>!agent.scopes.includes(scope)))return null;
     return {agentId:agent.agentId,conversationId:agent.conversationId,scopes:[...agent.scopes],projectIds:[...agent.projectIds],resourcePrefixes:[...agent.resourcePrefixes]};
   }
-  async function authorizeTaskRegistryAgent(req){
+  async function authorizeTaskRegistryAgent(req,{action=null}={}){
     const match=/^Bearer ([A-Za-z0-9._~-]{32,512})$/.exec(req?.headers?.authorization||"");
     if(!match)return null;
     const nowValue=clock();
@@ -46,7 +46,7 @@ function createTaskRegistryAuthorizer({config=process.env.JARVIS_TASK_REGISTRY_A
       if(agent.revoked||now>=agent.expiresAt)continue;
       const expected=Buffer.from(agent.tokenHash,"hex");
       if(supplied.length===expected.length&&crypto.timingSafeEqual(supplied,expected)){
-        if(!revocationStore&&agent.scopes.some(scope=>scope==="tasks:claim"||scope==="tasks:dispatch"))throw new Error("Shared Task Registry revocation store is required for Claim and Dispatch");
+        if(!revocationStore&&!["list","get"].includes(action)&&agent.scopes.some(scope=>scope==="tasks:claim"||scope==="tasks:dispatch"))throw new Error("Shared Task Registry revocation store is required for Claim and Dispatch");
         if(revocationStore){
           if(typeof revocationStore.isRevoked!=="function")throw new Error("Task Registry revocation store is unavailable");
           if(await revocationStore.isRevoked(agent.agentId))return null;
