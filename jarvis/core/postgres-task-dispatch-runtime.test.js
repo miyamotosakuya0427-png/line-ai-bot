@@ -1,7 +1,8 @@
 "use strict";
 const test=require("node:test");
 const assert=require("node:assert/strict");
-const {createPostgresTaskDispatchRuntime}=require("./postgres-task-dispatch-runtime");\nconst {DEPARTMENTS}=require("./department-agents");
+const {createPostgresTaskDispatchRuntime}=require("./postgres-task-dispatch-runtime");
+const {DEPARTMENTS}=require("./department-agents");
 
 function fixture(handler,authorizeAgentImpl=null){
  const calls=[];
