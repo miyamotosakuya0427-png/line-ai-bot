@@ -60,7 +60,7 @@ test("structured Department Handler Handoff is authorized and committed through 
  assert.equal(calls.includes("worker-release"),false,"atomic handoff already releases the source Worker");
 });
 test("structured Handoff with no eligible destination moves Task to waiting and safely releases source Lease",async()=>{
- const {dispatcher,calls}=fixture({handlerResult:{handoffRequest:{departmentId:"management",reason:"経営部門の専門確認が必要です",deliverables:["KPI分析"],acceptanceCriteria:["出典付きで確認"],actionClass:"analyze"}},targetWorker:null});
+ const {dispatcher,calls}=fixture({handlerResult:{answer:"経営部門の確認が必要です",handoffRequest:{departmentId:"management",reason:"経営部門の専門確認が必要です",deliverables:["KPI分析"],acceptanceCriteria:["出典付きで確認"],actionClass:"analyze"}},targetWorker:null});
  const result=await dispatcher.dispatchTask({taskId:"task-1",requesterAgentId:"agent-1",conversationId:"conversation-1",projectId:"project-1"});
  assert.equal(result.outcome,"waiting_for_handoff_target");
  assert.equal(result.task.status,"waiting");
