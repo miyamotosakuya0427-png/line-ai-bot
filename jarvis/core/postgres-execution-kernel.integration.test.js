@@ -42,6 +42,10 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   await revocations.init();
   assert.equal((await revocations.revoke({agentId:"agent-revoked-live",revokedBy:"integration-test"})).revoked,true);
   assert.equal(await revocations.isRevoked("agent-revoked-live"),true,"shared token revocation must be visible through PostgreSQL");
+  await registerScopedWorker({workerId:"worker-revoked-live",agentId:"agent-revoked-live",departmentId:"engineering",instanceId:"instance-revoked-live"});
+  const revokedAgentTask=await registry.createTask({title:"Revoked Agent claim",dedupeKey:"dedupe-revoked-agent-claim",projectId:"one-jarvis",ownerConversation:"test-conversation",ownerAgent:"agent-revoked-live",departmentId:"engineering",status:"ready"});
+  await assert.rejects(registry.claimTaskForWorker({taskId:revokedAgentTask.task.taskId,workerId:"worker-revoked-live",leaseMs:5000}),/Agent credential is revoked/);
+
   const initialEvents=await outbox.replay({projectId:"one-jarvis",conversationId:"test-conversation",afterCursor:0,limit:20});
   assert.ok(initialEvents.some(event=>event.taskId===first.task.taskId&&event.eventType==="created"),"Task creation and durable outbox row commit together");
   assert.deepEqual(await outbox.replay({projectId:"another-project",conversationId:"test-conversation",afterCursor:0,limit:20}),[],"outbox replay cannot cross Project scope");
@@ -122,6 +126,12 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
    assert.deepEqual(handoffEvents.find(row=>row.eventType==="agent_handoff").payload.handoffRequest,{reason:"経営部門の専門確認が必要です",deliverables:["KPI分析"],acceptanceCriteria:["根拠資料を明記"],actionClass:"analyze"},"PostgreSQL persists structured Handoff details in the atomic event");
   const handoffReplay=await registry.recordTaskHandoff({taskId:handoffTask.task.taskId,expectedVersion:handoffRunning.version,lease:handoffClaim.lease,fromAgentId:(loserId==="worker-a"?"agent-a":"agent-b"),toAgentId:"agent-target",fromDepartmentId:"engineering",toDepartmentId:"management",idempotencyKey:"handoff-once",handoffRequest:{reason:"経営部門の専門確認が必要です",deliverables:["KPI分析"],acceptanceCriteria:["根拠資料を明記"],actionClass:"analyze"}});
   assert.equal(handoffReplay.created,false,"handoff idempotency key must prevent duplicate transfer events");
+  const revokedTargetTask=await makeTask("handoff-revoked-target",loserId);
+  const revokedTargetClaim=await registry.claimTaskForWorker({taskId:revokedTargetTask.task.taskId,workerId:loserId,leaseMs:5000});
+  const revokedTargetRunning=await registry.transitionTask({taskId:revokedTargetTask.task.taskId,expectedVersion:revokedTargetClaim.version,lease:revokedTargetClaim.lease,status:"running"});
+  await revocations.revoke({agentId:"agent-target-revoked",revokedBy:"integration-test"});
+  await assert.rejects(registry.recordTaskHandoff({taskId:revokedTargetTask.task.taskId,expectedVersion:revokedTargetRunning.version,lease:revokedTargetClaim.lease,fromAgentId:(loserId==="worker-a"?"agent-a":"agent-b"),toAgentId:"agent-target-revoked",fromDepartmentId:"engineering",toDepartmentId:"management",idempotencyKey:"handoff-revoked-target"}),/Agent credential is revoked/);
+
   const resourceAttempts=await Promise.all([
    registry.acquireLease({resourceKey:"resource:race",ownerId:"worker-a",leaseMs:5000}),
    registry.acquireLease({resourceKey:"resource:race",ownerId:"worker-b",leaseMs:5000})
