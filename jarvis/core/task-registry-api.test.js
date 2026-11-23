@@ -5,7 +5,7 @@ const {createServer}=require("../server");
 const {createTaskRegistryApi,createInMemoryTaskRegistryRateLimiter}=require("./task-registry-api");
 const {canonicalTaskState}=require("./task-state-machine");
 
-function fixture({configured=true,authorize=true,rateLimiter=null}={}){
+function fixture({configured=true,authorize=true,rateLimiter=null,dispatcher=null}={}){
   const tasks=new Map();let sequence=0;
   const registry={
     async listTasks({status=null,limit=50,offset=0,ownerAgent=null,ownerConversation=null,projectId=null}={}){return [...tasks.values()].filter(x=>(status===null||x.task.status===status)&&(ownerAgent===null||x.task.ownerAgent===ownerAgent)&&(ownerConversation===null||x.task.ownerConversation===ownerConversation)&&(projectId===null||x.task.projectId===projectId)).slice(offset,offset+limit);},
@@ -21,7 +21,7 @@ function fixture({configured=true,authorize=true,rateLimiter=null}={}){
   const server=createServer({
     taskRegistry:configured?registry:null,
     authorizeTaskRegistry:authorize?async(req)=>req.headers.authorization==="Bearer agent-a"?{agentId:"agent-a",conversationId:"opaque-conversation",scopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]}:req.headers.authorization==="Bearer agent-b"?{agentId:"agent-b",scopes,projectIds:["other-project"],resourcePrefixes:["path:other-project:"]}:req.headers.authorization==="Bearer agent-a-other"?{agentId:"agent-a",conversationId:"other-conversation",scopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]}:req.headers.authorization==="Bearer agent-a-unbound"?{agentId:"agent-a",scopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]}:null:null,
-    taskRegistryRateLimiter:rateLimiter||createInMemoryTaskRegistryRateLimiter()
+    taskRegistryRateLimiter:rateLimiter||createInMemoryTaskRegistryRateLimiter(),\n    taskDispatcher:dispatcher
   });
   return{server,registry,tasks};
 }
@@ -114,4 +114,26 @@ test("Task Registry API applies a per-agent rate limit and returns Retry-After",
   assert.equal(second.status,429);
   assert.equal(second.headers.get("retry-after"),"23");
   assert.equal((await second.json()).error,"Task Registry rate limit exceeded");
+});
+
+test("authenticated Task Registry dispatch route invokes only the injected common Dispatcher",async t=>{
+ const calls=[];
+ const dispatcher={async dispatchTask(input){calls.push(input);return{dispatched:true,outcome:"completed",task:{taskId:input.taskId,status:"completed"}};}};
+ const {server}=fixture({dispatcher});t.after(()=>new Promise(resolve=>server.close(resolve)));
+ const root=await listen(server);
+ const created=await post(root,"/v1/tasks",{title:"Dispatcher API task",dedupeKey:"dispatch-api-1",status:"ready",departmentId:"construction"});
+ assert.equal(created.status,201);
+ const task=(await created.json()).task;
+ const denied=await post(root,"/v1/tasks/"+task.taskId+"/dispatch",{});
+ assert.equal(denied.status,200);
+ assert.equal((await denied.json()).outcome,"completed");
+ assert.deepEqual(calls,[{taskId:task.taskId,requesterAgentId:"agent-a",conversationId:"opaque-conversation",projectId:"one-jarvis"}]);
+});
+test("Task Registry dispatch route fails closed when the common Dispatcher is absent",async t=>{
+ const {server}=fixture();t.after(()=>new Promise(resolve=>server.close(resolve)));
+ const root=await listen(server);
+ const created=await post(root,"/v1/tasks",{title:"No dispatcher task",dedupeKey:"dispatch-api-2",status:"ready",departmentId:"construction"});
+ const task=(await created.json()).task;
+ const response=await post(root,"/v1/tasks/"+task.taskId+"/dispatch",{});
+ assert.equal(response.status,503);
 });
