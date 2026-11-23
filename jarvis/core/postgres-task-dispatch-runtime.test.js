@@ -3,7 +3,7 @@ const test=require("node:test");
 const assert=require("node:assert/strict");
 const {createPostgresTaskDispatchRuntime}=require("./postgres-task-dispatch-runtime");
 
-function fixture(handler){
+function fixture(handler,authorizeAgentImpl=null){
  const calls=[];
  const task={taskId:"task-1",status:"queued",state:"queued",ownerAgent:"agent-a",ownerConversation:"conversation-a",projectId:"project-a",departmentId:"construction"};
  let current={task,version:1};
@@ -27,7 +27,7 @@ function fixture(handler){
   async completeWorkerTask(){calls.push("complete-worker");},
   async writeResource(input){calls.push("fenced-write");assert.equal(input.operationScope,"task.result.persist");assert.equal(input.taskLease.ownerId,"worker-a");return{version:1,replayed:false};}
  };
- const authorizeAgent=async(agentId,scope)=>{calls.push("authorize:"+agentId);return{agentId,conversationId:"conversation-a",scopes:["tasks:dispatch","tasks:claim"],projectIds:["project-a"]};};
+ const authorizeAgent=authorizeAgentImpl||async(agentId,scope)=>{calls.push("authorize:"+agentId);return{agentId,conversationId:"conversation-a",scopes:["tasks:dispatch","tasks:claim"],projectIds:["project-a"]};};
  const runtime=createPostgresTaskDispatchRuntime({
   registry,executionKernel,authorizeAgent,handlers:{construction:handler},
   rateLimiter:{async consume(){return{allowed:true};}},leaseMs:5000,heartbeatMs:1000
@@ -54,8 +54,8 @@ test("PostgreSQL dispatch runtime verifies the target Agent and persists structu
  assert.equal(calls.includes("complete-worker"),false);
 });
 
-test("PostgreSQL dispatch runtime fails closed when shared revocation-backed target authorization is unavailable",async()=>{
- const {runtime}=fixture(async()=>({answer:"no handoff"}));
- const original=runtime.dispatchTask;
- assert.equal(typeof original,"function");
+test("PostgreSQL dispatch runtime fails closed when live Agent authorization is unavailable",async()=>{
+ const {runtime,calls}=fixture(async()=>({answer:"must not run"}),async()=>null);
+ await assert.rejects(()=>runtime.dispatchTask({taskId:"task-1",requesterAgentId:"agent-a",conversationId:"conversation-a",projectId:"project-a"}),/authorization failed/);
+ assert.equal(calls.includes("claim-task"),false);
 });
