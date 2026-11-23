@@ -119,7 +119,8 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   const handoffAttempts=await Promise.all([registry.recordTaskHandoff(handoffInput),registry.recordTaskHandoff(handoffInput)]);
   assert.equal(handoffAttempts.filter(result=>result.created).length,1,"concurrent duplicate handoffs must commit exactly once");
   const handoff=handoffAttempts.find(result=>result.created);
-  assert.equal(handoff.task.state,"queued");\n   assert.equal(handoff.task.resultResourceId,"task-result-handoff");
+  assert.equal(handoff.task.state,"queued");
+   assert.equal(handoff.task.resultResourceId,"task-result-handoff");
   assert.equal((await kernel.getWorker(loserId)).status,"idle");
   const handoffEvents=await registry.listTaskEvents({taskIds:[handoffTask.task.taskId],limit:10});
   assert.equal(handoffEvents.filter(row=>row.eventType==="agent_handoff").length,1);
