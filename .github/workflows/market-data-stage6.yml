@@ -27,6 +27,22 @@ permissions:
 jobs:
   market-data-stage6:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: one_jarvis_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d one_jarvis_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      MARKET_DATA_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/one_jarvis_test
     defaults:
       run:
         working-directory: jarvis
@@ -35,13 +51,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Install JARVIS dependencies
-        run: npm install --ignore-scripts
+      - name: Install JARVIS and isolated PostgreSQL test dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund --no-package-lock pg@8
+      - name: Verify isolated PostgreSQL test target
+        run: |
+          test -n "$MARKET_DATA_TEST_DATABASE_URL"
+          node -e "const u=new URL(process.env.MARKET_DATA_TEST_DATABASE_URL); if(!['localhost','127.0.0.1','::1'].includes(u.hostname)) process.exit(1)"
       - name: Syntax checks
         run: |
           for file in core/market-data-*.js core/backtest-data-gate.js core/execution-cost-model.js; do
             node --check "$file"
           done
-      - name: Stage 6 market-data unit tests
+      - name: Stage 6 market-data unit and PostgreSQL integration tests
         run: |
-          node --test core/market-data-gateway-adapter.test.js core/market-data-store.test.js core/market-data-migration.test.js core/market-data-quality.test.js core/backtest-data-gate.test.js
+          node --test core/market-data-gateway-adapter.test.js core/market-data-store.test.js core/market-data-migration.test.js core/market-data-quality.test.js core/backtest-data-gate.test.js core/market-data-store.postgres.test.js
