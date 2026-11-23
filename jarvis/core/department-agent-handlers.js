@@ -35,7 +35,7 @@ function parseStructuredHandoff(answer,sourceDepartmentId){
  const target=getDepartment(request.departmentId);
  const validText=(value,min,max)=>typeof value==="string"&&value.trim().length>=min&&value.length<=max;
  const validList=value=>Array.isArray(value)&&value.length>=1&&value.length<=20&&value.every(item=>validText(item,1,500));
- const safeActions=new Set(["read","analyze","draft","notify","internal_task"]);
+ const safeActions=new Set(["read","analyze","draft","internal_task"]);
  if(!target||target.id===sourceDepartmentId||!validText(request.reason,10,500)||!validList(request.deliverables)||!validList(request.acceptanceCriteria)||!safeActions.has(request.actionClass))throw new Error("Department Handler structured Handoff failed validation");
  return {answer:answer.slice(0,match.index).trimEnd(),handoffRequest:{departmentId:target.id,reason:request.reason.trim(),deliverables:request.deliverables.map(x=>x.trim()),acceptanceCriteria:request.acceptanceCriteria.map(x=>x.trim()),actionClass:request.actionClass}};
 }
