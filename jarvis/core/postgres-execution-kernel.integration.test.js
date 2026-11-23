@@ -30,11 +30,11 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   await pool.query("DROP SCHEMA IF EXISTS jarvis CASCADE");
   const fs=require("node:fs/promises"),path=require("node:path"),root=path.join(__dirname,"..","migrations");
   for(const file of ["0001_neon_event_store.sql","0003_append_only_event_ledger.sql","0004_task_registry.sql","0005_task_registry_scoped_dedupe.sql","0006_scheduling_reservation_store.sql","0007_execution_kernel_fencing.sql","0008_worker_scope_grants.sql","0009_task_event_outbox.sql","0010_task_registry_agent_revocations.sql"])await pool.query(await fs.readFile(path.join(root,file),"utf8"));
-  const registry=createTaskRegistry({pool,clock,tokenFactory:()=>require("node:crypto").randomBytes(32).toString("hex")});
+  const registry=createTaskRegistry({pool,clock,tokenFactory:()=>require("node:crypto").randomBytes(32).toString("hex"),requireAgentRevocation:true});
   const kernel=createPostgresExecutionKernel({pool,clock,allowedOperationScopes:["resource.update"]});
   await kernel.init();
   const registerScopedWorker=async(input)=>{await kernel.registerWorker(input);await kernel.grantWorkerScope({workerId:input.workerId,projectId:"one-jarvis",conversationId:"test-conversation",grantedBy:"integration-test"});};
-  const makeTask=async(id,worker)=>registry.createTask({title:"Synthetic "+id,dedupeKey:"dedupe-"+id,projectId:"one-jarvis",ownerConversation:"test-conversation",ownerAgent:worker==="worker-a"?"agent-a":worker==="worker-b"?"agent-b":worker,departmentId:"engineering",status:"ready"});
+  const makeTask=async(id,worker)=>registry.createTask({title:"Synthetic "+id,dedupeKey:"dedupe-"+id,projectId:"one-jarvis",ownerConversation:"test-conversation",ownerAgent:worker==="worker-a"?"agent-a":worker==="worker-b"?"agent-b":worker==="worker-ungranted"?"agent-ungranted":worker==="worker-revoked"?"agent-revoked":worker.startsWith("process-worker-")?"agent-process-"+worker.slice("process-worker-".length):worker,departmentId:"engineering",status:"ready"});
   const first=await makeTask("one","worker-a");
   const outbox=createTaskEventOutbox({pool});
   const {createPostgresTaskRegistryRevocationStore}=require("./postgres-task-registry-revocation-store");
