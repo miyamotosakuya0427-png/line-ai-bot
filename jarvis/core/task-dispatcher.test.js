@@ -19,7 +19,7 @@ function fixture({authorized=true,handlerResult={success:true},targetWorker=null
   registry,executionKernel,
   async authorizeTask({requesterAgentId="agent-1"}){calls.push("authorize:"+requesterAgentId);return authorized?{allowed:true,agentId:requesterAgentId,conversationId:"conversation-1",projectIds:["project-1"]}:null;},
   async isAgentEligible(){calls.push("eligible");return true;},
-  async selectWorker({task:targetTask}){calls.push("select-worker:"+targetTask.departmentId);return targetTask.departmentId==="construction"?{workerId:"worker-1",agentId:"agent-1",departmentId:"finance"}:targetWorker;},
+  async selectWorker({task:targetTask}){calls.push("select-worker:"+targetTask.departmentId);return targetTask.departmentId==="construction"?{workerId:"worker-1",agentId:"agent-1",departmentId:"construction"}:targetWorker;},
   handlers:{construction:async()=>{calls.push("execute");return handlerResult;}},
   rateLimiter:{async consume(agentId,context){calls.push("rate-limit");assert.equal(agentId,"agent-1");assert.equal(context.operation,"dispatch");return{allowed:true};}},
   async resultWriter(){calls.push("fenced-write");return{fenced:true,summary:"saved"};},
