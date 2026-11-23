@@ -21,7 +21,8 @@ function fixture({configured=true,authorize=true,rateLimiter=null,dispatcher=nul
   const server=createServer({
     taskRegistry:configured?registry:null,
     authorizeTaskRegistry:authorize?async(req)=>req.headers.authorization==="Bearer agent-a"?{agentId:"agent-a",conversationId:"opaque-conversation",scopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]}:req.headers.authorization==="Bearer agent-b"?{agentId:"agent-b",scopes,projectIds:["other-project"],resourcePrefixes:["path:other-project:"]}:req.headers.authorization==="Bearer agent-a-other"?{agentId:"agent-a",conversationId:"other-conversation",scopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]}:req.headers.authorization==="Bearer agent-a-unbound"?{agentId:"agent-a",scopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]}:null:null,
-    taskRegistryRateLimiter:rateLimiter||createInMemoryTaskRegistryRateLimiter(),\n    taskDispatcher:dispatcher
+    taskRegistryRateLimiter:rateLimiter||createInMemoryTaskRegistryRateLimiter(),
+    taskDispatcher:dispatcher
   });
   return{server,registry,tasks};
 }
