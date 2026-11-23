@@ -42,7 +42,7 @@ function createPostgresTaskDispatchRuntime({registry,executionKernel,authorizeAg
           handoffRequest:result.handoffRequest||null,model:typeof result.model==="string"?result.model.slice(0,120):null},
         expectedVersion:0
       });
-      return {fenced:true,summary:"Task result persisted with Worker and Task Lease fencing",version:saved.version,replayed:saved.replayed===true};
+      return {fenced:true,resourceId,summary:"Task result persisted with Worker and Task Lease fencing",version:saved.version,replayed:saved.replayed===true};
     }finally{await registry.releaseLease({lease:resourceLease}).catch(()=>{});}
   }
   const departmentHandlers=Object.fromEntries(Object.entries(handlers).filter(([key,value])=>key.startsWith("department.")&&typeof value==="function").map(([key,value])=>[key.slice("department.".length),value]));
