@@ -46,6 +46,7 @@ function createTaskRegistryAuthorizer({config=process.env.JARVIS_TASK_REGISTRY_A
       if(agent.revoked||now>=agent.expiresAt)continue;
       const expected=Buffer.from(agent.tokenHash,"hex");
       if(supplied.length===expected.length&&crypto.timingSafeEqual(supplied,expected)){
+        if(!revocationStore&&agent.scopes.some(scope=>scope==="tasks:claim"||scope==="tasks:dispatch"))throw new Error("Shared Task Registry revocation store is required for Claim and Dispatch");
         if(revocationStore){
           if(typeof revocationStore.isRevoked!=="function")throw new Error("Task Registry revocation store is unavailable");
           if(await revocationStore.isRevoked(agent.agentId))return null;
