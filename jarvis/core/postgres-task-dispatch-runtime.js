@@ -16,7 +16,7 @@ function createPostgresTaskDispatchRuntime({registry,executionKernel,authorizeAg
       principal.scopes.includes("tasks:dispatch")&&principal.scopes.includes("tasks:claim")&&
       principal.projectIds.includes(task.projectId)&&task.ownerConversation===principal.conversationId;
   }
-  async function selectWorker({task,principal,targetAgentId=null}={}){
+  async function selectWorker({task,principal,targetAgentId=null,sourceWorker=null}={}){
     const agentId=targetAgentId||(sourceWorker?null:principal?.agentId);
     const rows=await executionKernel.listWorkersForScope({projectId:task.projectId,conversationId:principal.conversationId});
     const now=Date.now();
