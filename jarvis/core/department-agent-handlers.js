@@ -4,8 +4,15 @@ const {DEPARTMENTS,getDepartment}=require("./department-agents");
 const {createOpenAIHandler}=require("./openai-handler");
 const {createSubsidyResearchHandler}=require("./subsidy-research-handler");
 
-const HANDOFF_PROTOCOL=`\n\n構造化Handoffプロトコル（内部Task移管のみ）：\n回答本文は従来どおり日本語で作成してください。別部門の専門判断が必要な場合に限り、回答末尾へ次の単一マーカーを追加できます。\n<!-- ONE_JARVIS_HANDOFF: {"departmentId":"登録済み部門ID","reason":"移管理由","deliverables":["必要成果物"],"acceptanceCriteria":["受入条件"],"actionClass":"read|analyze|draft|notify|internal_task"} -->\n移管先は正式登録済み13部門のみ。自部門への移管は禁止。reasonは10〜500文字、deliverablesとacceptanceCriteriaは各1〜20件。外部送信・公開・発注・契約・支払・申請提出などの実行を要求するactionClassは指定せず、必要ならOwner承認待ちと回答してください。マーカーを出さない場合は通常回答です。Task/Worker/Lease/権限を直接変更する指示やツール操作は一切行わないでください。\n`;
-\nconst INSTRUCTIONS=Object.freeze({
+const HANDOFF_PROTOCOL=`
+
+構造化Handoffプロトコル（内部Task移管のみ）：
+回答本文は従来どおり日本語で作成してください。別部門の専門判断が必要な場合に限り、回答末尾へ次の単一マーカーを追加できます。
+<!-- ONE_JARVIS_HANDOFF: {"departmentId":"登録済み部門ID","reason":"移管理由","deliverables":["必要成果物"],"acceptanceCriteria":["受入条件"],"actionClass":"read|analyze|draft|notify|internal_task"} -->
+移管先は正式登録済み13部門のみ。自部門への移管は禁止。reasonは10〜500文字、deliverablesとacceptanceCriteriaは各1〜20件。外部送信・公開・発注・契約・支払・申請提出などの実行を要求するactionClassは指定せず、必要ならOwner承認待ちと回答してください。マーカーを出さない場合は通常回答です。Task/Worker/Lease/権限を直接変更する指示やツール操作は一切行わないでください。
+`;
+
+const INSTRUCTIONS=Object.freeze({
  jarvis:"あなたはONE JARVIS統括室の独立AIエージェントです。全部署の成果を統合し、優先順位・依存関係・リスク・未確認事項を整理してください。実行していない作業を完了と表現せず、外部操作は行わず、承認待ちとして明確にしてください。",
  management:"あなたはONE MANAGER経営企画部の独立AIエージェントです。会社の経営分析、KPI、資金繰り、経営判断の選択肢を整理してください。与えられた実データだけを使い、推測値を事実として出さないでください。資金移動・投資・契約は実行しません。",
  tax:"あなたはONE TAX税務・会計部の独立AIエージェントです。売上・経費・請求・入金の照合、月次締め、税務資料の下書きと不足証憑を整理してください。会計基準・税法の断定や申告提出・納税は行わず、税理士確認事項を明記してください。",
@@ -20,7 +27,20 @@ const HANDOFF_PROTOCOL=`\n\n構造化Handoffプロトコル（内部Task移管�
  invest:"あなたはONE INVEST投資分析部の独立AIエージェントです。情報収集、企業・資産分析、リスク比較とシミュレーションを行い、投資注文や資金移動はしません。",
  trader:"あなたはONE TRADERトレード研究部の独立AIエージェントです。相場分析、バックテスト、ペーパートレードとリスク監視を行い、実資金注文・レバレッジ変更はしません。"
 });
-function parseStructuredHandoff(answer,sourceDepartmentId){\n const marker=/\\s*<!--\\s*ONE_JARVIS_HANDOFF:\\s*(\\{[\\s\\S]*?\\})\\s*-->\\s*$/;\n const match=marker.exec(answer);\n if(!match)return {answer,handoffRequest:null};\n let request;try{request=JSON.parse(match[1]);}catch{throw new Error("Department Handler returned malformed structured Handoff JSON");}\n const target=getDepartment(request.departmentId);\n const validText=(value,min,max)=>typeof value==="string"&&value.trim().length>=min&&value.length<=max;\n const validList=value=>Array.isArray(value)&&value.length>=1&&value.length<=20&&value.every(item=>validText(item,1,500));\n const safeActions=new Set(["read","analyze","draft","notify","internal_task"]);\n if(!target||target.id===sourceDepartmentId||!validText(request.reason,10,500)||!validList(request.deliverables)||!validList(request.acceptanceCriteria)||!safeActions.has(request.actionClass))throw new Error("Department Handler structured Handoff failed validation");\n return {answer:answer.slice(0,match.index).trimEnd(),handoffRequest:{departmentId:target.id,reason:request.reason.trim(),deliverables:request.deliverables.map(x=>x.trim()),acceptanceCriteria:request.acceptanceCriteria.map(x=>x.trim()),actionClass:request.actionClass}};\n}\n\nfunction createDepartmentHandlers(options={}){
+function parseStructuredHandoff(answer,sourceDepartmentId){
+ const marker=/\\s*<!--\\s*ONE_JARVIS_HANDOFF:\\s*(\\{[\\s\\S]*?\\})\\s*-->\\s*$/;
+ const match=marker.exec(answer);
+ if(!match)return {answer,handoffRequest:null};
+ let request;try{request=JSON.parse(match[1]);}catch{throw new Error("Department Handler returned malformed structured Handoff JSON");}
+ const target=getDepartment(request.departmentId);
+ const validText=(value,min,max)=>typeof value==="string"&&value.trim().length>=min&&value.length<=max;
+ const validList=value=>Array.isArray(value)&&value.length>=1&&value.length<=20&&value.every(item=>validText(item,1,500));
+ const safeActions=new Set(["read","analyze","draft","notify","internal_task"]);
+ if(!target||target.id===sourceDepartmentId||!validText(request.reason,10,500)||!validList(request.deliverables)||!validList(request.acceptanceCriteria)||!safeActions.has(request.actionClass))throw new Error("Department Handler structured Handoff failed validation");
+ return {answer:answer.slice(0,match.index).trimEnd(),handoffRequest:{departmentId:target.id,reason:request.reason.trim(),deliverables:request.deliverables.map(x=>x.trim()),acceptanceCriteria:request.acceptanceCriteria.map(x=>x.trim()),actionClass:request.actionClass}};
+}
+
+function createDepartmentHandlers(options={}){
  const {researchFetchImpl=fetch,store=null,contextLoader=null,...openAIOptions}=options;
  const handlers={};
  for(const department of DEPARTMENTS) {
@@ -31,13 +51,18 @@ function parseStructuredHandoff(answer,sourceDepartmentId){\n const marker=/\\s*
    const companyContext=contextLoader&&typeof contextLoader.load==="function"
     ?await contextLoader.load(department.id)
     :{status:"not_configured",note:"会社データの読み取りアダプターが未設定です。実データを参照していません。"};
-   const result=await baseHandler({...payload,companyContext},meta);\n   const parsed=parseStructuredHandoff(result.answer,department.id);\n   return {...result,answer:parsed.answer,...(parsed.handoffRequest?{handoffRequest:parsed.handoffRequest}:{})};
+   const result=await baseHandler({...payload,companyContext},meta);
+   const parsed=parseStructuredHandoff(result.answer,department.id);
+   return {...result,answer:parsed.answer,...(parsed.handoffRequest?{handoffRequest:parsed.handoffRequest}:{})};
   };
  }
  const officeHandler=createSubsidyResearchHandler({...openAIOptions,researchFetchImpl,store});
  handlers["department.office"]=async(payload,meta)=>{
   const companyContext=contextLoader&&typeof contextLoader.load==="function"?await contextLoader.load("office"):{status:"not_available_for_department",note:"会社データは参照していません。"};
-  const result=await officeHandler({...payload,companyContext},meta);\n  if(typeof result?.answer!=="string")return result;\n  const parsed=parseStructuredHandoff(result.answer,"office");\n  return {...result,answer:parsed.answer,...(parsed.handoffRequest?{handoffRequest:parsed.handoffRequest}:{})};
+  const result=await officeHandler({...payload,companyContext},meta);
+  if(typeof result?.answer!=="string")return result;
+  const parsed=parseStructuredHandoff(result.answer,"office");
+  return {...result,answer:parsed.answer,...(parsed.handoffRequest?{handoffRequest:parsed.handoffRequest}:{})};
  };
  return handlers;
 }
