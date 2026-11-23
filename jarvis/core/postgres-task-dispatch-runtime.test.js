@@ -1,7 +1,7 @@
 "use strict";
 const test=require("node:test");
 const assert=require("node:assert/strict");
-const {createPostgresTaskDispatchRuntime}=require("./postgres-task-dispatch-runtime");
+const {createPostgresTaskDispatchRuntime}=require("./postgres-task-dispatch-runtime");\nconst {DEPARTMENTS}=require("./department-agents");
 
 function fixture(handler,authorizeAgentImpl=null){
  const calls=[];
@@ -29,7 +29,7 @@ function fixture(handler,authorizeAgentImpl=null){
  };
  const authorizeAgent=authorizeAgentImpl||async(agentId,scope)=>{calls.push("authorize:"+agentId);return{agentId,conversationId:"conversation-a",scopes:["tasks:dispatch","tasks:claim"],projectIds:["project-a"]};};
  const runtime=createPostgresTaskDispatchRuntime({
-  registry,executionKernel,authorizeAgent,handlers:{"department.construction":handler},
+  registry,executionKernel,authorizeAgent,handlers:Object.fromEntries(DEPARTMENTS.map(department=>["department."+department.id,department.id==="construction"?handler:async()=>({answer:"unused"})])),
   rateLimiter:{async consume(){return{allowed:true};}},leaseMs:5000,heartbeatMs:1000
  });
  return{runtime,calls,registry};
