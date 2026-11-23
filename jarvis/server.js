@@ -1031,10 +1031,10 @@ if (require.main===module) {
       const {createTaskRegistry}=require("./core/task-registry-store");
       const {createTaskRegistryAuthorizer}=require("./core/task-registry-auth");
       const {createPostgresTaskRegistryRevocationStore}=require("./core/postgres-task-registry-revocation-store");
-      taskRegistry=createTaskRegistry({pool:postgresPool});
-      await taskRegistry.init(); // Read-only schema check; migration 0004 is never applied here.
       const revocationStore=createPostgresTaskRegistryRevocationStore({pool:postgresPool});
       try{await revocationStore.init();taskRegistryRevocationStore=revocationStore;}catch{taskRegistryRevocationStore=null;}
+      taskRegistry=createTaskRegistry({pool:postgresPool,requireAgentRevocation:!!taskRegistryRevocationStore});
+      await taskRegistry.init(); // Read-only schema check; no migration is applied here.
       // Missing revocation schema keeps polling auth available, but SSE fails closed until migration 0010 exists.
       authorizeTaskRegistry=createTaskRegistryAuthorizer({revocationStore:taskRegistryRevocationStore});
       const {createPostgresTaskRegistryRateLimiter}=require("./core/postgres-task-registry-rate-limiter");
