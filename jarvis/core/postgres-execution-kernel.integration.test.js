@@ -132,6 +132,10 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   const revokedTargetRunning=await registry.transitionTask({taskId:revokedTargetTask.task.taskId,expectedVersion:revokedTargetClaim.version,lease:revokedTargetClaim.lease,status:"running"});
   await revocations.revoke({agentId:"agent-target-revoked",revokedBy:"integration-test"});
   await assert.rejects(registry.recordTaskHandoff({taskId:revokedTargetTask.task.taskId,expectedVersion:revokedTargetRunning.version,lease:revokedTargetClaim.lease,fromAgentId:(loserId==="worker-a"?"agent-a":"agent-b"),toAgentId:"agent-target-revoked",fromDepartmentId:"engineering",toDepartmentId:"management",idempotencyKey:"handoff-revoked-target"}),/Agent credential is revoked/);
+  const failedHandoffCleanup=await registry.transitionTask({taskId:revokedTargetTask.task.taskId,expectedVersion:revokedTargetRunning.version,lease:revokedTargetClaim.lease,status:"failed",patch:{nextAction:"Test cleanup after revoked target rejection"}});
+  await kernel.completeWorkerTask({workerId:loserId,taskId:revokedTargetTask.task.taskId,lease:revokedTargetClaim.lease,finalState:"failed"});
+  await registry.releaseLease({lease:revokedTargetClaim.lease});
+
 
   const resourceAttempts=await Promise.all([
    registry.acquireLease({resourceKey:"resource:race",ownerId:"worker-a",leaseMs:5000}),
