@@ -22,7 +22,7 @@ function createPostgresTaskDispatchRuntime({registry,executionKernel,authorizeAg
     const now=Date.now();
     const eligible=rows.filter(row=>row.agent_id===agentId&&row.department_id===task.departmentId&&
       row.status==="idle"&&!row.current_task_id&&!!row.grant_id&&
-      (!row.heartbeat_at||now-Date.parse(row.heartbeat_at)<=120000));
+      (!!row.heartbeat_at&&Number.isFinite(Date.parse(row.heartbeat_at))&&now-Date.parse(row.heartbeat_at)<=120000));
     if(eligible.length!==1)return null;
     const row=eligible[0];
     return {workerId:row.worker_id,agentId:row.agent_id,departmentId:row.department_id};
