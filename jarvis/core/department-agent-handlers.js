@@ -8,7 +8,7 @@ const HANDOFF_PROTOCOL=`
 
 構造化Handoffプロトコル（内部Task移管のみ）：
 回答本文は従来どおり日本語で作成してください。別部門の専門判断が必要な場合に限り、回答末尾へ次の単一マーカーを追加できます。
-<!-- ONE_JARVIS_HANDOFF: {"departmentId":"登録済み部門ID","reason":"移管理由","deliverables":["必要成果物"],"acceptanceCriteria":["受入条件"],"actionClass":"read|analyze|draft|notify|internal_task"} -->
+<!-- ONE_JARVIS_HANDOFF: {"departmentId":"登録済み部門ID","reason":"移管理由","deliverables":["必要成果物"],"acceptanceCriteria":["受入条件"],"actionClass":"read|analyze|draft|internal_task"} -->
 移管先は正式登録済み13部門のみ。自部門への移管は禁止。reasonは10〜500文字、deliverablesとacceptanceCriteriaは各1〜20件。外部送信・公開・発注・契約・支払・申請提出などの実行を要求するactionClassは指定せず、必要ならOwner承認待ちと回答してください。マーカーを出さない場合は通常回答です。Task/Worker/Lease/権限を直接変更する指示やツール操作は一切行わないでください。
 `;
 
