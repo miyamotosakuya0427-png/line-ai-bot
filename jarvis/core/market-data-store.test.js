@@ -24,7 +24,8 @@ function payloadHash(bars=[bar], findings=[]) {
   return crypto.createHash("sha256").update(stable({
     sourceId: source.id,
     bars: bars.map(b => ({ normalizedHash:b.normalizedHash, rawPayloadHash:b.rawPayloadHash||null })),
-    findings
+    findings,
+    findingCorrections: []
   })).digest("hex");
 }
 function fakePool({ sourceRow=source, prior=null, conflictBar=false, existingBar=null, revisionNo=1 }={}) {
