@@ -45,3 +45,18 @@ test("unregistered, self-targeted, incomplete and external-action Handoffs fail 
   assert.throws(()=>parseStructuredHandoff(answer,"construction"),/failed validation/);
  }
 });
+
+test("each of the 13 Department Handlers can emit a validated structured Handoff while preserving its answer",async()=>{
+ let output="";
+ const handlers=createDepartmentHandlers({apiKey:"test-key",fetchImpl:async()=>({ok:true,json:async()=>({output_text:output})})});
+ for(const source of DEPARTMENTS){
+  const target=DEPARTMENTS.find(item=>item.id!==source.id);
+  const request={departmentId:target.id,reason:"別部門の専門判断を依頼します",deliverables:["分析メモ"],acceptanceCriteria:["根拠を明記"],actionClass:"analyze"};
+  output="通常回答："+source.id+"\n<!-- ONE_JARVIS_HANDOFF: "+JSON.stringify(request)+" -->";
+  const result=await handlers["department."+source.id]({request:"部門横断の確認"});
+  assert.equal(result.answer,"通常回答："+source.id);
+  assert.equal(result.handoffRequest.departmentId,target.id);
+  assert.equal("task" in result,false);
+  assert.equal("worker" in result,false);
+ }
+});
