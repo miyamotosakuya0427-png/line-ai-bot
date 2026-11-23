@@ -18,12 +18,14 @@ test("market-data base migration uses rerunnable table and index DDL", () => {
   assert.ok(migration002.includes("VALUES ('002')"));
 });
 
-test("license approval and quote currency are guarded by additive migration", () => {
+test("license migration has a valid rerunnable DO block and records version 003", () => {
   assert.match(migration003, /ADD COLUMN IF NOT EXISTS license_approved/);
   assert.match(migration003, /ADD COLUMN IF NOT EXISTS license_evidence_ref/);
   assert.match(migration003, /ADD COLUMN IF NOT EXISTS license_reviewed_at/);
   assert.match(migration003, /enabled = FALSE OR \(license_approved = TRUE/);
   assert.match(migration003, /ADD COLUMN IF NOT EXISTS quote_currency/);
   assert.match(migration003, /market_bars_quote_currency_format/);
+  assert.match(migration003, /END \$\$;/);
+  assert.doesNotMatch(migration003, /END \$;/);
   assert.ok(migration003.includes("VALUES ('003')"));
 });
