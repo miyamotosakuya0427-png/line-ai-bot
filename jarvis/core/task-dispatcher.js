@@ -50,7 +50,12 @@ function createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEli
     heartbeat.unref?.();
     try{
       active=await registry.transitionTask({taskId,expectedVersion:claim.version,lease,status:"running",patch:{nextAction:"Dispatcher worker executing"}});
-      const result=await handler({task:active.task,worker,signal:controller.signal,lease,principal});
+      const handlerRequest=[
+        "依頼："+String(active.task.title||""),
+        active.task.scope?"対象範囲："+String(active.task.scope):"",
+        Array.isArray(active.task.acceptanceCriteria)&&active.task.acceptanceCriteria.length?"受入条件：\n"+active.task.acceptanceCriteria.map(item=>"- "+String(item)).join("\n"):""
+      ].filter(Boolean).join("\n\n");
+      const result=await handler({request:handlerRequest,task:active.task,worker,signal:controller.signal,lease,principal});
       if(leaseLost)throw new Error("Worker lost its lease before result persistence");
       if(result?.outcomeUnknown===true){
         active=await registry.transitionTask({taskId,expectedVersion:active.version,lease,status:"outcome_unknown",patch:{outcomeUnknownReason:String(result.reason||"External outcome requires reconciliation").slice(0,500)}});
