@@ -138,6 +138,32 @@ test("Stage6 PostgreSQL migrations, rollback, idempotency, revisions, audit and 
     const revisions = await pool.query("SELECT count(*)::int AS count FROM market_bar_revisions");
     assert.equal(revisions.rows[0].count, 1);
 
+    const correctionTime = new Date(baseTime + 240000).toISOString();
+    const blockedBar = fixtureBar(sourceId, correctionTime);
+    await store.ingest({
+      sourceId,
+      batchId: crypto.randomUUID(),
+      idempotencyKey: "stage6-finding-blocker",
+      bars: [blockedBar],
+      findings: [{ code: "MANUAL_REVIEW", severity: "high", details: { fixture: true } }]
+    });
+    const blocker = await pool.query("SELECT id FROM market_quality_findings WHERE code='MANUAL_REVIEW' AND resolved_at IS NULL ORDER BY detected_at DESC LIMIT 1");
+    assert.equal(blocker.rowCount, 1);
+    const corrected = await store.ingest({
+      sourceId,
+      batchId: crypto.randomUUID(),
+      idempotencyKey: "stage6-finding-correction",
+      bars: [blockedBar],
+      findings: [],
+      findingCorrections: [{ id: blocker.rows[0].id, resolution: "Synthetic CI evidence reviewed" }]
+    });
+    assert.equal(corrected.quality, "completed");
+    const correctedBar = await pool.query("SELECT verification_status FROM market_bars WHERE open_time_utc=$1", [correctionTime]);
+    assert.equal(correctedBar.rows[0].verification_status, "passed");
+    const resolvedFinding = await pool.query("SELECT resolved_at,details->>'resolution' AS resolution FROM market_quality_findings WHERE id=$1", [blocker.rows[0].id]);
+    assert.ok(resolvedFinding.rows[0].resolved_at);
+    assert.equal(resolvedFinding.rows[0].resolution, "Synthetic CI evidence reviewed");
+
     const beforeRollback = await pool.query("SELECT (SELECT count(*) FROM market_bars)::int AS bars, (SELECT count(*) FROM market_ingest_batches)::int AS batches");
     await assert.rejects(() => store.ingest({
       sourceId,
