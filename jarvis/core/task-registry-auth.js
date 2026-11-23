@@ -24,7 +24,7 @@ function createTaskRegistryAuthorizer({config=process.env.JARVIS_TASK_REGISTRY_A
     if(value.scopes.includes("resources:lease")&&resourcePrefixes.length===0)throw new Error("Resource lease scope requires explicit resource prefixes");
     agents.push({agentId,tokenHash,scopes:[...value.scopes],conversationId,projectIds:[...projectIds],resourcePrefixes:[...resourcePrefixes],expiresAt:Date.parse(value.expiresAt),revoked:value.revoked===true});
   }
-  return async function authorizeTaskRegistryAgent(req){
+  async function authorizeAgent(agentId,{projectId=null,conversationId=null,requiredScopes=[]}={}){\n    const clockValue=clock(),now=typeof clockValue==="number"?clockValue:Date.parse(clockValue);\n    const agent=agents.find(item=>item.agentId===agentId);\n    if(!agent||agent.revoked||!Number.isFinite(now)||now>=agent.expiresAt)return null;\n    if(!revocationStore||typeof revocationStore.isRevoked!=="function")throw new Error("Shared Task Registry revocation store is required for internal Agent authorization");\n    if(await revocationStore.isRevoked(agent.agentId))return null;\n    if(projectId&&!agent.projectIds.includes(projectId))return null;\n    if(conversationId&&agent.conversationId!==conversationId)return null;\n    if(requiredScopes.some(scope=>!agent.scopes.includes(scope)))return null;\n    return {agentId:agent.agentId,conversationId:agent.conversationId,scopes:[...agent.scopes],projectIds:[...agent.projectIds],resourcePrefixes:[...agent.resourcePrefixes]};\n  }\n  async function authorizeTaskRegistryAgent(req){
     const match=/^Bearer ([A-Za-z0-9._~-]{32,512})$/.exec(req?.headers?.authorization||"");
     if(!match)return null;
     const nowValue=clock();
@@ -43,6 +43,4 @@ function createTaskRegistryAuthorizer({config=process.env.JARVIS_TASK_REGISTRY_A
       }
     }
     return null;
-  };
-}
-module.exports={ALLOWED_SCOPES,createTaskRegistryAuthorizer};
+  }\n  authorizeTaskRegistryAgent.authorizeAgent=authorizeAgent;\n  return authorizeTaskRegistryAgent;\n}\nmodule.exports={ALLOWED_SCOPES,createTaskRegistryAuthorizer};
