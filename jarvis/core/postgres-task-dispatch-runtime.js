@@ -17,13 +17,14 @@ function createPostgresTaskDispatchRuntime({registry,executionKernel,authorizeAg
       principal.projectIds.includes(task.projectId)&&task.ownerConversation===principal.conversationId;
   }
   async function selectWorker({task,principal,targetAgentId=null}={}){
-    const agentId=targetAgentId||principal?.agentId;
+    const agentId=targetAgentId||(sourceWorker?null:principal?.agentId);
     const rows=await executionKernel.listWorkersForScope({projectId:task.projectId,conversationId:principal.conversationId});
     const now=Date.now();
-    const eligible=rows.filter(row=>row.agent_id===agentId&&row.department_id===task.departmentId&&
+    const eligible=rows.filter(row=>(agentId===null||row.agent_id===agentId)&&(!sourceWorker||row.agent_id!==sourceWorker.agentId)&&row.department_id===task.departmentId&&
       row.status==="idle"&&!row.current_task_id&&!!row.grant_id&&
       (!!row.heartbeat_at&&Number.isFinite(Date.parse(row.heartbeat_at))&&now-Date.parse(row.heartbeat_at)<=120000));
-    if(eligible.length!==1)return null;
+    if(!eligible.length)return null;
+    eligible.sort((a,b)=>String(a.worker_id).localeCompare(String(b.worker_id)));
     const row=eligible[0];
     return {workerId:row.worker_id,agentId:row.agent_id,departmentId:row.department_id};
   }
