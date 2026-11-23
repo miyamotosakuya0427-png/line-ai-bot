@@ -31,7 +31,7 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   const fs=require("node:fs/promises"),path=require("node:path"),root=path.join(__dirname,"..","migrations");
   for(const file of ["0001_neon_event_store.sql","0003_append_only_event_ledger.sql","0004_task_registry.sql","0005_task_registry_scoped_dedupe.sql","0006_scheduling_reservation_store.sql","0007_execution_kernel_fencing.sql","0008_worker_scope_grants.sql","0009_task_event_outbox.sql","0010_task_registry_agent_revocations.sql"])await pool.query(await fs.readFile(path.join(root,file),"utf8"));
   const registry=createTaskRegistry({pool,clock,tokenFactory:()=>require("node:crypto").randomBytes(32).toString("hex"),requireAgentRevocation:true});
-  const kernel=createPostgresExecutionKernel({pool,clock,allowedOperationScopes:["resource.update"]});
+  const kernel=createPostgresExecutionKernel({pool,clock,allowedOperationScopes:["resource.update","task.result.persist"]});
   await kernel.init();
   const registerScopedWorker=async(input)=>{await kernel.registerWorker(input);await kernel.grantWorkerScope({workerId:input.workerId,projectId:"one-jarvis",conversationId:"test-conversation",grantedBy:"integration-test"});};
   const makeTask=async(id,worker)=>registry.createTask({title:"Synthetic "+id,dedupeKey:"dedupe-"+id,projectId:"one-jarvis",ownerConversation:"test-conversation",ownerAgent:worker==="worker-a"?"agent-a":worker==="worker-b"?"agent-b":worker==="worker-ungranted"?"agent-ungranted":worker==="worker-revoked"?"agent-revoked":worker.startsWith("process-worker-")?"agent-process-"+worker.slice("process-worker-".length):worker,departmentId:"engineering",status:"ready"});
@@ -84,6 +84,23 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   const sharedQuota=await Promise.all(processWorkers.map(workerId=>runWorkerProcess("rate-limit",workerId)));
   assert.equal(sharedQuota.filter(x=>x.acquired).length,5,"PostgreSQL shared Agent quota must allow exactly five of ten concurrent processes");
   assert.ok(sharedQuota.filter(x=>!x.acquired).every(x=>x.retryAfter>0),"shared rate limit must return Retry-After for rejected calls");
+  await registerScopedWorker({workerId:"worker-result",agentId:"agent-result",departmentId:"engineering",instanceId:"instance-result"});
+  const resultTask=await registry.createTask({title:"Persisted Handler result",dedupeKey:"dedupe-task-result",projectId:"one-jarvis",ownerConversation:"test-conversation",ownerAgent:"agent-result",departmentId:"engineering",status:"ready"});
+  const resultClaim=await registry.claimTaskForWorker({taskId:resultTask.task.taskId,workerId:"worker-result",leaseMs:5000});
+  const resultRunning=await registry.transitionTask({taskId:resultTask.task.taskId,expectedVersion:resultClaim.version,lease:resultClaim.lease,status:"running"});
+  const resultResourceId="task-result-"+resultTask.task.taskId;
+  const resultResourceLease=await registry.acquireLease({resourceKey:"resource:"+resultResourceId,ownerId:"worker-result",leaseMs:5000});
+  const resultWriteInput={resourceId:resultResourceId,projectId:"one-jarvis",workerId:"worker-result",taskId:resultTask.task.taskId,taskLease:resultClaim.lease,lease:resultResourceLease,operationId:"result-op-"+resultTask.task.taskId,idempotencyKey:"result-idem-"+resultTask.task.taskId,operationScope:"task.result.persist",payload:{answer:"PostgreSQL fenced result"},expectedVersion:0};
+  const resultWrite=await kernel.writeResource(resultWriteInput);
+  const resultReplay=await kernel.writeResource(resultWriteInput);
+  assert.equal(resultWrite.version,1);
+  assert.equal(resultReplay.replayed,true,"Fenced Task result persistence is idempotent");
+  const resultDone=await registry.transitionTask({taskId:resultTask.task.taskId,expectedVersion:resultRunning.version,lease:resultClaim.lease,status:"completed",patch:{resultResourceId,verificationSummary:"Fenced result persisted"}});
+  assert.equal(resultDone.task.resultResourceId,resultResourceId,"Task state references its durable result resource");
+  await kernel.completeWorkerTask({workerId:"worker-result",taskId:resultTask.task.taskId,lease:resultClaim.lease,finalState:"completed"});
+  await registry.releaseLease({lease:resultClaim.lease});
+  await registry.releaseLease({lease:resultResourceLease});
+
   const claimRace=await Promise.all([
    registry.claimTaskForWorker({taskId:first.task.taskId,workerId:"worker-a",leaseMs:5000}),
    registry.claimTaskForWorker({taskId:first.task.taskId,workerId:"worker-b",leaseMs:5000})
