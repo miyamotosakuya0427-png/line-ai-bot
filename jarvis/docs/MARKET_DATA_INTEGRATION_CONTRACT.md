@@ -37,11 +37,11 @@ The provider's inclusive closeTime must be strictly earlier than the injected cl
 
 ## Quality and persistence
 
-The adapter returns quality findings but does not itself persist or mark data passed. Persistence must re-run the quality gate inside the same transaction, include findings discovered during revision handling, quarantine on any high/critical finding and only mark bars passed after a successful gate.
+The adapter returns quality findings but does not itself persist or mark data passed. Persistence re-runs the quality gate inside the same transaction, includes unresolved findings from prior ingests, and quarantines on any active high/critical finding. Finding corrections are accepted only for unresolved findings attached to bars in the current batch; the resolution metadata, re-evaluation, bar status, batch status and audit event commit or roll back together. Bars are marked passed only after that gate succeeds.
 
 ## CI
 
-The Stage 6 workflow is separate from the existing PR #80 workflows. It runs from the `jarvis` working directory and does not connect to Neon. Database integration and Worker concurrency tests remain a separate isolated-environment gate.
+The Stage 6 workflow is separate from the existing PR #80 workflows. It runs from the `jarvis` working directory, uses a disposable localhost PostgreSQL 16 service for migration, rollback, idempotency, revision, append-only audit and 2/5-Worker concurrency integration tests, and does not connect to Neon. JSONL parity remains fixture-only; no production JSONL is imported or modified.
 
 ## Safety
 
