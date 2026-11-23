@@ -3,7 +3,7 @@ const crypto = require("node:crypto");
 
 const {ALL_TASK_STATES,canonicalTaskState,canTransitionTask}=require("./task-state-machine");
 const TASK_STATES = ALL_TASK_STATES;
-const PATCH_FIELDS = new Set(["scope","ownerConversation","ownerAgent","departmentId","priority","branch","baseBranch","headSha","pullRequest","dependencyTaskIds","changedPaths","testRunIds","verificationSummary","blockerIds","nextAction","startedAt","completedAt","outcomeUnknownReason","reconciliationId","reconciledBy"]);
+const PATCH_FIELDS = new Set(["scope","ownerConversation","ownerAgent","departmentId","priority","branch","baseBranch","headSha","pullRequest","dependencyTaskIds","changedPaths","testRunIds","verificationSummary","resultResourceId","blockerIds","nextAction","startedAt","completedAt","outcomeUnknownReason","reconciliationId","reconciledBy"]);
 const MAX_TITLE=240, MAX_SCOPE=12000, MAX_OWNER=128, MAX_DEDUPE=240;
 function text(value,max,required=true){return typeof value==="string"&&value.length<=max&&(!required||!!value.trim());}
 function clone(value){return JSON.parse(JSON.stringify(value));}
@@ -140,7 +140,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
       const {title,scope="",acceptanceCriteria=[],dedupeKey,projectId="one-jarvis",ownerConversation="unassigned",ownerAgent="unassigned",departmentId="general",priority="P2",status="proposed",dependencyTaskIds=[],parentTaskId=null}=input;
       if(!text(title,MAX_TITLE)||!text(scope,MAX_SCOPE,false)||!text(dedupeKey,MAX_DEDUPE)||!text(projectId,128)||!text(ownerConversation,MAX_OWNER)||!text(ownerAgent,MAX_OWNER)||!text(departmentId,128)||!["P0","P1","P2","P3"].includes(priority)||!TASK_STATES.has(status)||!Array.isArray(acceptanceCriteria)||acceptanceCriteria.length>100||acceptanceCriteria.some(x=>!text(x,1000))||!Array.isArray(dependencyTaskIds)||dependencyTaskIds.length>100||dependencyTaskIds.some(x=>!text(x,80))||(parentTaskId!==null&&!text(parentTaskId,80)))throw new Error("Invalid task input");
       const id=crypto.randomUUID(),now=clock();
-      const task={taskId:id,dedupeKey,projectId,title,scope,acceptanceCriteria:[...acceptanceCriteria],ownerConversation,ownerAgent,departmentId,priority,status,state:canonicalTaskState(status),parentTaskId,dependencyTaskIds:[...new Set(dependencyTaskIds)],branch:null,baseBranch:null,headSha:null,pullRequest:null,createdAt:now,updatedAt:now,startedAt:null,completedAt:null,leaseOwner:null,leaseTokenHash:null,leaseExpiresAt:null,fencingToken:0,changedPaths:[],testRunIds:[],verificationSummary:null,blockerIds:[],nextAction:null};
+      const task={taskId:id,dedupeKey,projectId,title,scope,acceptanceCriteria:[...acceptanceCriteria],ownerConversation,ownerAgent,departmentId,priority,status,state:canonicalTaskState(status),parentTaskId,dependencyTaskIds:[...new Set(dependencyTaskIds)],branch:null,baseBranch:null,headSha:null,pullRequest:null,createdAt:now,updatedAt:now,startedAt:null,completedAt:null,leaseOwner:null,leaseTokenHash:null,leaseExpiresAt:null,fencingToken:0,changedPaths:[],testRunIds:[],verificationSummary:null,resultResourceId:null,blockerIds:[],nextAction:null};
       return tx(async c=>{
         if(parentTaskId){await lock(c,"task-parent:"+parentTaskId);const parent=await latest(c,parentTaskId);if(!parent||["completed","cancelled"].includes(canonicalTaskState(parent.task.state||parent.task.status)))throw new Error("Parent task is missing or terminal");if(parent.task.projectId!==projectId||parent.task.ownerConversation!==ownerConversation)throw new Error("Parent task scope mismatch");}
         await lock(c,"task-dedupe:"+dedupeKey);
@@ -266,9 +266,9 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
       const r=await pool.query("SELECT event_id,aggregate_id,aggregate_version,event_type,payload,created_at FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=ANY($1::text[]) ORDER BY event_id DESC LIMIT $2",[taskIds,limit]);
       return r.rows.map(row=>({eventId:Number(row.event_id),taskId:row.aggregate_id,version:Number(row.aggregate_version),eventType:row.event_type,payload:clone(row.payload),createdAt:row.created_at}));
     },
-    async recordTaskHandoff({taskId,expectedVersion,lease,fromAgentId,toAgentId,fromDepartmentId,toDepartmentId,idempotencyKey,handoffRequest=null}={}){
+    async recordTaskHandoff({taskId,expectedVersion,lease,fromAgentId,toAgentId,fromDepartmentId,toDepartmentId,idempotencyKey,handoffRequest=null,resultResourceId=null}={}){
       await init();
-      if(!text(taskId,200)||!Number.isSafeInteger(expectedVersion)||![fromAgentId,toAgentId,fromDepartmentId,toDepartmentId].every(x=>text(x,128))||!text(idempotencyKey,240))throw new Error("Invalid Task handoff request");
+      if(!text(taskId,200)||!Number.isSafeInteger(expectedVersion)||![fromAgentId,toAgentId,fromDepartmentId,toDepartmentId].every(x=>text(x,128))||!text(idempotencyKey,240)||(resultResourceId!==null&&!text(resultResourceId,160)))throw new Error("Invalid Task handoff request");
        if(handoffRequest!==null&&(!handoffRequest||typeof handoffRequest!=="object"||Array.isArray(handoffRequest)||!(typeof handoffRequest.reason==="string"&&handoffRequest.reason.trim().length>=10&&handoffRequest.reason.length<=500)||!Array.isArray(handoffRequest.deliverables)||handoffRequest.deliverables.length<1||handoffRequest.deliverables.length>20||handoffRequest.deliverables.some(x=>!text(x,500))||!Array.isArray(handoffRequest.acceptanceCriteria)||handoffRequest.acceptanceCriteria.length<1||handoffRequest.acceptanceCriteria.length>20||handoffRequest.acceptanceCriteria.some(x=>!text(x,500))||!["read","analyze","draft","internal_task"].includes(handoffRequest.actionClass)))throw new Error("Invalid structured Task handoff details");
       const keyHash=hash("task-handoff:"+idempotencyKey);
       return tx(async c=>{
@@ -278,7 +278,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
           const p=prior.rows[0].payload;
           const priorRequest=p.handoffRequest||null;
           const sameRequest=priorRequest===null?handoffRequest===null:!!handoffRequest&&priorRequest.reason===handoffRequest.reason&&priorRequest.actionClass===handoffRequest.actionClass&&JSON.stringify(priorRequest.deliverables)===JSON.stringify(handoffRequest.deliverables)&&JSON.stringify(priorRequest.acceptanceCriteria)===JSON.stringify(handoffRequest.acceptanceCriteria);
-          if(p.fromAgentId!==fromAgentId||p.toAgentId!==toAgentId||p.fromDepartmentId!==fromDepartmentId||p.toDepartmentId!==toDepartmentId||!sameRequest)throw new Error("Handoff idempotency key replayed with different target or payload");
+          if(p.fromAgentId!==fromAgentId||p.toAgentId!==toAgentId||p.fromDepartmentId!==fromDepartmentId||p.toDepartmentId!==toDepartmentId||p.resultResourceId!==resultResourceId||!sameRequest)throw new Error("Handoff idempotency key replayed with different target or payload");
           return {created:false,task:clone(p),version:Number(prior.rows[0].aggregate_version)};
         }
         await assertLease(c,lease);
@@ -294,7 +294,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         validateHandoffRoute(handoffHistory.rows,fromDepartmentId,toDepartmentId,8);
         if((task.state||task.status)!=="running"||task.leaseOwner!==lease.ownerId||Number(task.fencingToken)!==lease.fencingToken||worker.rows[0].agent_id!==fromAgentId||task.ownerAgent!==fromAgentId||worker.rows[0].department_id!==fromDepartmentId||task.departmentId!==fromDepartmentId)throw new Error("Handoff source ownership or fencing validation failed");
         const now=clock();
-        const next={...task,ownerAgent:toAgentId,departmentId:toDepartmentId,status:"queued",state:"queued",leaseOwner:null,leaseTokenHash:null,leaseExpiresAt:null,fencingToken:0,updatedAt:now,nextAction:"Queued for authorized Agent handoff"};
+        const next={...task,ownerAgent:toAgentId,departmentId:toDepartmentId,resultResourceId,status:"queued",state:"queued",leaseOwner:null,leaseTokenHash:null,leaseExpiresAt:null,fencingToken:0,updatedAt:now,nextAction:"Queued for authorized Agent handoff"};
         await c.query("UPDATE jarvis.coordination_leases SET expires_at=$1::timestamptz,updated_at=$1::timestamptz WHERE resource_key=$2 AND owner_id=$3 AND fencing_token=$4",[now,lease.resourceKey,lease.ownerId,lease.fencingToken]);
         const released=await c.query("UPDATE jarvis.worker_registry SET status='idle',current_task_id=NULL,lease_resource_key=NULL,fencing_token=NULL,version=version+1,updated_at=$1 WHERE worker_id=$2 AND version=$3 RETURNING worker_id",[now,lease.ownerId,Number(worker.rows[0].version)]);
         if(released.rowCount!==1)throw new Error("Handoff Worker release lost concurrency race");
