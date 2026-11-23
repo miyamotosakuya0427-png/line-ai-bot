@@ -105,8 +105,8 @@ dailyForm.addEventListener("submit",async(event)=>{event.preventDefault();if(!id
 </script></body></html>`;
 }
 
-function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||"",sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,approvalStore=null,videoBatchStore=null,paperTradingStore=null,influenceEventStore=null,worker=null,departmentHandlers=null,departmentContextLoader=null,commandPlanner=null,taskRegistry=null,authorizeTaskRegistry=null,taskRegistryRateLimiter=null,executionKernel=null,taskEventOutbox=null,taskRegistryRevocationStore=null,schedulingRuntime=null,now=()=>new Date()}={}) {
-  const taskRegistryApi=createTaskRegistryApi({registry:taskRegistry,authorize:authorizeTaskRegistry,json,readJson,rateLimiter:taskRegistryRateLimiter||undefined});
+function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||"",sheetsUrl=SHEETS_URL,sheetsToken=SHEETS_TOKEN,lineLoginChannelId=LINE_LOGIN_CHANNEL_ID,liffId=LIFF_ID,fetchImpl=fetch,jobStore=null,approvalStore=null,videoBatchStore=null,paperTradingStore=null,influenceEventStore=null,worker=null,departmentHandlers=null,departmentContextLoader=null,commandPlanner=null,taskRegistry=null,authorizeTaskRegistry=null,taskRegistryRateLimiter=null,executionKernel=null,taskEventOutbox=null,taskRegistryRevocationStore=null,taskDispatcher=null,schedulingRuntime=null,now=()=>new Date()}={}) {
+  const taskRegistryApi=createTaskRegistryApi({registry:taskRegistry,authorize:authorizeTaskRegistry,json,readJson,rateLimiter:taskRegistryRateLimiter||undefined,dispatcher:taskDispatcher});
   let schedulingRuntimeInit=null;
   let activeSseConnections=0;
   const sseConnectionsByAgent=new Map();
@@ -1025,7 +1025,7 @@ if (require.main===module) {
       jobStore=JOB_STORE_PATH?createJobStore({filePath:JOB_STORE_PATH}):null;
       approvalStore=APPROVAL_STORE_PATH?createApprovalStore({filePath:APPROVAL_STORE_PATH}):null;
     }
-    let taskRegistry=null,authorizeTaskRegistry=null,taskRegistryRateLimiter=null,executionKernel=null,taskEventOutbox=null,taskRegistryRevocationStore=null,executionRecoveryScheduler=null;
+    let taskRegistry=null,authorizeTaskRegistry=null,taskRegistryRateLimiter=null,executionKernel=null,taskEventOutbox=null,taskRegistryRevocationStore=null,taskDispatcher=null,executionRecoveryScheduler=null;
     if(process.env.JARVIS_TASK_REGISTRY_API_ENABLED==="true"){
       if(!postgresPool)throw new Error("Task Registry API requires JARVIS_STORAGE_MODE=postgres.");
       const {createTaskRegistry}=require("./core/task-registry-store");
@@ -1041,7 +1041,7 @@ if (require.main===module) {
       const {createPostgresExecutionKernel}=require("./core/postgres-execution-kernel");
       const {createTaskEventOutbox}=require("./core/task-event-outbox");
       const {createExecutionRecoveryScheduler}=require("./core/execution-recovery-scheduler");
-      executionKernel=createPostgresExecutionKernel({pool:postgresPool});
+      executionKernel=createPostgresExecutionKernel({pool:postgresPool,allowedOperationScopes:["task.result.persist"]});
       taskEventOutbox=createTaskEventOutbox({pool:postgresPool});
       await executionKernel.init(); // Read-only migration 0007/schema check; never applies a migration.
       taskRegistryRateLimiter=createPostgresTaskRegistryRateLimiter({pool:postgresPool});
@@ -1058,13 +1058,13 @@ if (require.main===module) {
     if (workerEnabled && (!jobStore || !process.env.OPENAI_API_KEY)) throw new Error("Worker requires JARVIS_JOB_STORE_PATH and OPENAI_API_KEY.");
     const departmentContextLoader=createDepartmentContextLoader({sheetsUrl:SHEETS_URL,sheetsToken:SHEETS_TOKEN});
     const departmentHandlers=createDepartmentHandlers({store:jobStore,contextLoader:departmentContextLoader});
-    if(videoBatchStore&&departmentHandlers["department.content"]) departmentHandlers["department.content"]=createVideoBatchContentHandler({contentHandler:departmentHandlers["department.content"],videoBatchStore});
+    if(videoBatchStore&&departmentHandlers["department.content"]) departmentHandlers["department.content"]=createVideoBatchContentHandler({contentHandler:departmentHandlers["department.content"],videoBatchStore});\n    if(taskRegistry&&executionKernel&&taskRegistryRevocationStore&&taskRegistryRateLimiter){\n      const {createPostgresTaskDispatchRuntime}=require("./core/postgres-task-dispatch-runtime");\n      taskDispatcher=createPostgresTaskDispatchRuntime({registry:taskRegistry,executionKernel,authorizeAgent:authorizeTaskRegistry.authorizeAgent,handlers:departmentHandlers,rateLimiter:taskRegistryRateLimiter});\n    }
     const worker=workerEnabled?createWorker({store:jobStore,handlers:{"assistant.request":createOpenAIHandler(),"assistant.company_question":createOpenAIHandler(),...departmentHandlers}}):null;
     if (worker) { await worker.start(); worker.startPolling({intervalMs:Number(process.env.JARVIS_WORKER_POLL_MS||1500)}); }
     const contentScheduler=worker&&process.env.JARVIS_CONTENT_AUTOPLAN_ENABLED==="true"?startDailyContentPlanner({store:jobStore}):null;
     const subsidyScheduler=worker&&process.env.JARVIS_SUBSIDY_AUTOMONITOR_ENABLED==="true"?startDailySubsidyMonitor({store:jobStore}):null;
     const commandPlanner=createCommandPlanner();
-    const server=createServer({jobStore,approvalStore,videoBatchStore,paperTradingStore,influenceEventStore,worker,departmentHandlers,departmentContextLoader,commandPlanner,taskRegistry,authorizeTaskRegistry,taskRegistryRateLimiter,executionKernel,taskEventOutbox,taskRegistryRevocationStore}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
+    const server=createServer({jobStore,approvalStore,videoBatchStore,paperTradingStore,influenceEventStore,worker,departmentHandlers,departmentContextLoader,commandPlanner,taskRegistry,authorizeTaskRegistry,taskRegistryRateLimiter,executionKernel,taskEventOutbox,taskRegistryRevocationStore,taskDispatcher}); server.requestTimeout=15000; server.headersTimeout=10000; server.keepAliveTimeout=5000;
     const shutdown=signal=>{ console.log(`Received ${signal}; shutting down.`); if(subsidyScheduler)subsidyScheduler.stop(); if(contentScheduler)contentScheduler.stop(); if(executionRecoveryScheduler)executionRecoveryScheduler.stop(); if(worker)worker.stop(); server.close(async error=>{if(error){console.error("Graceful shutdown failed.");process.exit(1);}if(postgresPool){try{await postgresPool.end();}catch{console.error("Database pool shutdown failed.");}}process.exit(0);}); setTimeout(()=>process.exit(1),10000).unref(); };
     process.on("SIGTERM",()=>shutdown("SIGTERM")); process.on("SIGINT",()=>shutdown("SIGINT"));
     server.listen(PORT,"0.0.0.0",()=>{if(executionRecoveryScheduler)executionRecoveryScheduler.start();console.log(`ONE JARVIS running on port ${PORT}`);});
