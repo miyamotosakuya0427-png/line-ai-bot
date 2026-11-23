@@ -280,9 +280,9 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
           return {created:false,task:clone(p),version:Number(prior.rows[0].aggregate_version)};
         }
         await assertLease(c,lease);
-        await assertAgentsActive(c,[fromAgentId,toAgentId]);
         if(lease.resourceKey!=="task:"+taskId)throw new Error("Handoff Task Lease mismatch");
         const worker=await c.query("SELECT worker_id,agent_id,department_id,current_task_id,lease_resource_key,fencing_token,version FROM jarvis.worker_registry WHERE worker_id=$1 FOR UPDATE",[lease.ownerId]);
+        await assertAgentsActive(c,[fromAgentId,toAgentId]);
         if(!worker.rows[0]||worker.rows[0].current_task_id!==taskId||worker.rows[0].lease_resource_key!==lease.resourceKey||Number(worker.rows[0].fencing_token)!==lease.fencingToken)throw new Error("Handoff Worker binding is stale");
         await lock(c,"task:"+taskId);
         const current=await latest(c,taskId);
