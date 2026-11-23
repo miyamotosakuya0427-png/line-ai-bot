@@ -4,7 +4,7 @@ const assert=require("node:assert/strict");
 const {createTaskDispatcher}=require("./task-dispatcher");
 function fixture({authorized=true,handlerResult={success:true},targetWorker=null,resultWriterImpl=null}={}){
  const calls=[];
- const task={taskId:"task-1",status:"queued",state:"queued",ownerAgent:"agent-1",ownerConversation:"conversation-1",projectId:"project-1",departmentId:"construction"};
+ const task={taskId:"task-1",title:"Task 1",scope:"Scope 1",acceptanceCriteria:["条件1"],status:"queued",state:"queued",ownerAgent:"agent-1",ownerConversation:"conversation-1",projectId:"project-1",departmentId:"construction"};
  const registry={
   async getTask(){calls.push("get");return{task,version:1};},
   async listTasks(){calls.push("list");return[{task,version:1}];},
@@ -20,7 +20,7 @@ function fixture({authorized=true,handlerResult={success:true},targetWorker=null
   async authorizeTask({requesterAgentId="agent-1"}){calls.push("authorize:"+requesterAgentId);return authorized?{allowed:true,agentId:requesterAgentId,conversationId:"conversation-1",projectIds:["project-1"]}:null;},
   async isAgentEligible(){calls.push("eligible");return true;},
   async selectWorker({task:targetTask}){calls.push("select-worker:"+targetTask.departmentId);return targetTask.departmentId==="construction"?{workerId:"worker-1",agentId:"agent-1",departmentId:"construction"}:targetWorker;},
-  handlers:{construction:async()=>{calls.push("execute");return handlerResult;}},
+  handlers:{construction:async(payload)=>{assert.match(payload.request,/依頼：Task 1/);assert.match(payload.request,/対象範囲：Scope 1/);assert.match(payload.request,/条件1/);calls.push("execute");return handlerResult;}},
   rateLimiter:{async consume(agentId,context){calls.push("rate-limit");assert.equal(agentId,"agent-1");assert.equal(context.operation,"dispatch");return{allowed:true};}},
   async resultWriter(input){calls.push("fenced-write");return resultWriterImpl?resultWriterImpl(input):{fenced:true,summary:"saved"};},
   heartbeatMs:1000,leaseMs:5000
