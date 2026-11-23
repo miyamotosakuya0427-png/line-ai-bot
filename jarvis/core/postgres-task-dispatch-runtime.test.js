@@ -62,3 +62,14 @@ test("PostgreSQL dispatch runtime fails closed when live Agent authorization is 
  await assert.rejects(()=>runtime.dispatchTask({taskId:"task-1",requesterAgentId:"agent-a",conversationId:"conversation-a",projectId:"project-a"}),/authorization failed/);
  assert.equal(calls.includes("claim-task"),false);
 });
+
+test("revoked target Agent is excluded and the Task waits without committing a Handoff",async()=>{
+ const request={departmentId:"management",reason:"経営判断の専門確認が必要です",deliverables:["KPI分析"],acceptanceCriteria:["根拠資料を明記"],actionClass:"analyze"};
+ const authorize=async(agentId)=>agentId==="agent-b"?null:{agentId,conversationId:"conversation-a",scopes:["tasks:dispatch","tasks:claim"],projectIds:["project-a"]};
+ const {runtime,calls}=fixture(async()=>({answer:"移管候補",handoffRequest:request}),authorize);
+ const result=await runtime.dispatchTask({taskId:"task-1",requesterAgentId:"agent-a",conversationId:"conversation-a",projectId:"project-a"});
+ assert.equal(result.outcome,"waiting_for_handoff_target");
+ assert.equal(result.task.status,"waiting");
+ assert.equal(result.task.resultResourceId,"task-result-task-1");
+ assert.equal(calls.includes("record-handoff"),false);
+});
