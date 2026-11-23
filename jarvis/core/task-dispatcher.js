@@ -1,5 +1,6 @@
 "use strict";
 const crypto=require("node:crypto");
+const {getDepartment}=require("./department-agents");
 
 function createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEligible,selectWorker,handlers,resultWriter,rateLimiter,leaseMs=60000,heartbeatMs=20000}={}){
   for(const [name,value] of Object.entries({registry,executionKernel,authorizeTask,isAgentEligible,selectWorker,handlers,resultWriter,rateLimiter})){
@@ -51,9 +52,24 @@ function createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEli
       active=await registry.transitionTask({taskId,expectedVersion:claim.version,lease,status:"running",patch:{nextAction:"Dispatcher worker executing"}});
       const result=await handler({task:active.task,worker,signal:controller.signal,lease,principal});
       if(leaseLost)throw new Error("Worker lost its lease before result persistence");
+      if(result?.outcomeUnknown===true){
+        active=await registry.transitionTask({taskId,expectedVersion:active.version,lease,status:"outcome_unknown",patch:{outcomeUnknownReason:String(result.reason||"External outcome requires reconciliation").slice(0,500)}});
+        taskFinalized=true;
+        return {dispatched:true,outcome:"outcome_unknown",task:active.task};
+      }
+      if(result?.success!==true&&typeof result?.answer!=="string"){
+        active=await registry.transitionTask({taskId,expectedVersion:active.version,lease,status:"failed",patch:{nextAction:String(result?.reason||"Worker reported failure").slice(0,500)}});
+        taskFinalized=true;
+        return {dispatched:true,outcome:"failed",task:active.task};
+      }
+      const saved=await resultWriter({task:active.task,version:active.version,worker,lease,principal,result});
+      if(!saved||saved.fenced!==true)throw new Error("Fenced result writer did not confirm a durable write");
       if(result?.handoffRequest!==undefined){
         const request=result.handoffRequest;
-        if(!request||typeof request!=="object"||Array.isArray(request)||typeof request.departmentId!=="string"||!/^[A-Za-z0-9._:-]{1,128}$/.test(request.departmentId))throw new Error("Handler returned an invalid structured Handoff request");
+        const targetDepartment=getDepartment(request?.departmentId);
+        const validText=(value,min,max)=>typeof value==="string"&&value.trim().length>=min&&value.length<=max;
+        const validList=value=>Array.isArray(value)&&value.length>=1&&value.length<=20&&value.every(item=>validText(item,1,500));
+        if(!request||typeof request!=="object"||Array.isArray(request)||!targetDepartment||targetDepartment.id===active.task.departmentId||!validText(request.reason,10,500)||!validList(request.deliverables)||!validList(request.acceptanceCriteria)||!["read","analyze","draft","notify","internal_task"].includes(request.actionClass))throw new Error("Handler returned an invalid or unregistered structured Handoff request");
         if(typeof registry.recordTaskHandoff!=="function")throw new Error("Atomic Task Handoff is unavailable");
         const targetTask={...active.task,departmentId:request.departmentId,ownerAgent:"pending-target"};
         const targetWorker=await selectWorker({task:targetTask,principal,targetAgentId:request.agentId||null,sourceWorker:worker});
@@ -67,24 +83,12 @@ function createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEli
         if(!targetPrincipal||targetPrincipal.allowed!==true||targetPrincipal.agentId!==targetWorker.agentId||targetPrincipal.conversationId!==conversationId||!targetPrincipal.projectIds?.includes(active.task.projectId))throw new Error("Handoff target Agent authorization failed");
         if(await isAgentEligible({task:targetTask,principal:targetPrincipal,targetAgentId:targetWorker.agentId})!==true)throw new Error("Handoff target Agent is not eligible");
         const idempotencyKey=crypto.createHash("sha256").update(["handler-handoff",taskId,String(active.version),worker.agentId,targetWorker.agentId,request.departmentId].join(":")).digest("hex");
-        const handoff=await registry.recordTaskHandoff({taskId,expectedVersion:active.version,lease,fromAgentId:worker.agentId,toAgentId:targetWorker.agentId,fromDepartmentId:active.task.departmentId,toDepartmentId:request.departmentId,idempotencyKey});
+        const handoff=await registry.recordTaskHandoff({taskId,expectedVersion:active.version,lease,fromAgentId:worker.agentId,toAgentId:targetWorker.agentId,fromDepartmentId:active.task.departmentId,toDepartmentId:request.departmentId,idempotencyKey,handoffRequest:{reason:request.reason,deliverables:request.deliverables,acceptanceCriteria:request.acceptanceCriteria,actionClass:request.actionClass}});
         if(!handoff||handoff.created!==true)return {dispatched:true,outcome:"handoff_replayed",task:handoff?.task||active.task};
         active={task:handoff.task,version:handoff.version};
         taskFinalized=true;handoffCommitted=true;
         return {dispatched:true,outcome:"handed_off",task:active.task,handoff:{fromAgentId:worker.agentId,toAgentId:targetWorker.agentId,toDepartmentId:request.departmentId}};
       }
-      if(result?.outcomeUnknown===true){
-        active=await registry.transitionTask({taskId,expectedVersion:active.version,lease,status:"outcome_unknown",patch:{outcomeUnknownReason:String(result.reason||"External outcome requires reconciliation").slice(0,500)}});
-        taskFinalized=true;
-        return {dispatched:true,outcome:"outcome_unknown",task:active.task};
-      }
-      if(result?.success!==true){
-        active=await registry.transitionTask({taskId,expectedVersion:active.version,lease,status:"failed",patch:{nextAction:String(result?.reason||"Worker reported failure").slice(0,500)}});
-        taskFinalized=true;
-        return {dispatched:true,outcome:"failed",task:active.task};
-      }
-      const saved=await resultWriter({task:active.task,version:active.version,worker,lease,principal,result});
-      if(!saved||saved.fenced!==true)throw new Error("Fenced result writer did not confirm a durable write");
       active=await registry.transitionTask({taskId,expectedVersion:active.version,lease,status:"completed",patch:{verificationSummary:String(saved.summary||"Fenced result persisted").slice(0,1000)}});
       taskFinalized=true;
       return {dispatched:true,outcome:"completed",task:active.task,result:saved};
