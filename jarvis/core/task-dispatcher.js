@@ -32,7 +32,7 @@ function createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEli
     if(!revalidated||revalidated.allowed!==true||revalidated.agentId!==requesterAgentId||!revalidated.projectIds?.includes(task.projectId)||revalidated.conversationId!==conversationId)throw new Error("Task authorization expired before claim");
     const claim=await registry.claimTaskForWorker({taskId,workerId:worker.workerId,leaseMs});
     if(!claim)return {dispatched:false,reason:"ATOMIC_CLAIM_CONFLICT",taskId};
-    let lease=claim.lease,active=claim,leaseLost=false,taskFinalized=false,handoffCommitted=false,heartbeatBusy=false,heartbeatPromise=Promise.resolve();
+    let lease=claim.lease,active=claim,leaseLost=false,taskFinalized=false,handoffCommitted=false,heartbeatBusy=false,heartbeatPromise=Promise.resolve(),savedResult=null;
     const controller=new AbortController();
     const heartbeat=setInterval(()=>{
       if(heartbeatBusy||leaseLost)return;
@@ -67,7 +67,7 @@ function createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEli
         taskFinalized=true;
         return {dispatched:true,outcome:"failed",task:active.task};
       }
-      const saved=await resultWriter({task:active.task,version:active.version,worker,lease,principal,result});
+      const saved=await resultWriter({task:active.task,version:active.version,worker,lease,principal,result});\n      savedResult=saved;
       if(!saved||saved.fenced!==true)throw new Error("Fenced result writer did not confirm a durable write");
       if(result?.handoffRequest!==undefined){
         const request=result.handoffRequest;
@@ -88,18 +88,18 @@ function createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEli
         if(!targetPrincipal||targetPrincipal.allowed!==true||targetPrincipal.agentId!==targetWorker.agentId||targetPrincipal.conversationId!==conversationId||!targetPrincipal.projectIds?.includes(active.task.projectId))throw new Error("Handoff target Agent authorization failed");
         if(await isAgentEligible({task:targetTask,principal:targetPrincipal,targetAgentId:targetWorker.agentId})!==true)throw new Error("Handoff target Agent is not eligible");
         const idempotencyKey=crypto.createHash("sha256").update(["handler-handoff",taskId,String(active.version),worker.agentId,targetWorker.agentId,request.departmentId].join(":")).digest("hex");
-        const handoff=await registry.recordTaskHandoff({taskId,expectedVersion:active.version,lease,fromAgentId:worker.agentId,toAgentId:targetWorker.agentId,fromDepartmentId:active.task.departmentId,toDepartmentId:request.departmentId,idempotencyKey,handoffRequest:{reason:request.reason,deliverables:request.deliverables,acceptanceCriteria:request.acceptanceCriteria,actionClass:request.actionClass}});
+        const handoff=await registry.recordTaskHandoff({taskId,expectedVersion:active.version,lease,fromAgentId:worker.agentId,toAgentId:targetWorker.agentId,fromDepartmentId:active.task.departmentId,toDepartmentId:request.departmentId,idempotencyKey,handoffRequest:{reason:request.reason,deliverables:request.deliverables,acceptanceCriteria:request.acceptanceCriteria,actionClass:request.actionClass},resultResourceId:saved.resourceId});
         if(!handoff||handoff.created!==true)return {dispatched:true,outcome:"handoff_replayed",task:handoff?.task||active.task};
         active={task:handoff.task,version:handoff.version};
         taskFinalized=true;handoffCommitted=true;
         return {dispatched:true,outcome:"handed_off",task:active.task,handoff:{fromAgentId:worker.agentId,toAgentId:targetWorker.agentId,toDepartmentId:request.departmentId}};
       }
-      active=await registry.transitionTask({taskId,expectedVersion:active.version,lease,status:"completed",patch:{verificationSummary:String(saved.summary||"Fenced result persisted").slice(0,1000)}});
+      active=await registry.transitionTask({taskId,expectedVersion:active.version,lease,status:"completed",patch:{verificationSummary:String(saved.summary||"Fenced result persisted").slice(0,1000),resultResourceId:saved.resourceId}});
       taskFinalized=true;
       return {dispatched:true,outcome:"completed",task:active.task,result:saved};
     }catch(error){
       if(!leaseLost&&active?.version&&active.task?.status==="running"){
-        try{active=await registry.transitionTask({taskId,expectedVersion:active.version,lease,status:"outcome_unknown",patch:{outcomeUnknownReason:"Execution or fenced persistence failed; explicit reconciliation required"}});taskFinalized=true;}catch{}
+        try{active=await registry.transitionTask({taskId,expectedVersion:active.version,lease,status:"outcome_unknown",patch:{outcomeUnknownReason:"Execution or fenced persistence failed; explicit reconciliation required",...(savedResult?.resourceId?{resultResourceId:savedResult.resourceId}:{})}});taskFinalized=true;}catch{}
       }
       throw error;
     }finally{
