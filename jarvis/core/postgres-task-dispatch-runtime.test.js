@@ -6,7 +6,7 @@ const {DEPARTMENTS}=require("./department-agents");
 
 function fixture(handler,authorizeAgentImpl=null){
  const calls=[];
- const task={taskId:"task-1",status:"queued",state:"queued",ownerAgent:"agent-a",ownerConversation:"conversation-a",projectId:"project-a",departmentId:"construction"};
+ const task={taskId:"task-1",title:"Runtime Task",scope:"Runtime scope",acceptanceCriteria:["Runtime acceptance"],status:"queued",state:"queued",ownerAgent:"agent-a",ownerConversation:"conversation-a",projectId:"project-a",departmentId:"construction"};
  let current={task,version:1};
  const registry={
   async getTask(){calls.push("get-task");return current;},
@@ -37,7 +37,7 @@ function fixture(handler,authorizeAgentImpl=null){
 }
 
 test("PostgreSQL dispatch runtime connects authorized Handler execution to fenced result persistence and completion",async()=>{
- const {runtime,calls}=fixture(async()=>({answer:"施工部門の分析結果",model:"test-model"}));
+ const {runtime,calls}=fixture(async payload=>{assert.match(payload.request,/依頼：Runtime Task/);return{answer:"施工部門の分析結果",model:"test-model"};});
  const result=await runtime.dispatchTask({taskId:"task-1",requesterAgentId:"agent-a",conversationId:"conversation-a",projectId:"project-a"});
  assert.equal(result.outcome,"completed");
  assert.ok(calls.indexOf("fenced-write")<calls.indexOf("transition:completed"));
@@ -47,7 +47,7 @@ test("PostgreSQL dispatch runtime connects authorized Handler execution to fence
 
 test("PostgreSQL dispatch runtime verifies the target Agent and persists structured Handoff details before atomic transfer",async()=>{
  const request={departmentId:"management",reason:"経営判断の専門確認が必要です",deliverables:["KPI分析"],acceptanceCriteria:["根拠資料を明記"],actionClass:"analyze"};
- const {runtime,calls}=fixture(async()=>({answer:"経営部門で追加確認します",handoffRequest:request}));
+ const {runtime,calls}=fixture(async payload=>{assert.match(payload.request,/受入条件：/);return{answer:"経営部門で追加確認します",handoffRequest:request};});
  const result=await runtime.dispatchTask({taskId:"task-1",requesterAgentId:"agent-a",conversationId:"conversation-a",projectId:"project-a"});
  assert.equal(result.outcome,"handed_off");
  assert.ok(calls.includes("authorize:agent-b"));
