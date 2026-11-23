@@ -14,8 +14,15 @@ function createPostgresTaskRegistryRevocationStore({pool,clock=()=>new Date().to
     },
     async revoke({agentId,revokedBy}={}){
       if(typeof agentId!=="string"||! /^[A-Za-z0-9._:-]{1,128}$/.test(agentId)||typeof revokedBy!=="string"||!revokedBy.trim()||revokedBy.length>128)throw new Error("Invalid Agent revocation");
-      const r=await pool.query("INSERT INTO jarvis.task_registry_agent_revocations(agent_id,revoked_at,revoked_by) VALUES($1,$2,$3) ON CONFLICT(agent_id) DO NOTHING RETURNING agent_id,revoked_at,revoked_by",[agentId,clock(),revokedBy]);
-      return {revoked:r.rowCount===1,agentId};
+      const client=await pool.connect();
+      try{
+        await client.query("BEGIN");
+        await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",["agent-revocation:"+agentId]);
+        const r=await client.query("INSERT INTO jarvis.task_registry_agent_revocations(agent_id,revoked_at,revoked_by) VALUES($1,$2,$3) ON CONFLICT(agent_id) DO NOTHING RETURNING agent_id,revoked_at,revoked_by",[agentId,clock(),revokedBy]);
+        await client.query("COMMIT");
+        return {revoked:r.rowCount===1,agentId};
+      }catch(error){try{await client.query("ROLLBACK");}catch{}throw error;}
+      finally{client.release();}
     }
   };
 }
