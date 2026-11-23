@@ -120,7 +120,7 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   const handoffEvents=await registry.listTaskEvents({taskIds:[handoffTask.task.taskId],limit:10});
   assert.equal(handoffEvents.filter(row=>row.eventType==="agent_handoff").length,1);
    assert.deepEqual(handoffEvents.find(row=>row.eventType==="agent_handoff").payload.handoffRequest,{reason:"経営部門の専門確認が必要です",deliverables:["KPI分析"],acceptanceCriteria:["根拠資料を明記"],actionClass:"analyze"},"PostgreSQL persists structured Handoff details in the atomic event");
-  const handoffReplay=await registry.recordTaskHandoff({taskId:handoffTask.task.taskId,expectedVersion:handoffRunning.version,lease:handoffClaim.lease,fromAgentId:(loserId==="worker-a"?"agent-a":"agent-b"),toAgentId:"agent-target",fromDepartmentId:"engineering",toDepartmentId:"management",idempotencyKey:"handoff-once"});
+  const handoffReplay=await registry.recordTaskHandoff({taskId:handoffTask.task.taskId,expectedVersion:handoffRunning.version,lease:handoffClaim.lease,fromAgentId:(loserId==="worker-a"?"agent-a":"agent-b"),toAgentId:"agent-target",fromDepartmentId:"engineering",toDepartmentId:"management",idempotencyKey:"handoff-once",handoffRequest:{reason:"経営部門の専門確認が必要です",deliverables:["KPI分析"],acceptanceCriteria:["根拠資料を明記"],actionClass:"analyze"}});
   assert.equal(handoffReplay.created,false,"handoff idempotency key must prevent duplicate transfer events");
   const resourceAttempts=await Promise.all([
    registry.acquireLease({resourceKey:"resource:race",ownerId:"worker-a",leaseMs:5000}),
