@@ -9,7 +9,7 @@ function fixture({authorized=true,handlerResult={success:true},targetWorker=null
   async getTask(){calls.push("get");return{task,version:1};},
   async listTasks(){calls.push("list");return[{task,version:1}];},
   async claimTaskForWorker(){calls.push("atomic-claim");return{task:{...task,status:"claimed",state:"claimed"},version:2,lease:{resourceKey:"task:task-1",ownerId:"worker-1",token:"opaque",fencingToken:1},worker:{version:1}};},
-  async transitionTask(input){calls.push("transition:"+input.status);return{task:{...task,status:input.status,state:input.status},version:input.expectedVersion+1};},
+  async transitionTask(input){calls.push("transition:"+input.status);return{task:{...task,...input.patch,status:input.status,state:input.status},version:input.expectedVersion+1};},
   async heartbeatLease({lease}){return lease;},
   async releaseLease(){calls.push("release");return true;},
   async recordTaskHandoff(input){calls.push("record-handoff");assert.equal(input.fromAgentId,"agent-1");assert.equal(input.toAgentId,"agent-2");assert.equal(input.toDepartmentId,"management");assert.ok(input.idempotencyKey);return{created:true,task:{...task,ownerAgent:input.toAgentId,departmentId:input.toDepartmentId,resultResourceId:input.resultResourceId,status:"queued",state:"queued"},version:4};}
@@ -31,6 +31,7 @@ test("Dispatcher uses Task Registry as source and orders auth eligibility select
  const {dispatcher,calls}=fixture();
  const result=await dispatcher.dispatchTask({taskId:"task-1",requesterAgentId:"agent-1",conversationId:"conversation-1",projectId:"project-1"});
  assert.equal(result.outcome,"completed");
+ assert.equal(result.task.resultResourceId,"task-result-task-1");
  assert.deepEqual(calls,["get","authorize:agent-1","eligible","select-worker:construction","rate-limit","authorize:agent-1","atomic-claim","transition:running","execute","fenced-write","transition:completed","worker-release","release"]);
 });
 test("Dispatcher fails closed before claim when authorization is denied",async()=>{
@@ -64,6 +65,7 @@ test("structured Handoff with no eligible destination moves Task to waiting and 
  const result=await dispatcher.dispatchTask({taskId:"task-1",requesterAgentId:"agent-1",conversationId:"conversation-1",projectId:"project-1"});
  assert.equal(result.outcome,"waiting_for_handoff_target");
  assert.equal(result.task.status,"waiting");
+ assert.equal(result.task.resultResourceId,"task-result-task-1");
  assert.ok(calls.includes("transition:waiting"));
  assert.ok(calls.includes("worker-release"));
  assert.ok(calls.includes("release"));
