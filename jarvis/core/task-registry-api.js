@@ -3,7 +3,7 @@
 const {ALL_TASK_STATES}=require("./task-state-machine");
 const TASK_STATES=ALL_TASK_STATES;
 const ACTIONS=Object.freeze({
-  list:"tasks:read",get:"tasks:read",create:"tasks:write",claim:"tasks:claim",
+  list:"tasks:read",get:"tasks:read",create:"tasks:write",claim:"tasks:claim",dispatch:"tasks:dispatch",
   heartbeat:"tasks:lease",release:"tasks:lease",transition:"tasks:transition",resourceLease:"resources:lease"
 });
 function createInMemoryTaskRegistryRateLimiter({limit=120,windowMs=60000,clock=()=>Date.now()}={}){
@@ -23,9 +23,10 @@ function createInMemoryTaskRegistryRateLimiter({limit=120,windowMs=60000,clock=(
   }};
 }
 
-function createTaskRegistryApi({registry=null,authorize=null,json,readJson,rateLimiter=null}={}){
+function createTaskRegistryApi({registry=null,authorize=null,json,readJson,rateLimiter=null,dispatcher=null}={}){
   if(typeof json!=="function"||typeof readJson!=="function")throw new Error("JSON response and request readers are required");
   if(registry&&typeof authorize==="function"&&(!rateLimiter||typeof rateLimiter.consume!=="function"))throw new Error("A shared Task Registry rate limiter must be explicitly configured");
+  if(dispatcher!==null&&typeof dispatcher.dispatchTask!=="function")throw new Error("A compatible Task Dispatcher is required");
   if(!rateLimiter)rateLimiter={async consume(){throw new Error("Rate limiter is not configured");}};
   async function principalFor(req,action,taskId){
     if(!registry||typeof authorize!=="function")return {error:"unavailable"};
@@ -114,7 +115,7 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson,rateL
         });
         json(res,result.created?201:200,{ok:true,...result});return true;
       }
-      const match=/^\/v1\/tasks\/([A-Za-z0-9._:-]{1,80})(?:\/(claim|heartbeat|release|transition))?$/.exec(path);
+      const match=/^\/v1\/tasks\/([A-Za-z0-9._:-]{1,80})(?:\/(claim|dispatch|heartbeat|release|transition))?$/.exec(path);
       if(!match)return json(res,404,{ok:false,error:"Not Found"});
       const taskId=match[1],operation=match[2]||"get";
       if(operation==="get"&&req.method==="GET"){
@@ -123,6 +124,20 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson,rateL
         const result=await registry.getTask(taskId,{ownerAgent:auth.principal.agentId,ownerConversation:(auth.principal.conversationId||"agent:"+auth.principal.agentId)});
         if(!result||!auth.principal.projectIds.includes(result.task.projectId))return json(res,404,{ok:false,error:"Task not found"});
         json(res,200,{ok:true,...result});return true;
+      }
+      if(operation==="dispatch"&&req.method==="POST"){
+        const auth=await principalFor(req,"dispatch",taskId);
+        if(authResponse(res,auth))return true;
+        if(!dispatcher)return json(res,503,{ok:false,error:"Common Task Dispatcher is not configured"});
+        if(!req.headers?.["content-type"]?.toLowerCase().startsWith("application/json"))return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+        const d=await readJson(req);
+        const projectId=d.projectId||auth.principal.projectIds[0];
+        const conversationId=auth.principal.conversationId||"agent:"+auth.principal.agentId;
+        if(!auth.principal.projectIds.includes(projectId))return json(res,403,{ok:false,error:"Project is outside the authenticated agent scope"});
+        const owned=await registry.getTask(taskId,{ownerAgent:auth.principal.agentId,ownerConversation:conversationId,projectId});
+        if(!owned)return json(res,404,{ok:false,error:"Task not found"});
+        const result=await dispatcher.dispatchTask({taskId,requesterAgentId:auth.principal.agentId,conversationId,projectId});
+        json(res,result.dispatched?200:409,{ok:true,...result});return true;
       }
       if(operation==="claim"&&req.method==="POST"){
         const auth=await principalFor(req,"claim",taskId);
