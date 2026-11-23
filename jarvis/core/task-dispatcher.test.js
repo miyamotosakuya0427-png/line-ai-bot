@@ -2,7 +2,7 @@
 const test=require("node:test");
 const assert=require("node:assert/strict");
 const {createTaskDispatcher}=require("./task-dispatcher");
-function fixture({authorized=true,handlerResult={success:true},targetWorker=null}={}){
+function fixture({authorized=true,handlerResult={success:true},targetWorker=null,resultWriterImpl=null}={}){
  const calls=[];
  const task={taskId:"task-1",status:"queued",state:"queued",ownerAgent:"agent-1",ownerConversation:"conversation-1",projectId:"project-1",departmentId:"construction"};
  const registry={
@@ -22,7 +22,7 @@ function fixture({authorized=true,handlerResult={success:true},targetWorker=null
   async selectWorker({task:targetTask}){calls.push("select-worker:"+targetTask.departmentId);return targetTask.departmentId==="construction"?{workerId:"worker-1",agentId:"agent-1",departmentId:"construction"}:targetWorker;},
   handlers:{construction:async()=>{calls.push("execute");return handlerResult;}},
   rateLimiter:{async consume(agentId,context){calls.push("rate-limit");assert.equal(agentId,"agent-1");assert.equal(context.operation,"dispatch");return{allowed:true};}},
-  async resultWriter(){calls.push("fenced-write");return{fenced:true,summary:"saved"};},
+  async resultWriter(input){calls.push("fenced-write");return resultWriterImpl?resultWriterImpl(input):{fenced:true,summary:"saved"};},
   heartbeatMs:1000,leaseMs:5000
  });
  return{dispatcher,calls};
@@ -67,4 +67,11 @@ test("structured Handoff with no eligible destination moves Task to waiting and 
  assert.ok(calls.includes("transition:waiting"));
  assert.ok(calls.includes("worker-release"));
  assert.ok(calls.includes("release"));
+});
+
+test("Fenced Writer failure never completes the Task and quarantines the result as outcome_unknown",async()=>{
+ const {dispatcher,calls}=fixture({resultWriterImpl:async()=>{throw new Error("fenced persistence unavailable");}});
+ await assert.rejects(()=>dispatcher.dispatchTask({taskId:"task-1",requesterAgentId:"agent-1",conversationId:"conversation-1",projectId:"project-1"}),/fenced persistence unavailable/);
+ assert.ok(calls.includes("transition:outcome_unknown"));
+ assert.equal(calls.includes("transition:completed"),false);
 });
