@@ -216,7 +216,6 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         if(!["idle","recovering"].includes(worker.rows[0].status)||worker.rows[0].current_task_id)throw new Error("Worker is not available for task claim");
         const current=await latest(c,taskId);
         if(!current)throw new Error("Task does not exist");
-        if(requireAgentRevocation&&current.task.ownerAgent!==worker.rows[0].agent_id)throw new Error("Worker Agent does not own the Task");
         const scopeGrant=await c.query("SELECT grant_id FROM jarvis.worker_scope_grants WHERE worker_id=$1 AND project_id=$2 AND conversation_id=$3 AND revoked_at IS NULL FOR SHARE",[workerId,current.task.projectId,current.task.ownerConversation]);
         if(!scopeGrant.rows[0])throw new Error("Worker has no active grant for this Project and Conversation");
         const now=clock();
