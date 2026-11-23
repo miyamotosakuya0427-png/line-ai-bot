@@ -67,7 +67,8 @@ function createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEli
         taskFinalized=true;
         return {dispatched:true,outcome:"failed",task:active.task};
       }
-      const saved=await resultWriter({task:active.task,version:active.version,worker,lease,principal,result});\n      savedResult=saved;
+      const saved=await resultWriter({task:active.task,version:active.version,worker,lease,principal,result});
+      savedResult=saved;
       if(!saved||saved.fenced!==true)throw new Error("Fenced result writer did not confirm a durable write");
       if(result?.handoffRequest!==undefined){
         const request=result.handoffRequest;
