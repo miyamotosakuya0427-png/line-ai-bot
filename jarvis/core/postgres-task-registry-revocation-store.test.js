@@ -17,12 +17,15 @@ test("shared Agent revocation is re-read for every request without process resta
   assert.equal(reads,2);
 });
 test("PostgreSQL revocation store fails closed when migration is absent and records revocations once",async()=>{
-  let exists=false;const rows=new Set();const pool={async query(sql,args=[]){
+  let exists=false;const rows=new Set();
+  const query=async(sql,args=[])=>{
     if(sql.includes("to_regclass"))return{rows:[{table_name:exists?"jarvis.task_registry_agent_revocations":null}]};
     if(sql.includes("INSERT INTO jarvis.task_registry_agent_revocations")){const before=rows.size;rows.add(args[0]);return{rowCount:rows.size-before,rows:[]};}
     if(sql.includes("SELECT 1 FROM jarvis.task_registry_agent_revocations"))return{rowCount:rows.has(args[0])?1:0,rows:[]};
-    throw new Error("unexpected query");
-  }};
+    if(sql==="BEGIN"||sql==="COMMIT"||sql==="ROLLBACK"||sql.includes("pg_advisory_xact_lock"))return{rowCount:0,rows:[]};
+    throw new Error("unexpected query: "+sql);
+  };
+  const pool={query,async connect(){return{query,release(){}};}};
   const store=createPostgresTaskRegistryRevocationStore({pool,clock:()=>"2026-11-21T00:00:00.000Z"});
   await assert.rejects(store.init(),/migration 0010 is not installed/);
   exists=true;await store.init();
