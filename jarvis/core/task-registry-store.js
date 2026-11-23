@@ -22,13 +22,14 @@ function validateHandoffRoute(history,fromDepartmentId,toDepartmentId,maxHandoff
   return true;
 }
 
-function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactory=()=>crypto.randomBytes(32).toString("base64url")}={}){
+function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactory=()=>crypto.randomBytes(32).toString("base64url"),requireAgentRevocation=false}={}){
   if(!pool||typeof pool.connect!=="function")throw new Error("PostgreSQL pool is required");
   let initialized=false;
   async function init(){
     if(initialized)return {ok:true};
-    const r=await pool.query("SELECT to_regclass('jarvis.events') AS events, to_regclass('jarvis.coordination_leases') AS leases");
+    const r=await pool.query("SELECT to_regclass('jarvis.events') AS events, to_regclass('jarvis.coordination_leases') AS leases, to_regclass('jarvis.task_registry_agent_revocations') AS revocations");
     if(!r.rows[0]?.events||!r.rows[0]?.leases)throw new Error("Task Registry migration 0004 is not installed");
+    if(requireAgentRevocation&&!r.rows[0]?.revocations)throw new Error("Task Registry migration 0010 is required for Worker dispatch");
     initialized=true;return {ok:true};
   }
   async function tx(fn){
@@ -38,6 +39,16 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
     finally{c.release();}
   }
   async function lock(c,key){await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))",[key]);}
+  async function assertAgentsActive(c,agentIds){
+    if(!requireAgentRevocation)return;
+    const ids=[...new Set(agentIds)].sort();
+    for(const agentId of ids){
+      if(!text(agentId,128))throw new Error("Invalid Agent identity for revocation check");
+      await lock(c,"agent-revocation:"+agentId);
+      const revoked=await c.query("SELECT 1 FROM jarvis.task_registry_agent_revocations WHERE agent_id=$1",[agentId]);
+      if(revoked.rows[0])throw new Error("Agent credential is revoked; Task claim or Handoff denied");
+    }
+  }
   async function latest(c,id){
     const r=await c.query("SELECT aggregate_version,payload FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1 ORDER BY aggregate_version DESC LIMIT 1",[id]);
     return r.rows[0]?{version:Number(r.rows[0].aggregate_version),task:r.rows[0].payload}:null;
@@ -201,6 +212,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         if(!lease)return null;
         const worker=await c.query("SELECT status,current_task_id FROM jarvis.worker_registry WHERE worker_id=$1 FOR UPDATE",[workerId]);
         if(!worker.rows[0])throw new Error("Worker is not registered");
+        await assertAgentsActive(c,[worker.rows[0].agent_id]);
         if(!["idle","recovering"].includes(worker.rows[0].status)||worker.rows[0].current_task_id)throw new Error("Worker is not available for task claim");
         const current=await latest(c,taskId);
         if(!current)throw new Error("Task does not exist");
@@ -267,6 +279,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
           return {created:false,task:clone(p),version:Number(prior.rows[0].aggregate_version)};
         }
         await assertLease(c,lease);
+        await assertAgentsActive(c,[fromAgentId,toAgentId]);
         if(lease.resourceKey!=="task:"+taskId)throw new Error("Handoff Task Lease mismatch");
         const worker=await c.query("SELECT worker_id,agent_id,department_id,current_task_id,lease_resource_key,fencing_token,version FROM jarvis.worker_registry WHERE worker_id=$1 FOR UPDATE",[lease.ownerId]);
         if(!worker.rows[0]||worker.rows[0].current_task_id!==taskId||worker.rows[0].lease_resource_key!==lease.resourceKey||Number(worker.rows[0].fencing_token)!==lease.fencingToken)throw new Error("Handoff Worker binding is stale");
