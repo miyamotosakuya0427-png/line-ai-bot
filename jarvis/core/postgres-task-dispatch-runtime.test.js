@@ -39,7 +39,8 @@ function fixture(handler,authorizeAgentImpl=null){
 test("PostgreSQL dispatch runtime connects authorized Handler execution to fenced result persistence and completion",async()=>{
  const {runtime,calls}=fixture(async payload=>{assert.match(payload.request,/依頼：Runtime Task/);return{answer:"施工部門の分析結果",model:"test-model"};});
  const result=await runtime.dispatchTask({taskId:"task-1",requesterAgentId:"agent-a",conversationId:"conversation-a",projectId:"project-a"});
- assert.equal(result.outcome,"completed");\n assert.equal(result.task.resultResourceId,"task-result-task-1");
+ assert.equal(result.outcome,"completed");
+ assert.equal(result.task.resultResourceId,"task-result-task-1");
  assert.ok(calls.indexOf("fenced-write")<calls.indexOf("transition:completed"));
  assert.ok(calls.includes("complete-worker"));
  assert.ok(calls.includes("release:resource:task-result-task-1"));
@@ -49,7 +50,8 @@ test("PostgreSQL dispatch runtime verifies the target Agent and persists structu
  const request={departmentId:"management",reason:"経営判断の専門確認が必要です",deliverables:["KPI分析"],acceptanceCriteria:["根拠資料を明記"],actionClass:"analyze"};
  const {runtime,calls}=fixture(async payload=>{assert.match(payload.request,/受入条件：/);return{answer:"経営部門で追加確認します",handoffRequest:request};});
  const result=await runtime.dispatchTask({taskId:"task-1",requesterAgentId:"agent-a",conversationId:"conversation-a",projectId:"project-a"});
- assert.equal(result.outcome,"handed_off");\n assert.equal(result.task.resultResourceId,"task-result-task-1");
+ assert.equal(result.outcome,"handed_off");
+ assert.equal(result.task.resultResourceId,"task-result-task-1");
  assert.ok(calls.includes("authorize:agent-b"));
  assert.ok(calls.indexOf("fenced-write")<calls.indexOf("record-handoff"));
  assert.equal(calls.includes("complete-worker"),false);
