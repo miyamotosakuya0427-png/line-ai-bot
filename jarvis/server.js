@@ -1061,7 +1061,8 @@ if (require.main===module) {
     if(videoBatchStore&&departmentHandlers["department.content"]) departmentHandlers["department.content"]=createVideoBatchContentHandler({contentHandler:departmentHandlers["department.content"],videoBatchStore});
     if(taskRegistry&&executionKernel&&taskRegistryRevocationStore&&taskRegistryRateLimiter){
       const {createPostgresTaskDispatchRuntime}=require("./core/postgres-task-dispatch-runtime");
-      taskDispatcher=createPostgresTaskDispatchRuntime({registry:taskRegistry,executionKernel,authorizeAgent:authorizeTaskRegistry.authorizeAgent,handlers:departmentHandlers,rateLimiter:taskRegistryRateLimiter});\n    }
+      taskDispatcher=createPostgresTaskDispatchRuntime({registry:taskRegistry,executionKernel,authorizeAgent:authorizeTaskRegistry.authorizeAgent,handlers:departmentHandlers,rateLimiter:taskRegistryRateLimiter});
+    }
     const worker=workerEnabled?createWorker({store:jobStore,handlers:{"assistant.request":createOpenAIHandler(),"assistant.company_question":createOpenAIHandler(),...departmentHandlers}}):null;
     if (worker) { await worker.start(); worker.startPolling({intervalMs:Number(process.env.JARVIS_WORKER_POLL_MS||1500)}); }
     const contentScheduler=worker&&process.env.JARVIS_CONTENT_AUTOPLAN_ENABLED==="true"?startDailyContentPlanner({store:jobStore}):null;
