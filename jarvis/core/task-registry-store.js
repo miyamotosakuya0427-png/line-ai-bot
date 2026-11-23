@@ -238,6 +238,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
     async claimTask({taskId,ownerId,leaseMs=60000}={}){
       await init();
       return tx(async c=>{
+        await assertAgentsActive(c,[ownerId]);
         const lease=await acquireInTx(c,{resourceKey:"task:"+taskId,ownerId,leaseMs});
         if(!lease)return null;
         const current=await latest(c,taskId);
