@@ -146,9 +146,10 @@ class MarketDataStore {
       ];
       const gate = qualityGate(gateFindings);
       for (const finding of allFindings) {
+        const findingBarId = finding.barId || (barIds.length === 1 ? barIds[0] : null);
         await client.query(
           "INSERT INTO market_quality_findings(batch_id,bar_id,code,severity,details) VALUES($1,$2,$3,$4,$5::jsonb)",
-          [batchId,finding.barId||null,finding.code,finding.severity,JSON.stringify(finding.details||{})]
+          [batchId,findingBarId,finding.code,finding.severity,JSON.stringify(finding.details||{})]
         );
       }
       const finalStatus = gate.accepted ? "completed" : "quarantined";
