@@ -79,5 +79,6 @@ test("internal target Agent authorization fails closed without the shared revoca
 test("Claim and Dispatch scopes fail closed when shared revocation storage is unavailable",async()=>{
  const token="claim-needs-revocation".padEnd(48,"x");
  const authorize=createTaskRegistryAuthorizer({config:JSON.stringify({"worker-a":{tokenHash:hash(token),expiresAt:"2099-01-01T00:00:00.000Z",scopes:["tasks:claim","tasks:dispatch"]}})});
- assert.equal((await authorize({headers:{authorization:"Bearer "+token}},{action:"list"})).agentId,"worker-a","read-only polling remains available");\n await assert.rejects(()=>authorize({headers:{authorization:"Bearer "+token}},{action:"claim"}),/Shared Task Registry revocation store is required/);
+ assert.equal((await authorize({headers:{authorization:"Bearer "+token}},{action:"list"})).agentId,"worker-a","read-only polling remains available");
+ await assert.rejects(()=>authorize({headers:{authorization:"Bearer "+token}},{action:"claim"}),/Shared Task Registry revocation store is required/);
 });
