@@ -253,9 +253,9 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
       const r=await pool.query("SELECT event_id,aggregate_id,aggregate_version,event_type,payload,created_at FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=ANY($1::text[]) ORDER BY event_id DESC LIMIT $2",[taskIds,limit]);
       return r.rows.map(row=>({eventId:Number(row.event_id),taskId:row.aggregate_id,version:Number(row.aggregate_version),eventType:row.event_type,payload:clone(row.payload),createdAt:row.created_at}));
     },
-    async recordTaskHandoff({taskId,expectedVersion,lease,fromAgentId,toAgentId,fromDepartmentId,toDepartmentId,idempotencyKey}={}){
+    async recordTaskHandoff({taskId,expectedVersion,lease,fromAgentId,toAgentId,fromDepartmentId,toDepartmentId,idempotencyKey,handoffRequest=null}={}){
       await init();
-      if(!text(taskId,200)||!Number.isSafeInteger(expectedVersion)||![fromAgentId,toAgentId,fromDepartmentId,toDepartmentId].every(x=>text(x,128))||!text(idempotencyKey,240))throw new Error("Invalid Task handoff request");
+      if(!text(taskId,200)||!Number.isSafeInteger(expectedVersion)||![fromAgentId,toAgentId,fromDepartmentId,toDepartmentId].every(x=>text(x,128))||!text(idempotencyKey,240))throw new Error("Invalid Task handoff request");\n       if(handoffRequest!==null&&(!handoffRequest||typeof handoffRequest!=="object"||Array.isArray(handoffRequest)||!text(handoffRequest.reason,10,500)||!Array.isArray(handoffRequest.deliverables)||handoffRequest.deliverables.length<1||handoffRequest.deliverables.length>20||handoffRequest.deliverables.some(x=>!text(x,500))||!Array.isArray(handoffRequest.acceptanceCriteria)||handoffRequest.acceptanceCriteria.length<1||handoffRequest.acceptanceCriteria.length>20||handoffRequest.acceptanceCriteria.some(x=>!text(x,500))||!["read","analyze","draft","notify","internal_task"].includes(handoffRequest.actionClass)))throw new Error("Invalid structured Task handoff details");
       const keyHash=hash("task-handoff:"+idempotencyKey);
       return tx(async c=>{
         await lock(c,"task-handoff:"+keyHash);
@@ -281,7 +281,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         await c.query("UPDATE jarvis.coordination_leases SET expires_at=$1::timestamptz,updated_at=$1::timestamptz WHERE resource_key=$2 AND owner_id=$3 AND fencing_token=$4",[now,lease.resourceKey,lease.ownerId,lease.fencingToken]);
         const released=await c.query("UPDATE jarvis.worker_registry SET status='idle',current_task_id=NULL,lease_resource_key=NULL,fencing_token=NULL,version=version+1,updated_at=$1 WHERE worker_id=$2 AND version=$3 RETURNING worker_id",[now,lease.ownerId,Number(worker.rows[0].version)]);
         if(released.rowCount!==1)throw new Error("Handoff Worker release lost concurrency race");
-        await append(c,taskId,"agent_handoff",{...next,fromAgentId,toAgentId,fromDepartmentId,toDepartmentId,fromWorkerId:lease.ownerId,handoffAt:now},keyHash);
+        await append(c,taskId,"agent_handoff",{...next,fromAgentId,toAgentId,fromDepartmentId,toDepartmentId,fromWorkerId:lease.ownerId,handoffRequest:handoffRequest?clone(handoffRequest):null,handoffAt:now},keyHash);
         return {created:true,task:clone(next),version:current.version+1,event:{eventType:"agent_handoff",fromAgentId,toAgentId,fromDepartmentId,toDepartmentId,workerId:lease.ownerId,createdAt:now}};
       });
     },
