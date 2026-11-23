@@ -74,7 +74,7 @@ function createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEli
         const targetDepartment=getDepartment(request?.departmentId);
         const validText=(value,min,max)=>typeof value==="string"&&value.trim().length>=min&&value.length<=max;
         const validList=value=>Array.isArray(value)&&value.length>=1&&value.length<=20&&value.every(item=>validText(item,1,500));
-        if(!request||typeof request!=="object"||Array.isArray(request)||!targetDepartment||targetDepartment.id===active.task.departmentId||!validText(request.reason,10,500)||!validList(request.deliverables)||!validList(request.acceptanceCriteria)||!["read","analyze","draft","notify","internal_task"].includes(request.actionClass))throw new Error("Handler returned an invalid or unregistered structured Handoff request");
+        if(!request||typeof request!=="object"||Array.isArray(request)||!targetDepartment||targetDepartment.id===active.task.departmentId||!validText(request.reason,10,500)||!validList(request.deliverables)||!validList(request.acceptanceCriteria)||!["read","analyze","draft","internal_task"].includes(request.actionClass))throw new Error("Handler returned an invalid or unregistered structured Handoff request");
         if(typeof registry.recordTaskHandoff!=="function")throw new Error("Atomic Task Handoff is unavailable");
         const targetTask={...active.task,departmentId:request.departmentId,ownerAgent:"pending-target"};
         const targetWorker=await selectWorker({task:targetTask,principal,targetAgentId:request.agentId||null,sourceWorker:worker});
