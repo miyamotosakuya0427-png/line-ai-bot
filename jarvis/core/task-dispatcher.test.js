@@ -4,7 +4,7 @@ const assert=require("node:assert/strict");
 const {createTaskDispatcher}=require("./task-dispatcher");
 function fixture({authorized=true,handlerResult={success:true},targetWorker=null}={}){
  const calls=[];
- const task={taskId:"task-1",status:"queued",state:"queued",ownerAgent:"agent-1",ownerConversation:"conversation-1",projectId:"project-1",departmentId:"finance"};
+ const task={taskId:"task-1",status:"queued",state:"queued",ownerAgent:"agent-1",ownerConversation:"conversation-1",projectId:"project-1",departmentId:"construction"};
  const registry={
   async getTask(){calls.push("get");return{task,version:1};},
   async listTasks(){calls.push("list");return[{task,version:1}];},
@@ -19,8 +19,8 @@ function fixture({authorized=true,handlerResult={success:true},targetWorker=null
   registry,executionKernel,
   async authorizeTask({requesterAgentId="agent-1"}){calls.push("authorize:"+requesterAgentId);return authorized?{allowed:true,agentId:requesterAgentId,conversationId:"conversation-1",projectIds:["project-1"]}:null;},
   async isAgentEligible(){calls.push("eligible");return true;},
-  async selectWorker({task:targetTask}){calls.push("select-worker:"+targetTask.departmentId);return targetTask.departmentId==="finance"?{workerId:"worker-1",agentId:"agent-1",departmentId:"finance"}:targetWorker;},
-  handlers:{finance:async()=>{calls.push("execute");return handlerResult;}},
+  async selectWorker({task:targetTask}){calls.push("select-worker:"+targetTask.departmentId);return targetTask.departmentId==="construction"?{workerId:"worker-1",agentId:"agent-1",departmentId:"finance"}:targetWorker;},
+  handlers:{construction:async()=>{calls.push("execute");return handlerResult;}},
   rateLimiter:{async consume(agentId,context){calls.push("rate-limit");assert.equal(agentId,"agent-1");assert.equal(context.operation,"dispatch");return{allowed:true};}},
   async resultWriter(){calls.push("fenced-write");return{fenced:true,summary:"saved"};},
   heartbeatMs:1000,leaseMs:5000
@@ -31,7 +31,7 @@ test("Dispatcher uses Task Registry as source and orders auth eligibility select
  const {dispatcher,calls}=fixture();
  const result=await dispatcher.dispatchTask({taskId:"task-1",requesterAgentId:"agent-1",conversationId:"conversation-1",projectId:"project-1"});
  assert.equal(result.outcome,"completed");
- assert.deepEqual(calls,["get","authorize:agent-1","eligible","select-worker:finance","rate-limit","authorize:agent-1","atomic-claim","transition:running","execute","fenced-write","transition:completed","worker-release","release"]);
+ assert.deepEqual(calls,["get","authorize:agent-1","eligible","select-worker:construction","rate-limit","authorize:agent-1","atomic-claim","transition:running","execute","fenced-write","transition:completed","worker-release","release"]);
 });
 test("Dispatcher fails closed before claim when authorization is denied",async()=>{
  const {dispatcher,calls}=fixture({authorized:false});
@@ -51,7 +51,7 @@ test("Dispatcher requires an explicit fenced result writer",()=>{
 
 test("structured Department Handler Handoff is authorized and committed through the common Dispatcher",async()=>{
  const target={workerId:"worker-2",agentId:"agent-2",departmentId:"management"};
- const {dispatcher,calls}=fixture({handlerResult:{handoffRequest:{departmentId:"management",reason:"needs management review"}},targetWorker:target});
+ const {dispatcher,calls}=fixture({handlerResult:{handoffRequest:{departmentId:"management",reason:"経営部門の専門確認が必要です",deliverables:["KPI分析"],acceptanceCriteria:["出典付きで確認"],actionClass:"analyze"}},targetWorker:target});
  const result=await dispatcher.dispatchTask({taskId:"task-1",requesterAgentId:"agent-1",conversationId:"conversation-1",projectId:"project-1"});
  assert.equal(result.outcome,"handed_off");
  assert.equal(result.task.ownerAgent,"agent-2");
@@ -60,7 +60,7 @@ test("structured Department Handler Handoff is authorized and committed through 
  assert.equal(calls.includes("worker-release"),false,"atomic handoff already releases the source Worker");
 });
 test("structured Handoff with no eligible destination moves Task to waiting and safely releases source Lease",async()=>{
- const {dispatcher,calls}=fixture({handlerResult:{handoffRequest:{departmentId:"management"}},targetWorker:null});
+ const {dispatcher,calls}=fixture({handlerResult:{handoffRequest:{departmentId:"management",reason:"経営部門の専門確認が必要です",deliverables:["KPI分析"],acceptanceCriteria:["出典付きで確認"],actionClass:"analyze"}},targetWorker:null});
  const result=await dispatcher.dispatchTask({taskId:"task-1",requesterAgentId:"agent-1",conversationId:"conversation-1",projectId:"project-1"});
  assert.equal(result.outcome,"waiting_for_handoff_target");
  assert.equal(result.task.status,"waiting");
