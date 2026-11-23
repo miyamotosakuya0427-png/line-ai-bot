@@ -80,7 +80,7 @@ function createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEli
         const targetTask={...active.task,departmentId:request.departmentId,ownerAgent:"pending-target"};
         const targetWorker=await selectWorker({task:targetTask,principal,targetAgentId:request.agentId||null,sourceWorker:worker});
         if(!targetWorker){
-          active=await registry.transitionTask({taskId,expectedVersion:active.version,lease,status:"waiting",patch:{nextAction:"No eligible Handoff Worker; awaiting Dispatcher capacity"}});
+          active=await registry.transitionTask({taskId,expectedVersion:active.version,lease,status:"waiting",patch:{nextAction:"No eligible Handoff Worker; awaiting Dispatcher capacity",resultResourceId:saved.resourceId}});
           taskFinalized=true;
           return {dispatched:true,outcome:"waiting_for_handoff_target",task:active.task};
         }
