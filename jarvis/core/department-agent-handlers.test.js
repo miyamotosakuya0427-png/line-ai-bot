@@ -40,7 +40,7 @@ test("structured Handoff is parsed without changing the legacy answer shape",asy
 });
 test("unregistered, self-targeted, incomplete and external-action Handoffs fail closed",()=>{
  const valid={departmentId:"management",reason:"専門確認のため移管します",deliverables:["資料"],acceptanceCriteria:["根拠を確認"],actionClass:"analyze"};
- for(const request of [{...valid,departmentId:"not-registered"},{...valid,departmentId:"construction"},{...valid,deliverables:[]},{...valid,actionClass:"publish"}]){
+ for(const request of [{...valid,departmentId:"not-registered"},{...valid,departmentId:"construction"},{...valid,deliverables:[]},{...valid,actionClass:"publish"},{...valid,actionClass:"notify"}]){
   const answer='本文\n<!-- ONE_JARVIS_HANDOFF: '+JSON.stringify(request)+' -->';
   assert.throws(()=>parseStructuredHandoff(answer,"construction"),/failed validation/);
  }
