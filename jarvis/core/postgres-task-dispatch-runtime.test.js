@@ -29,7 +29,7 @@ function fixture(handler,authorizeAgentImpl=null){
  };
  const authorizeAgent=authorizeAgentImpl||async(agentId,scope)=>{calls.push("authorize:"+agentId);return{agentId,conversationId:"conversation-a",scopes:["tasks:dispatch","tasks:claim"],projectIds:["project-a"]};};
  const runtime=createPostgresTaskDispatchRuntime({
-  registry,executionKernel,authorizeAgent,handlers:{construction:handler},
+  registry,executionKernel,authorizeAgent,handlers:{"department.construction":handler},
   rateLimiter:{async consume(){return{allowed:true};}},leaseMs:5000,heartbeatMs:1000
  });
  return{runtime,calls,registry};
