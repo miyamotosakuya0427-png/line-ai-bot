@@ -16,15 +16,16 @@ class MarketDataStore {
     this.pool = pool;
   }
 
-  async ingest({ sourceId, batchId, idempotencyKey, bars, findings = [] }) {
-    if (!sourceId || !batchId || !idempotencyKey || !Array.isArray(bars) || !Array.isArray(findings)) {
+  async ingest({ sourceId, batchId, idempotencyKey, bars, findings = [], findingCorrections = [] }) {
+    if (!sourceId || !batchId || !idempotencyKey || !Array.isArray(bars) || !Array.isArray(findings) || !Array.isArray(findingCorrections)) {
       throw new Error("Invalid ingest request");
     }
     if (!bars.length) throw new Error("At least one normalized bar is required");
     const payloadHash = crypto.createHash("sha256").update(stable({
       sourceId,
       bars: bars.map(b => ({ normalizedHash: b.normalizedHash, rawPayloadHash: b.rawPayloadHash || null })),
-      findings
+      findings,
+      findingCorrections
     })).digest("hex");
     const client = await this.pool.connect();
     try {
@@ -82,19 +83,21 @@ class MarketDataStore {
 
       let inserted = 0;
       let revised = 0;
+      const barIds = [];
       const allFindings = [...findings, ...auditBars(bars)];
       for (const bar of bars) {
         const result = await client.query(
           "INSERT INTO market_bars(source_id,venue,symbol,interval,open_time_utc,close_time_utc,source_timestamp_raw,source_timezone,received_at_utc,open,high,low,close,volume,quote_volume,adjustment_state,normalized_hash,raw_payload_hash,quote_currency,verification_status,batch_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'unverified',$20) ON CONFLICT(source_id,venue,symbol,interval,open_time_utc,adjustment_state) DO NOTHING RETURNING id",
           [sourceId,bar.venue,bar.symbol,bar.interval,bar.openTimeUtc,bar.closeTimeUtc,bar.sourceTimestampRaw,bar.sourceTimezone,bar.receivedAtUtc,bar.open,bar.high,bar.low,bar.close,bar.volume,bar.quoteVolume,bar.adjustmentState,bar.normalizedHash,bar.rawPayloadHash||null,quoteCurrency(bar, source.currency_allowlist),batchId]
         );
-        if (result.rowCount) { inserted++; continue; }
+        if (result.rowCount) { inserted++; barIds.push(result.rows[0].id); continue; }
 
         const old = await client.query(
           "SELECT id, normalized_hash, to_jsonb(market_bars) AS prior_payload FROM market_bars WHERE source_id=$1 AND venue=$2 AND symbol=$3 AND interval=$4 AND open_time_utc=$5 AND adjustment_state=$6 FOR UPDATE",
           [sourceId,bar.venue,bar.symbol,bar.interval,bar.openTimeUtc,bar.adjustmentState]
         );
         if (!old.rowCount) throw new Error("Conflicting bar disappeared during ingest");
+        barIds.push(old.rows[0].id);
         if (old.rows[0].normalized_hash !== bar.normalizedHash) {
           const revision = await client.query(
             "SELECT COALESCE(MAX(revision_no),0)+1 AS next_revision FROM market_bar_revisions WHERE bar_id=$1",
@@ -111,11 +114,37 @@ class MarketDataStore {
           );
           allFindings.push({ code:"CANDLE_REVISION", severity:"high", details:{ priorHash:old.rows[0].normalized_hash, newHash:bar.normalizedHash }, barId:old.rows[0].id });
           revised++;
+        } else {
+          await client.query(
+            "UPDATE market_bars SET batch_id=$2, verification_status='unverified' WHERE id=$1",
+            [old.rows[0].id,batchId]
+          );
         }
       }
 
-      // Revisions can introduce findings, so evaluate only after all write-side checks.
-      const gate = qualityGate(allFindings);
+      // Finding corrections, unresolved-finding lookup and quality re-evaluation
+      // are part of this same transaction as bars, revisions and the audit event.
+      const correctionAudit = [];
+      for (const correction of findingCorrections) {
+        if (!correction || !correction.id || typeof correction.resolution !== "string" || !correction.resolution.trim()) {
+          throw new Error("Finding correction requires an id and non-empty resolution");
+        }
+        const resolved = await client.query(
+          "UPDATE market_quality_findings SET resolved_at=now(), details=details || jsonb_build_object('resolution',$2::text,'resolvedAt',now()) WHERE id=$1 AND bar_id=ANY($3::uuid[]) AND resolved_at IS NULL RETURNING id,code,severity",
+          [correction.id,correction.resolution.trim(),barIds]
+        );
+        if (!resolved.rowCount) throw new Error("Finding correction target is missing, already resolved, or outside this batch");
+        correctionAudit.push({ id: resolved.rows[0].id, code: resolved.rows[0].code, resolution: correction.resolution.trim() });
+      }
+      const unresolvedResult = await client.query(
+        "SELECT id,code,severity,details,bar_id FROM market_quality_findings WHERE bar_id=ANY($1::uuid[]) AND resolved_at IS NULL FOR UPDATE",
+        [barIds]
+      );
+      const gateFindings = [
+        ...unresolvedResult.rows.map(row => ({ code:row.code, severity:row.severity, details:row.details, barId:row.bar_id })),
+        ...allFindings
+      ];
+      const gate = qualityGate(gateFindings);
       for (const finding of allFindings) {
         await client.query(
           "INSERT INTO market_quality_findings(batch_id,bar_id,code,severity,details) VALUES($1,$2,$3,$4,$5::jsonb)",
@@ -124,15 +153,15 @@ class MarketDataStore {
       }
       const finalStatus = gate.accepted ? "completed" : "quarantined";
       await client.query(
-        "UPDATE market_bars SET verification_status=$2 WHERE batch_id=$1",
-        [batchId, gate.accepted ? "passed" : "quarantined"]
+        "UPDATE market_bars SET verification_status=$2 WHERE id=ANY($1::uuid[])",
+        [barIds, gate.accepted ? "passed" : "quarantined"]
       );
 
       // One transaction-scoped global lock serializes chain-head read + append.
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", ["market_data_audit_events:global"]);
       const chain = await client.query("SELECT event_hash FROM market_data_audit_events ORDER BY id DESC LIMIT 1");
       const previousHash = chain.rows[0]?.event_hash || null;
-      const auditPayload = { batchId, sourceId, idempotencyKey, payloadHash, inputCount:bars.length, inserted, revised, findings:allFindings.length, qualityAccepted:gate.accepted };
+      const auditPayload = { batchId, sourceId, idempotencyKey, payloadHash, inputCount:bars.length, inserted, revised, findings:allFindings.length, activeFindings:gateFindings.length, findingCorrections:correctionAudit, qualityAccepted:gate.accepted };
       const eventHash = hashEvent(auditPayload, previousHash);
       await client.query(
         "INSERT INTO market_data_audit_events(event_type,resource_type,resource_id,payload,previous_hash,event_hash) VALUES('INGEST','market_ingest_batch',$1,$2::jsonb,$3,$4)",
@@ -140,7 +169,7 @@ class MarketDataStore {
       );
       await client.query(
         "UPDATE market_ingest_batches SET status=$2,completed_at=now(),accepted_count=$3,rejected_count=$4 WHERE id=$1",
-        [batchId,finalStatus,gate.accepted?inserted:0,gate.accepted?0:allFindings.length]
+        [batchId,finalStatus,gate.accepted?inserted:0,gate.accepted?0:gateFindings.length]
       );
       await client.query("COMMIT");
       return { idempotentReplay:false, batchId, inserted, revised, findings:allFindings.length, quality:finalStatus };
