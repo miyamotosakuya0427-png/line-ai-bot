@@ -56,7 +56,7 @@ function createDepartmentHandlers(options={}){
    return {...result,answer:parsed.answer,...(parsed.handoffRequest?{handoffRequest:parsed.handoffRequest}:{})};
   };
  }
- const officeHandler=createSubsidyResearchHandler({...openAIOptions,researchFetchImpl,store});
+ const officeHandler=createSubsidyResearchHandler({...openAIOptions,researchFetchImpl,store,instructionsSuffix:HANDOFF_PROTOCOL});
  handlers["department.office"]=async(payload,meta)=>{
   const companyContext=contextLoader&&typeof contextLoader.load==="function"?await contextLoader.load("office"):{status:"not_available_for_department",note:"会社データは参照していません。"};
   const result=await officeHandler({...payload,companyContext},meta);
