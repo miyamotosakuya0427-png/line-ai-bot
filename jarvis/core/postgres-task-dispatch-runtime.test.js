@@ -28,7 +28,7 @@ function fixture(handler,authorizeAgentImpl=null){
   async completeWorkerTask(){calls.push("complete-worker");},
   async writeResource(input){calls.push("fenced-write");assert.equal(input.operationScope,"task.result.persist");assert.equal(input.taskLease.ownerId,"worker-a");return{version:1,replayed:false};}
  };
- const authorizeAgent=authorizeAgentImpl||async(agentId,scope)=>{calls.push("authorize:"+agentId);return{agentId,conversationId:"conversation-a",scopes:["tasks:dispatch","tasks:claim"],projectIds:["project-a"]};};
+ const authorizeAgent=authorizeAgentImpl||(async(agentId,scope)=>{calls.push("authorize:"+agentId);return{agentId,conversationId:"conversation-a",scopes:["tasks:dispatch","tasks:claim"],projectIds:["project-a"]};});
  const runtime=createPostgresTaskDispatchRuntime({
   registry,executionKernel,authorizeAgent,handlers:Object.fromEntries(DEPARTMENTS.map(department=>["department."+department.id,department.id==="construction"?handler:async()=>({answer:"unused"})])),
   rateLimiter:{async consume(){return{allowed:true};}},leaseMs:5000,heartbeatMs:1000
