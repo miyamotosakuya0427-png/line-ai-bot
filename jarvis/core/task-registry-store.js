@@ -263,7 +263,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         const prior=await c.query("SELECT aggregate_version,payload FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1 AND idempotency_key=$2 LIMIT 1",[taskId,keyHash]);
         if(prior.rows[0]){
           const p=prior.rows[0].payload;
-          if(p.fromAgentId!==fromAgentId||p.toAgentId!==toAgentId||p.fromDepartmentId!==fromDepartmentId||p.toDepartmentId!==toDepartmentId)throw new Error("Handoff idempotency key replayed with different target");
+          if(p.fromAgentId!==fromAgentId||p.toAgentId!==toAgentId||p.fromDepartmentId!==fromDepartmentId||p.toDepartmentId!==toDepartmentId||JSON.stringify(p.handoffRequest||null)!==JSON.stringify(handoffRequest||null))throw new Error("Handoff idempotency key replayed with different target or payload");
           return {created:false,task:clone(p),version:Number(prior.rows[0].aggregate_version)};
         }
         await assertLease(c,lease);
