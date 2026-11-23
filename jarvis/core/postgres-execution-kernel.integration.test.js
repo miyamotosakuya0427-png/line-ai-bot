@@ -45,6 +45,9 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   await registerScopedWorker({workerId:"worker-revoked-live",agentId:"agent-revoked-live",departmentId:"engineering",instanceId:"instance-revoked-live"});
   const revokedAgentTask=await registry.createTask({title:"Revoked Agent claim",dedupeKey:"dedupe-revoked-agent-claim",projectId:"one-jarvis",ownerConversation:"test-conversation",ownerAgent:"agent-revoked-live",departmentId:"engineering",status:"ready"});
   await assert.rejects(registry.claimTaskForWorker({taskId:revokedAgentTask.task.taskId,workerId:"worker-revoked-live",leaseMs:5000}),/Agent credential is revoked/);
+  const revokedPublicTask=await registry.createTask({title:"Revoked public Claim",dedupeKey:"dedupe-revoked-public-claim",projectId:"one-jarvis",ownerConversation:"test-conversation",ownerAgent:"agent-revoked-live",departmentId:"engineering",status:"ready"});
+  await assert.rejects(registry.claimTask({taskId:revokedPublicTask.task.taskId,ownerId:"agent-revoked-live",leaseMs:5000}),/Agent credential is revoked/);
+
 
   const initialEvents=await outbox.replay({projectId:"one-jarvis",conversationId:"test-conversation",afterCursor:0,limit:20});
   assert.ok(initialEvents.some(event=>event.taskId===first.task.taskId&&event.eventType==="created"),"Task creation and durable outbox row commit together");
