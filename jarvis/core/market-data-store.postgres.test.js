@@ -174,6 +174,14 @@ test("Stage6 PostgreSQL migrations, rollback, idempotency, revisions, audit and 
     }));
     const afterRollback = await pool.query("SELECT (SELECT count(*) FROM market_bars)::int AS bars, (SELECT count(*) FROM market_ingest_batches)::int AS batches");
     assert.deepEqual(afterRollback.rows[0], beforeRollback.rows[0]);
+    const retryAfterRollback = await store.ingest({
+      sourceId,
+      batchId: crypto.randomUUID(),
+      idempotencyKey: "stage6-forced-rollback",
+      bars: [fixtureBar(sourceId, new Date(baseTime + 180000).toISOString())],
+      findings: []
+    });
+    assert.equal(retryAfterRollback.quality, "completed");
 
     const audit = await pool.query("SELECT payload, previous_hash AS \"previousHash\", event_hash AS \"eventHash\" FROM market_data_audit_events ORDER BY id");
     assert.equal(verifyChain(audit.rows.map(row => ({ payload: row.payload, previousHash: row.previousHash, eventHash: row.eventHash }))).valid, true);
