@@ -100,7 +100,7 @@ function createPaperTradingEngine({policy={}, clock=()=>new Date().toISOString()
       if (state.halted) throw new Error("Paper trading halted: "+state.haltReason);
       if (state.openPositions>=limits.maxOpenPositions) throw new Error("Open-position limit reached");
       if (trades.length>=MAX_TRADES) throw new Error("Trade capacity reached");
-      const {id=crypto.randomUUID(),symbol,side,quantity,entryPrice,stopPrice,openedAt=clock(),strategyId,signalId="",sourceSnapshotId="",reason=""}=input||{};
+      const {id=crypto.randomUUID(),symbol,side,quantity,entryPrice,stopPrice,openedAt=clock(),strategyId,signalId="",sourceSnapshotId="",entryExecutionCosts,reason=""}=input||{};
       if (typeof id!=="string"||id.length<1||id.length>100||seenIds.has(id)) throw new Error("Invalid or duplicate trade id");
       if (typeof symbol!=="string"||!/^[A-Z0-9._:-]{1,32}$/.test(symbol)) throw new Error("Invalid symbol");
       if (!["long","short"].includes(side)) throw new Error("Invalid side");
@@ -109,11 +109,12 @@ function createPaperTradingEngine({policy={}, clock=()=>new Date().toISOString()
       if (stopPrice && ((side==="long"&&stopPrice>=entryPrice)||(side==="short"&&stopPrice<=entryPrice))) throw new Error("Stop price is on the wrong side of entry");
       if (typeof strategyId!=="string"||strategyId.length<1||strategyId.length>80) throw new Error("A strategy id is required");
       if (!validTimestamp(openedAt)) throw new Error("Invalid open timestamp");
+      if (entryExecutionCosts!=null&&!(entryExecutionCosts.complete===true&&entryExecutionCosts.costs&&["feeYen","spreadYen","slippageYen","impactYen"].every(k=>Number.isFinite(entryExecutionCosts.costs[k])&&entryExecutionCosts.costs[k]>=0))) throw new Error("Entry execution costs must be complete and verified");
       const notional=quantity*entryPrice;
       if (!Number.isFinite(notional)||notional>equity*100) throw new Error("Position notional exceeds simulation safety bound");
       const stopRisk=stopPrice?Math.abs(entryPrice-stopPrice)*quantity:0;
       if (pct(stopRisk,equity)>limits.maxRiskPerTradePct) throw new Error("Trade risk exceeds maxRiskPerTradePct");
-      const trade={id,symbol,side,quantity,entryPrice,stopPrice:stopPrice||null,openedAt,strategyId,signalId,sourceSnapshotId,reason:String(reason).slice(0,500),status:"open",closedAt:null,exitPrice:null,feesYen:null,slippageYen:null,grossPnlYen:null,netPnlYen:null,costStatus:"unknown",costBreakdown:null,lessonIds:[]};
+      const trade={id,symbol,side,quantity,entryPrice,stopPrice:stopPrice||null,openedAt,strategyId,signalId,sourceSnapshotId,entryExecutionCosts:entryExecutionCosts?clone(entryExecutionCosts):null,reason:String(reason).slice(0,500),status:"open",closedAt:null,exitPrice:null,feesYen:null,slippageYen:null,grossPnlYen:null,netPnlYen:null,costStatus:"unknown",costBreakdown:null,lessonIds:[]};
       trades.push(trade);seenIds.add(id);
       return clone(trade);
     },
@@ -124,15 +125,15 @@ function createPaperTradingEngine({policy={}, clock=()=>new Date().toISOString()
       if (!validTimestamp(closedAt)) throw new Error("Invalid close timestamp");
       const explicitCosts=Number.isFinite(feesYen)&&feesYen>=0&&Number.isFinite(slippageYen)&&slippageYen>=0;
       const modelCosts=executionCosts&&typeof executionCosts==="object"&&executionCosts.costs&&typeof executionCosts.costs==="object"?executionCosts:null;
-      const modelComplete=Boolean(modelCosts&&modelCosts.complete===true&&["feeYen","spreadYen","slippageYen","impactYen"].every(k=>Number.isFinite(modelCosts.costs[k])&&modelCosts.costs[k]>=0));
+      const modelComplete=Boolean(modelCosts&&modelCosts.complete===true&&trade.entryExecutionCosts?.complete===true&&["feeYen","spreadYen","slippageYen","impactYen"].every(k=>Number.isFinite(modelCosts.costs[k])&&modelCosts.costs[k]>=0)&&["feeYen","spreadYen","slippageYen","impactYen"].every(k=>Number.isFinite(trade.entryExecutionCosts.costs[k])&&trade.entryExecutionCosts.costs[k]>=0));
       if (executionCosts!=null&&!modelCosts) throw new Error("Invalid execution cost model result");
-      const feeValue=explicitCosts?feesYen:(modelComplete?modelCosts.costs.feeYen:null);
-      const slippageValue=explicitCosts?slippageYen:(modelComplete?modelCosts.costs.spreadYen+modelCosts.costs.slippageYen+modelCosts.costs.impactYen:null);
+      const feeValue=explicitCosts?feesYen:(modelComplete?trade.entryExecutionCosts.costs.feeYen+modelCosts.costs.feeYen:null);
+      const slippageValue=explicitCosts?slippageYen:(modelComplete?(trade.entryExecutionCosts.costs.spreadYen+trade.entryExecutionCosts.costs.slippageYen+trade.entryExecutionCosts.costs.impactYen+modelCosts.costs.spreadYen+modelCosts.costs.slippageYen+modelCosts.costs.impactYen):null);
       const costStatus=explicitCosts||modelComplete?"complete":modelCosts?"partial":"unknown";
       const direction=trade.side==="long"?1:-1;
       const gross=roundYen((exitPrice-trade.entryPrice)*trade.quantity*direction);
       const net=costStatus==="complete"?gross-roundYen(feeValue)-roundYen(slippageValue):null;
-      const costBreakdown=explicitCosts?{source:"explicit-total-round-trip-costs",feesYen:feeValue,slippageYen:slippageValue}:modelCosts?clone(modelCosts):null;
+      const costBreakdown=explicitCosts?{source:"explicit-total-round-trip-costs",feesYen:feeValue,slippageYen:slippageValue}:modelCosts?{entry:clone(trade.entryExecutionCosts),exit:clone(modelCosts)}:null;
       Object.assign(trade,{status:"closed",closedAt,exitPrice,feesYen:feeValue===null?null:roundYen(feeValue),slippageYen:slippageValue===null?null:roundYen(slippageValue),grossPnlYen:gross,netPnlYen:net,costStatus,costBreakdown,exitReason:String(exitReason).slice(0,300)});
       if(net!==null){equity+=net;peakEquity=Math.max(peakEquity,equity);}
       const state=riskState();
