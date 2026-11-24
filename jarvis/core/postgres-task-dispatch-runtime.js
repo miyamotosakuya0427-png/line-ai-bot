@@ -32,7 +32,7 @@ function createPostgresTaskDispatchRuntime({registry,executionKernel,authorizeAg
     return null;
   }
   async function resultWriter({task,version,worker,lease,result}={}){
-    const resourceId=("task-result-"+task.taskId).slice(0,160);
+    const resourceId=("task-result-"+task.taskId+"-v"+version).slice(0,160);
     const resourceLease=await registry.acquireLease({resourceKey:"resource:"+resourceId,ownerId:worker.workerId,leaseMs});
     if(!resourceLease)throw new Error("Task result resource is currently leased");
     try{
