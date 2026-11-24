@@ -12,8 +12,6 @@ on:
       - "jarvis/core/execution-cost-model*.js"
       - "jarvis/core/paper-trading.js"
       - "jarvis/core/paper-trading.test.js"
-      - "jarvis/core/paper-trading.js"
-      - "jarvis/core/paper-trading.test.js"
       - "jarvis/migrations/**"
       - ".github/workflows/market-data-stage6.yml"
   pull_request:
@@ -26,6 +24,8 @@ on:
       - "jarvis/core/paper-trading-jsonl-parity*.js"
       - "jarvis/core/backtest-data-gate*.js"
       - "jarvis/core/execution-cost-model*.js"
+      - "jarvis/core/paper-trading.js"
+      - "jarvis/core/paper-trading.test.js"
       - "jarvis/migrations/**"
       - ".github/workflows/market-data-stage6.yml"
 permissions:
