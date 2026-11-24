@@ -110,13 +110,16 @@ test("unknown execution costs remain null and block new paper entries",()=>{
  assert.throws(()=>open(engine,{id:"trade-2"}),/EXECUTION_COST_UNKNOWN/);
 });
 test("execution-cost model output is applied to paper PnL without double-counting fill-price difference",()=>{
- const {engine}=setup();open(engine);
+ const {engine}=setup();
+ const entryCosts=estimateExecutionCost({side:"buy",quantity:100,referencePrice:1000,executionPrice:1000,makerFeeRate:0.001,takerFeeRate:0.002,liquidityRole:"maker",spreadBps:0,slippageBps:0,impactBps:0});
+ open(engine,{entryExecutionCosts:entryCosts});
  const costs=estimateExecutionCost({side:"sell",quantity:100,referencePrice:1000,executionPrice:1010,makerFeeRate:0.001,takerFeeRate:0.002,liquidityRole:"maker",spreadBps:2,slippageBps:3,impactBps:1});
  const result=engine.closePaperTrade({id:"trade-1",exitPrice:1010,executionCosts:costs});
  assert.equal(result.trade.costStatus,"complete");
- assert.equal(result.trade.feesYen,100);
+ assert.equal(result.trade.feesYen,200);
  assert.equal(result.trade.slippageYen,50);
  assert.equal(result.trade.grossPnlYen,1000);
- assert.equal(result.trade.netPnlYen,850);
- assert.equal(result.trade.costBreakdown.costs.executionDifferenceYen,1000);
+ assert.equal(result.trade.netPnlYen,750);
+ assert.equal(result.trade.costBreakdown.entry.costs.feeYen,100);
+ assert.equal(result.trade.costBreakdown.exit.costs.executionDifferenceYen,1000);
 });
