@@ -67,7 +67,7 @@ function createPaperTradingEngine({policy={}, clock=()=>new Date().toISOString()
 
   function currentDay() { return clock().slice(0,10); }
   function dayTrades(day=currentDay()) { return trades.filter(t=>t.status==="closed"&&typeof t.closedAt==="string"&&t.closedAt.slice(0,10)===day); }
-  function dailyPnl(day=currentDay()) { return dayTrades(day).reduce((sum,t)=>sum+t.netPnlYen,0); }
+  function dailyPnl(day=currentDay()) { return dayTrades(day).filter(t=>Number.isFinite(t.netPnlYen)).reduce((sum,t)=>sum+t.netPnlYen,0); }
   function openTrades() { return trades.filter(t=>t.status==="open"); }
   function riskState() {
     const day=currentDay();
@@ -77,9 +77,10 @@ function createPaperTradingEngine({policy={}, clock=()=>new Date().toISOString()
     if (drawdownPct>=limits.maxPeakDrawdownPct) drawdownHalted=true;
     const dailyHalted=dailyHaltedDay===day;
     const openPositions=openTrades().length;
-    const halted=drawdownHalted||dailyHalted;
-    const haltReason=drawdownHalted?"PEAK_DRAWDOWN_LIMIT":dailyHalted?"DAILY_LOSS_LIMIT":null;
-    return {halted,haltReason,dailyHalted,drawdownHalted,dailyLossPct,drawdownPct,openPositions,openPositionLimitReached:openPositions>=limits.maxOpenPositions,limits:clone(limits)};
+    const unknownDailyCosts=dayTrades(day).some(t=>t.netPnlYen===null);
+    const halted=drawdownHalted||dailyHalted||unknownDailyCosts;
+    const haltReason=drawdownHalted?"PEAK_DRAWDOWN_LIMIT":dailyHalted?"DAILY_LOSS_LIMIT":unknownDailyCosts?"EXECUTION_COST_UNKNOWN":null;
+    return {halted,haltReason,dailyHalted,drawdownHalted,unknownDailyCosts,dailyLossPct,drawdownPct,openPositions,openPositionLimitReached:openPositions>=limits.maxOpenPositions,limits:clone(limits)};
   }
 
   return {
@@ -112,21 +113,28 @@ function createPaperTradingEngine({policy={}, clock=()=>new Date().toISOString()
       if (!Number.isFinite(notional)||notional>equity*100) throw new Error("Position notional exceeds simulation safety bound");
       const stopRisk=stopPrice?Math.abs(entryPrice-stopPrice)*quantity:0;
       if (pct(stopRisk,equity)>limits.maxRiskPerTradePct) throw new Error("Trade risk exceeds maxRiskPerTradePct");
-      const trade={id,symbol,side,quantity,entryPrice,stopPrice:stopPrice||null,openedAt,strategyId,signalId,sourceSnapshotId,reason:String(reason).slice(0,500),status:"open",closedAt:null,exitPrice:null,feesYen:0,slippageYen:0,grossPnlYen:0,netPnlYen:0,lessonIds:[]};
+      const trade={id,symbol,side,quantity,entryPrice,stopPrice:stopPrice||null,openedAt,strategyId,signalId,sourceSnapshotId,reason:String(reason).slice(0,500),status:"open",closedAt:null,exitPrice:null,feesYen:null,slippageYen:null,grossPnlYen:null,netPnlYen:null,costStatus:"unknown",costBreakdown:null,lessonIds:[]};
       trades.push(trade);seenIds.add(id);
       return clone(trade);
     },
-    closePaperTrade({id,exitPrice,closedAt=clock(),feesYen=0,slippageYen=0,exitReason=""}={}) {
+    closePaperTrade({id,exitPrice,closedAt=clock(),feesYen,slippageYen,executionCosts,exitReason=""}={}) {
       const trade=trades.find(t=>t.id===id);
       if (!trade||trade.status!=="open") throw new Error("Open paper trade not found");
-      if (!finitePositive(exitPrice)||!Number.isFinite(feesYen)||feesYen<0||!Number.isFinite(slippageYen)||slippageYen<0) throw new Error("Invalid exit price or costs");
+      if (!finitePositive(exitPrice)) throw new Error("Invalid exit price");
       if (!validTimestamp(closedAt)) throw new Error("Invalid close timestamp");
+      const explicitCosts=Number.isFinite(feesYen)&&feesYen>=0&&Number.isFinite(slippageYen)&&slippageYen>=0;
+      const modelCosts=executionCosts&&typeof executionCosts==="object"&&executionCosts.costs&&typeof executionCosts.costs==="object"?executionCosts:null;
+      const modelComplete=Boolean(modelCosts&&modelCosts.complete===true&&["feeYen","spreadYen","slippageYen","impactYen"].every(k=>Number.isFinite(modelCosts.costs[k])&&modelCosts.costs[k]>=0));
+      if (executionCosts!=null&&!modelCosts) throw new Error("Invalid execution cost model result");
+      const feeValue=explicitCosts?feesYen:(modelComplete?modelCosts.costs.feeYen:null);
+      const slippageValue=explicitCosts?slippageYen:(modelComplete?modelCosts.costs.spreadYen+modelCosts.costs.slippageYen+modelCosts.costs.impactYen:null);
+      const costStatus=explicitCosts||modelComplete?"complete":modelCosts?"partial":"unknown";
       const direction=trade.side==="long"?1:-1;
       const gross=roundYen((exitPrice-trade.entryPrice)*trade.quantity*direction);
-      const net=gross-roundYen(feesYen)-roundYen(slippageYen);
-      Object.assign(trade,{status:"closed",closedAt,exitPrice,feesYen:roundYen(feesYen),slippageYen:roundYen(slippageYen),grossPnlYen:gross,netPnlYen:net,exitReason:String(exitReason).slice(0,300)});
-      equity+=net;
-      peakEquity=Math.max(peakEquity,equity);
+      const net=costStatus==="complete"?gross-roundYen(feeValue)-roundYen(slippageValue):null;
+      const costBreakdown=explicitCosts?{source:"explicit-total-round-trip-costs",feesYen:feeValue,slippageYen:slippageValue}:modelCosts?clone(modelCosts):null;
+      Object.assign(trade,{status:"closed",closedAt,exitPrice,feesYen:feeValue===null?null:roundYen(feeValue),slippageYen:slippageValue===null?null:roundYen(slippageValue),grossPnlYen:gross,netPnlYen:net,costStatus,costBreakdown,exitReason:String(exitReason).slice(0,300)});
+      if(net!==null){equity+=net;peakEquity=Math.max(peakEquity,equity);}
       const state=riskState();
       return {trade:clone(trade),equityYen:equity,peakEquityYen:peakEquity,risk:state};
     },
@@ -145,17 +153,18 @@ function createPaperTradingEngine({policy={}, clock=()=>new Date().toISOString()
     },
     analyze() {
       const closed=trades.filter(t=>t.status==="closed");
-      const wins=closed.filter(t=>t.netPnlYen>0),losses=closed.filter(t=>t.netPnlYen<0);
+      const pricedClosed=closed.filter(t=>Number.isFinite(t.netPnlYen));
+      const wins=pricedClosed.filter(t=>t.netPnlYen>0),losses=pricedClosed.filter(t=>t.netPnlYen<0);
       const grossProfit=wins.reduce((s,t)=>s+t.netPnlYen,0);
       const grossLoss=Math.abs(losses.reduce((s,t)=>s+t.netPnlYen,0));
       const byStrategy={};
-      for (const t of closed) {
+      for (const t of pricedClosed) {
         const x=byStrategy[t.strategyId]||(byStrategy[t.strategyId]={trades:0,wins:0,netPnlYen:0});
         x.trades++;if(t.netPnlYen>0)x.wins++;x.netPnlYen+=t.netPnlYen;
       }
       const repeated=mistakes.filter(m=>m.repeatCount>0);
       return {
-        sampleSize:closed.length,openCount:openTrades().length,startingCapitalYen:limits.startingCapitalYen,equityYen:equity,netPnlYen:equity-limits.startingCapitalYen,returnPct:pct(equity-limits.startingCapitalYen,limits.startingCapitalYen),
+        sampleSize:pricedClosed.length,closedTradeCount:closed.length,unpricedTradeCount:closed.length-pricedClosed.length,openCount:openTrades().length,startingCapitalYen:limits.startingCapitalYen,equityYen:equity,netPnlYen:equity-limits.startingCapitalYen,returnPct:pct(equity-limits.startingCapitalYen,limits.startingCapitalYen),
         winRatePct:closed.length?pct(wins.length,closed.length):0,profitFactor:grossLoss?grossProfit/grossLoss:null,averageWinYen:wins.length?grossProfit/wins.length:0,averageLossYen:losses.length?grossLoss/losses.length:0,
         byStrategy,lessons:clone(mistakes),repeatedLessonCount:repeated.length,risk:this.riskState(),
         targetAssessment:{monthlyProfitTargetPct:TARGETS_ARE_HYPOTHESES.monthlyProfitTargetPct,dailyReturnTargetPct:TARGETS_ARE_HYPOTHESES.dailyReturnTargetPct,proposedStopLossPct:TARGETS_ARE_HYPOTHESES.proposedStopLossPct,achievedReturnPct:pct(equity-limits.startingCapitalYen,limits.startingCapitalYen),status:"RESEARCH_ONLY_NOT_A_PROMISE"},
