@@ -70,7 +70,7 @@ function mapSnapshotToBars(snapshot, { source, now = () => Date.now(), receivedA
       receivedAt: received
     });
     const sourcePayloadHash = crypto.createHash("sha256").update(stable(candle)).digest("hex");
-    bars.push(Object.freeze({ ...normalized, sourceTimestampRaw: String(candle.openTime), sourceTimezone: "UTC_UNIX_MILLISECONDS", rawPayloadHash: sourcePayloadHash, currency: "JPY", licenseEvidenceRef: config.licenseEvidenceRef }));
+    bars.push(Object.freeze({ ...normalized, sourceTimestampRaw: String(candle.openTime), sourceTimezone: "UTC_UNIX_MILLISECONDS", sourceRecordId: `binance-public:${snapshot.symbol}:${snapshot.interval}:${candle.openTime}`, rawPayload: Object.freeze({ ...candle }), rawPayloadHash: sourcePayloadHash, quoteVolume: candle.quoteVolume == null ? null : String(candle.quoteVolume), currency: "JPY", licenseEvidenceRef: config.licenseEvidenceRef }));
   }
   const findings = auditBars(bars);
   const gate = qualityGate(findings);
