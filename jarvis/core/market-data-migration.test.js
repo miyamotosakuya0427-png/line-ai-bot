@@ -29,3 +29,11 @@ test("license migration has a valid rerunnable DO block and records version 003"
   assert.doesNotMatch(migration003, /END \$;/);
   assert.ok(migration003.includes("VALUES ('003')"));
 });
+
+test("raw source record and payload migration is rerunnable",()=>{
+ const migration004=fs.readFileSync(path.join(root,"004_market_data_raw_provenance.sql"),"utf8");
+ assert.match(migration004,/ADD COLUMN IF NOT EXISTS source_record_id/);
+ assert.match(migration004,/ADD COLUMN IF NOT EXISTS raw_payload JSONB/);
+ assert.match(migration004,/CREATE UNIQUE INDEX IF NOT EXISTS market_bars_source_record_id_key/);
+ assert.ok(migration004.includes("VALUES ('004')"));
+});
