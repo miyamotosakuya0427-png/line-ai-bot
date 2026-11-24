@@ -12,6 +12,8 @@ on:
       - "jarvis/core/execution-cost-model*.js"
       - "jarvis/core/paper-trading.js"
       - "jarvis/core/paper-trading.test.js"
+      - "jarvis/core/paper-trading.js"
+      - "jarvis/core/paper-trading.test.js"
       - "jarvis/migrations/**"
       - ".github/workflows/market-data-stage6.yml"
   pull_request:
@@ -68,4 +70,4 @@ jobs:
           done
       - name: Stage 6 market-data unit and PostgreSQL integration tests
         run: |
-          node --test core/market-data-gateway-adapter.test.js core/market-data-store.test.js core/market-data-migration.test.js core/market-data-quality.test.js core/backtest-data-gate.test.js core/paper-trading-jsonl-parity.test.js core/market-data-store.postgres.test.js core/paper-trading.test.js
+          node --test core/market-data-gateway-adapter.test.js core/market-data-store.test.js core/market-data-migration.test.js core/market-data-quality.test.js core/backtest-data-gate.test.js core/paper-trading-jsonl-parity.test.js core/market-data-store.postgres.test.js core/paper-trading.test.js core/execution-cost-model.test.js
