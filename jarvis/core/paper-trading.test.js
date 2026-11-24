@@ -2,6 +2,7 @@
 const test=require("node:test");
 const assert=require("node:assert/strict");
 const {createPaperTradingEngine,DEFAULT_POLICY,TARGETS_ARE_HYPOTHESES,normalizeSnapshot,validTimestamp}=require("./paper-trading");
+const {estimateExecutionCost}=require("./execution-cost-model");
 
 function setup(){
  let now="2026-11-16T09:00:00+09:00";
@@ -59,7 +60,7 @@ test("lessons link to closed trades and repeated preventive rules are flagged",(
 });
 test("analysis reports strategy-level performance without claiming predictive returns",()=>{
  const {engine}=setup();open(engine);
- engine.closePaperTrade({id:"trade-1",exitPrice:1010});
+ engine.closePaperTrade({id:"trade-1",exitPrice:1010,feesYen:0,slippageYen:0});
  const a=engine.analyze();
  assert.equal(a.byStrategy["breakout-v1"].trades,1);
  assert.equal(a.targetAssessment.status,"RESEARCH_ONLY_NOT_A_PROMISE");
@@ -70,7 +71,7 @@ test("position cap blocks new entries without permanently halting the paper engi
  open(capped);
  assert.equal(capped.riskState().halted,false);
  assert.equal(capped.riskState().openPositionLimitReached,true);
- capped.closePaperTrade({id:"trade-1",exitPrice:1000});
+ capped.closePaperTrade({id:"trade-1",exitPrice:1000,feesYen:0,slippageYen:0});
  assert.equal(capped.riskState().halted,false);
  assert.equal(capped.riskState().openPositionLimitReached,false);
  open(capped,{id:"trade-2"});
@@ -79,7 +80,7 @@ test("position cap blocks new entries without permanently halting the paper engi
 test("daily loss halt expires on the next market day while drawdown remains below its hard limit",()=>{
  const {engine,setTime}=setup();
  open(engine);
- engine.closePaperTrade({id:"trade-1",exitPrice:790});
+ engine.closePaperTrade({id:"trade-1",exitPrice:790,feesYen:0,slippageYen:0});
  assert.equal(engine.riskState().halted,true);
  assert.equal(engine.riskState().haltReason,"DAILY_LOSS_LIMIT");
  setTime("2026-11-17T09:00:00+09:00");
@@ -94,4 +95,28 @@ test("all trading timestamps must be timezone-qualified and calendar-valid",()=>
  const {engine}=setup();
  assert.throws(()=>engine.recordSnapshot({source:"example.exchange",symbol:"7203",capturedAt:"2026-02-30T09:00:00Z",price:1000}),/capture timestamp/);
  assert.throws(()=>open(engine,{openedAt:"2026-11-16T09:00:00"}),/open timestamp/);
+});
+
+test("unknown execution costs remain null and block new paper entries",()=>{
+ const {engine}=setup();open(engine);
+ const result=engine.closePaperTrade({id:"trade-1",exitPrice:1010});
+ assert.equal(result.trade.costStatus,"unknown");
+ assert.equal(result.trade.feesYen,null);
+ assert.equal(result.trade.slippageYen,null);
+ assert.equal(result.trade.netPnlYen,null);
+ assert.equal(result.risk.haltReason,"EXECUTION_COST_UNKNOWN");
+ assert.equal(engine.analyze().unpricedTradeCount,1);
+ assert.equal(engine.analyze().sampleSize,0);
+ assert.throws(()=>open(engine,{id:"trade-2"}),/EXECUTION_COST_UNKNOWN/);
+});
+test("execution-cost model output is applied to paper PnL without double-counting fill-price difference",()=>{
+ const {engine}=setup();open(engine);
+ const costs=estimateExecutionCost({side:"sell",quantity:100,referencePrice:1000,executionPrice:1010,makerFeeRate:0.001,takerFeeRate:0.002,liquidityRole:"maker",spreadBps:2,slippageBps:3,impactBps:1});
+ const result=engine.closePaperTrade({id:"trade-1",exitPrice:1010,executionCosts:costs});
+ assert.equal(result.trade.costStatus,"complete");
+ assert.equal(result.trade.feesYen,100);
+ assert.equal(result.trade.slippageYen,50);
+ assert.equal(result.trade.grossPnlYen,1000);
+ assert.equal(result.trade.netPnlYen,850);
+ assert.equal(result.trade.costBreakdown.costs.executionDifferenceYen,1000);
 });
