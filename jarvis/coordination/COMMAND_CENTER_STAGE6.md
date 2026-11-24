@@ -5,7 +5,7 @@
 - PR: `#78`
 - Branch: `integration/one-jarvis-command-center-ui`
 - Base: `integration/one-jarvis-stage5-dispatcher-state-machine`
-- Verification Head before this documentation commit: `455a7bf58239f3951ee8a5e01e055d8f2c6bac7e`
+- Verification Head before the multi-hop result-isolation correction: `5c2a233b46c39b47939e019632c819106bf0d46f`
 - PostgreSQL test target: PostgreSQL 16
 
 ## Implemented on this PR branch
@@ -35,7 +35,7 @@
 ### 4. Fenced result persistence
 - The runtime writes the Handler result through the Execution Kernel Fenced Writer using both the Task Lease and a separate Resource Lease.
 - Result resources use a deterministic Task-scoped identifier and idempotency key.
-- The Task stores `resultResourceId` when completed, waiting for a target, or handed off; the Handoff event includes the same reference.
+- The Task stores `resultResourceId` when completed, waiting for a target, or handed off; the Handoff event includes the same reference. Result resource IDs are versioned per Task execution (`task-result-<taskId>-v<runningVersion>`) so a later Department Handler in a multi-hop route cannot collide with the previous department's `expectedVersion: 0` resource write.
 - A missing/failed Fenced Writer confirmation prevents completion. Uncertain persistence/execution is quarantined as `outcome_unknown` and is not automatically retried.
 
 ### 5. Dynamic Agent revocation
@@ -48,12 +48,12 @@
 
 ## Verification
 
-Exact pre-documentation implementation Head: `455a7bf58239f3951ee8a5e01e055d8f2c6bac7e`
+Exact post-correction implementation Head: `150d7f802f337805e76c1502d9c95b3a6e9e781c`
 
-- JARVIS tests — run `45153010963`: success.
-- ONE JARVIS tests — run `45153011086`: success.
-- ONE JARVIS Task Registry PostgreSQL 16 — run `45153011036`: success.
-- PostgreSQL 16 suite: **315 passed / 0 failed / 0 skipped**.
+- JARVIS tests — run `45416591603`: success; **312 passed / 0 failed / 4 skipped**.
+- ONE JARVIS tests — run `45416591574`: success; **312 passed / 0 failed / 4 skipped**.
+- ONE JARVIS Task Registry PostgreSQL 16 — run `45416591553`: success; **316 passed / 0 failed / 0 skipped**.
+- Added a sequential cross-department runtime test: Construction Handler → atomic Handoff → Management Handler → distinct fenced result resource → completed Task.
 - The PostgreSQL 16 suite includes multi-process claim contention, Fenced Task result persistence/idempotent replay, atomic structured Handoff, revocation-denied Claim/Handoff, and Worker recovery.
 - Runtime tests use deterministic fake Handler/Kernel dependencies to prove Handler → Dispatcher → result persistence/Handoff behavior without calling paid APIs or a live LLM.
 - Dashboard regression checks and responsive CSS marker checks pass as part of the JARVIS test suite.
@@ -74,3 +74,11 @@ Exact pre-documentation implementation Head: `455a7bf58239f3951ee8a5e01e055d8f2c
 - PR #78 must remain Draft / Open / unmerged.
 - PR #77 and all other Worker branches remain untouched.
 - No force push, rebase, merge, production configuration changes, secret display, or external publication.
+
+
+## Multi-hop result isolation correction
+
+- Fixed the Task result resource key to include the running Task version, preventing the second Department Handler in a sequential Handoff chain from colliding with the first Handler's result resource.
+- Added a regression test that dispatches the same Task through Construction → Management and verifies separate fenced result resources and final completion.
+- Exact correction Head: `150d7f802f337805e76c1502d9c95b3a6e9e781c`.
+- All three CI workflows passed on that exact Head; see the verification block above.
