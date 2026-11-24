@@ -65,7 +65,7 @@ jobs:
           node -e "const u=new URL(process.env.MARKET_DATA_TEST_DATABASE_URL); if(!['localhost','127.0.0.1','::1'].includes(u.hostname)) process.exit(1)"
       - name: Syntax checks
         run: |
-          for file in core/market-data-*.js core/backtest-data-gate.js core/execution-cost-model.js; do
+          for file in core/market-data-*.js core/backtest-data-gate.js core/execution-cost-model.js core/paper-trading.js; do
             node --check "$file"
           done
       - name: Stage 6 market-data unit and PostgreSQL integration tests
