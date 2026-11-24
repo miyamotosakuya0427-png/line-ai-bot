@@ -26,6 +26,8 @@ function fixtureBar(sourceId, openTimeUtc, close = "101") {
     closeTimeUtc,
     sourceTimestampRaw: openTimeUtc,
     sourceTimezone: "UTC",
+    sourceRecordId: "fixture:" + openTimeUtc,
+    rawPayload: { openTimeUtc, close },
     receivedAtUtc: "2026-11-22T12:00:00.000Z",
     open: "100",
     high: "103",
@@ -55,14 +57,14 @@ test("Stage6 PostgreSQL migrations, rollback, idempotency, revisions, audit and 
     await pool.query("CREATE TABLE IF NOT EXISTS schema_migrations(version TEXT PRIMARY KEY)");
     await pool.query("REVOKE TEMP ON DATABASE " + '"' + parsed.pathname.slice(1).replace(/"/g, '""') + '"' + " FROM PUBLIC");
 
-    for (const file of ["002_market_data_quality.sql", "003_market_data_license_and_currency.sql"]) {
+    for (const file of ["002_market_data_quality.sql", "003_market_data_license_and_currency.sql", "004_market_data_raw_provenance.sql"]) {
       const sql = fs.readFileSync(path.join(migrationsDir, file), "utf8");
       await pool.query(sql);
       await pool.query(sql);
     }
 
     const versions = await pool.query("SELECT version FROM schema_migrations ORDER BY version");
-    assert.deepEqual(versions.rows.map(row => row.version), ["002", "003"]);
+    assert.deepEqual(versions.rows.map(row => row.version), ["002", "003", "004"]);
 
     const grants = await pool.query(
       "SELECT has_table_privilege('jarvis_audit_readonly','market_bars','SELECT') AS can_select, " +
@@ -96,6 +98,9 @@ test("Stage6 PostgreSQL migrations, rollback, idempotency, revisions, audit and 
       findings: []
     }));
     const twoWorkerResults = await Promise.all(twoWorkerCalls);
+    const storedProvenance = await pool.query("SELECT source_record_id,raw_payload->>'close' AS raw_close FROM market_bars WHERE open_time_utc=$1",[twoWorkerBar.openTimeUtc]);
+    assert.equal(storedProvenance.rows[0].source_record_id,"fixture:" + twoWorkerBar.openTimeUtc);
+    assert.equal(storedProvenance.rows[0].raw_close,"101");
     assert.equal(twoWorkerResults.filter(result => result.idempotentReplay !== true).length, 1);
     assert.equal(twoWorkerResults.filter(result => result.idempotentReplay === true).length, 1);
 
