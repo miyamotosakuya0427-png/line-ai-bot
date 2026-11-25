@@ -42,6 +42,9 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   await revocations.init();
   assert.equal((await revocations.revoke({agentId:"agent-revoked-live",revokedBy:"integration-test"})).revoked,true);
   assert.equal(await revocations.isRevoked("agent-revoked-live"),true,"shared token revocation must be visible through PostgreSQL");
+  await assert.rejects(pool.query("UPDATE jarvis.task_registry_agent_revocations SET revoked_by='tampered' WHERE agent_id=$1",["agent-revoked-live"]),/append-only/,"revocation ledger rejects UPDATE");
+  await assert.rejects(pool.query("DELETE FROM jarvis.task_registry_agent_revocations WHERE agent_id=$1",["agent-revoked-live"]),/append-only/,"revocation ledger rejects DELETE");
+  await assert.rejects(pool.query("TRUNCATE jarvis.task_registry_agent_revocations"),/append-only/,"revocation ledger rejects TRUNCATE");
   await registerScopedWorker({workerId:"worker-revoked-live",agentId:"agent-revoked-live",departmentId:"engineering",instanceId:"instance-revoked-live"});
   const revokedAgentTask=await registry.createTask({title:"Revoked Agent claim",dedupeKey:"dedupe-revoked-agent-claim",projectId:"one-jarvis",ownerConversation:"test-conversation",ownerAgent:"agent-revoked-live",departmentId:"engineering",status:"ready"});
   await assert.rejects(registry.claimTaskForWorker({taskId:revokedAgentTask.task.taskId,workerId:"worker-revoked-live",leaseMs:5000}),/Agent credential is revoked/);
