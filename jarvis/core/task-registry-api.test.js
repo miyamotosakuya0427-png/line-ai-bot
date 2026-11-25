@@ -11,7 +11,7 @@ function fixture({configured=true,authorize=true,rateLimiter=null,dispatcher=nul
     async listTasks({status=null,limit=50,offset=0,ownerAgent=null,ownerConversation=null,projectId=null}={}){return [...tasks.values()].filter(x=>(status===null||x.task.status===status)&&(ownerAgent===null||x.task.ownerAgent===ownerAgent)&&(ownerConversation===null||x.task.ownerConversation===ownerConversation)&&(projectId===null||x.task.projectId===projectId)).slice(offset,offset+limit);},
     async createTask(input){const id="task-"+(++sequence);const task={taskId:id,...input,state:canonicalTaskState(input.status||"proposed")};const value={task,version:1};tasks.set(id,value);return{...value,created:true};},
     async getTask(id,{ownerAgent=null,ownerConversation=null}={}){const value=tasks.get(id);if(!value)return null;if(ownerAgent!==null&&value.task.ownerAgent!==ownerAgent)return null;if(ownerConversation!==null&&value.task.ownerConversation!==ownerConversation)return null;return value;},
-    async claimTask({taskId,ownerId,leaseMs}){const current=tasks.get(taskId);if(!current||current.task.status!=="ready")return null;const lease={resourceKey:"task:"+taskId,ownerId,token:"opaque-token",fencingToken:1,expiresAt:new Date(Date.now()+leaseMs).toISOString()};const next={...current.task,status:"claimed",state:"claimed",ownerAgent:ownerId};const value={task:next,version:current.version+1};tasks.set(taskId,value);return{...value,lease};},
+    async claimTask({taskId,ownerId,leaseMs}){const current=tasks.get(taskId);if(!current||current.task.status!=="ready")return null;const lease={resourceKey:"task:"+taskId,ownerId,token:"opaque-token",fencingToken:1,expiresAt:new Date(Date.now()+leaseMs).toISOString()};const next={...current.task,status:"claimed",state:"claimed",ownerAgent:ownerId,leaseTokenHash:"sensitive-lease-token-hash"};const value={task:next,version:current.version+1};tasks.set(taskId,value);return{...value,lease};},
     async heartbeatLease({lease,leaseMs}){return{...lease,expiresAt:new Date(Date.now()+leaseMs).toISOString()};},
     async releaseLease(){return true;},
     async transitionTask({taskId,expectedVersion,lease,status,patch}){const current=tasks.get(taskId);if(!current)return null;if(current.version!==expectedVersion)throw new Error("Stale task version");const value={task:{...current.task,...patch,status,state:canonicalTaskState(status)},version:current.version+1};tasks.set(taskId,value);return value;},
@@ -73,6 +73,11 @@ test("Task Registry API creates, claims, heartbeats, transitions and releases un
   const claimed=await post(root,"/v1/tasks/"+id+"/claim",{leaseMs:10000});
   assert.equal(claimed.status,200);const claim=await claimed.json();
   assert.equal(claim.lease.ownerId,"agent-a");
+  assert.equal(claim.task.leaseTokenHash,undefined,"Task API never exposes a lease token hash");
+  const claimedRead=await fetch(root+"/v1/tasks/"+id,{headers:{Authorization:"Bearer agent-a"}});
+  assert.equal((await claimedRead.json()).task.leaseTokenHash,undefined,"GET Task response redacts lease token hashes");
+  const claimedList=await fetch(root+"/v1/tasks?projectId=one-jarvis",{headers:{Authorization:"Bearer agent-a"}});
+  assert.equal((await claimedList.json()).tasks[0].task.leaseTokenHash,undefined,"Task list response redacts lease token hashes");
   const wrongOwner=await post(root,"/v1/tasks/"+id+"/heartbeat",{lease:claim.lease},"agent-b");
   assert.equal(wrongOwner.status,403);
   const renewed=await post(root,"/v1/tasks/"+id+"/heartbeat",{lease:claim.lease,leaseMs:15000});
