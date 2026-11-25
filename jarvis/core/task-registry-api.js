@@ -161,7 +161,7 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson,rateL
         if(!owned||!auth.principal.projectIds.includes(owned.task.projectId))return json(res,404,{ok:false,error:"Task not found"});
         const result=await registry.claimTask({taskId,ownerId:auth.principal.agentId,leaseMs:d.leaseMs===undefined?60000:d.leaseMs});
         if(!result)return json(res,409,{ok:false,error:"Task is leased or not claimable"});
-        json(res,200,{ok:true,...result});return true;
+        json(res,200,{ok:true,...redactTaskResult(result)});return true;
       }
       if(["heartbeat","release","transition"].includes(operation)&&req.method==="POST"){
         const auth=await principalFor(req,operation,taskId);
