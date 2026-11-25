@@ -62,6 +62,8 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   await assert.rejects(pool.query("UPDATE jarvis.task_event_outbox SET event_type='tampered' WHERE source_event_id=$1",[initialEvents[0].eventId]),/append-only/);
   await registerScopedWorker({workerId:"worker-a",agentId:"agent-a",departmentId:"engineering",instanceId:"instance-a",processId:"100"});
   await registerScopedWorker({workerId:"worker-b",agentId:"agent-b",departmentId:"engineering",instanceId:"instance-b",processId:"200"});
+  await registerScopedWorker({workerId:"worker-target",agentId:"agent-target",departmentId:"management",instanceId:"instance-target",processId:"300"});
+  await registerScopedWorker({workerId:"worker-target-revoked",agentId:"agent-target-revoked",departmentId:"management",instanceId:"instance-target-revoked",processId:"400"});
   const scopedWorkers=await kernel.listWorkersForScope({projectId:"one-jarvis",conversationId:"test-conversation"});
   assert.ok(scopedWorkers.some(row=>row.worker_id==="worker-a"&&row.grant_id),"only explicitly granted Workers are returned in a scope listing");
   const grantAudit=await kernel.listWorkerScopeGrants({limit:50});
@@ -138,7 +140,7 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   const handoffTask=await makeTask("handoff",loserId);
   const handoffClaim=await registry.claimTaskForWorker({taskId:handoffTask.task.taskId,workerId:loserId,leaseMs:5000});
   const handoffRunning=await registry.transitionTask({taskId:handoffTask.task.taskId,expectedVersion:handoffClaim.version,lease:handoffClaim.lease,status:"running"});
-  const handoffInput={taskId:handoffTask.task.taskId,expectedVersion:handoffRunning.version,lease:handoffClaim.lease,fromAgentId:(loserId==="worker-a"?"agent-a":"agent-b"),toAgentId:"agent-target",fromDepartmentId:"engineering",toDepartmentId:"management",idempotencyKey:"handoff-once",resultResourceId:"task-result-handoff",handoffRequest:{reason:"経営部門の専門確認が必要です",deliverables:["KPI分析"],acceptanceCriteria:["根拠資料を明記"],actionClass:"analyze"}};
+  const handoffInput={taskId:handoffTask.task.taskId,expectedVersion:handoffRunning.version,lease:handoffClaim.lease,targetWorkerId:"worker-target",fromAgentId:(loserId==="worker-a"?"agent-a":"agent-b"),toAgentId:"agent-target",fromDepartmentId:"engineering",toDepartmentId:"management",idempotencyKey:"handoff-once",resultResourceId:"task-result-handoff",handoffRequest:{reason:"経営部門の専門確認が必要です",deliverables:["KPI分析"],acceptanceCriteria:["根拠資料を明記"],actionClass:"analyze"}};
   const handoffAttempts=await Promise.all([registry.recordTaskHandoff(handoffInput),registry.recordTaskHandoff(handoffInput)]);
   assert.equal(handoffAttempts.filter(result=>result.created).length,1,"concurrent duplicate handoffs must commit exactly once");
   const handoff=handoffAttempts.find(result=>result.created);
@@ -154,7 +156,7 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   const revokedTargetClaim=await registry.claimTaskForWorker({taskId:revokedTargetTask.task.taskId,workerId:loserId,leaseMs:5000});
   const revokedTargetRunning=await registry.transitionTask({taskId:revokedTargetTask.task.taskId,expectedVersion:revokedTargetClaim.version,lease:revokedTargetClaim.lease,status:"running"});
   await revocations.revoke({agentId:"agent-target-revoked",revokedBy:"integration-test"});
-  await assert.rejects(registry.recordTaskHandoff({taskId:revokedTargetTask.task.taskId,expectedVersion:revokedTargetRunning.version,lease:revokedTargetClaim.lease,fromAgentId:(loserId==="worker-a"?"agent-a":"agent-b"),toAgentId:"agent-target-revoked",fromDepartmentId:"engineering",toDepartmentId:"management",idempotencyKey:"handoff-revoked-target"}),/Agent credential is revoked/);
+  await assert.rejects(registry.recordTaskHandoff({taskId:revokedTargetTask.task.taskId,expectedVersion:revokedTargetRunning.version,lease:revokedTargetClaim.lease,targetWorkerId:"worker-target-revoked",fromAgentId:(loserId==="worker-a"?"agent-a":"agent-b"),toAgentId:"agent-target-revoked",fromDepartmentId:"engineering",toDepartmentId:"management",idempotencyKey:"handoff-revoked-target"}),/Agent credential is revoked/);
   const failedHandoffCleanup=await registry.transitionTask({taskId:revokedTargetTask.task.taskId,expectedVersion:revokedTargetRunning.version,lease:revokedTargetClaim.lease,status:"failed",patch:{nextAction:"Test cleanup after revoked target rejection"}});
   await kernel.completeWorkerTask({workerId:loserId,taskId:revokedTargetTask.task.taskId,lease:revokedTargetClaim.lease,finalState:"failed"});
   await registry.releaseLease({lease:revokedTargetClaim.lease});
