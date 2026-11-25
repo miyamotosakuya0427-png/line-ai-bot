@@ -266,9 +266,9 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
       const r=await pool.query("SELECT event_id,aggregate_id,aggregate_version,event_type,payload,created_at FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=ANY($1::text[]) ORDER BY event_id DESC LIMIT $2",[taskIds,limit]);
       return r.rows.map(row=>({eventId:Number(row.event_id),taskId:row.aggregate_id,version:Number(row.aggregate_version),eventType:row.event_type,payload:clone(row.payload),createdAt:row.created_at}));
     },
-    async recordTaskHandoff({taskId,expectedVersion,lease,fromAgentId,toAgentId,fromDepartmentId,toDepartmentId,idempotencyKey,handoffRequest=null,resultResourceId=null}={}){
+    async recordTaskHandoff({taskId,expectedVersion,lease,targetWorkerId,fromAgentId,toAgentId,fromDepartmentId,toDepartmentId,idempotencyKey,handoffRequest=null,resultResourceId=null}={}){
       await init();
-      if(!text(taskId,200)||!Number.isSafeInteger(expectedVersion)||![fromAgentId,toAgentId,fromDepartmentId,toDepartmentId].every(x=>text(x,128))||!text(idempotencyKey,240)||(resultResourceId!==null&&!text(resultResourceId,160)))throw new Error("Invalid Task handoff request");
+      if(!text(taskId,200)||!Number.isSafeInteger(expectedVersion)||!text(targetWorkerId,160)||targetWorkerId===lease?.ownerId||![fromAgentId,toAgentId,fromDepartmentId,toDepartmentId].every(x=>text(x,128))||!text(idempotencyKey,240)||(resultResourceId!==null&&!text(resultResourceId,160)))throw new Error("Invalid Task handoff request");
        if(handoffRequest!==null&&(!handoffRequest||typeof handoffRequest!=="object"||Array.isArray(handoffRequest)||!(typeof handoffRequest.reason==="string"&&handoffRequest.reason.trim().length>=10&&handoffRequest.reason.length<=500)||!Array.isArray(handoffRequest.deliverables)||handoffRequest.deliverables.length<1||handoffRequest.deliverables.length>20||handoffRequest.deliverables.some(x=>!text(x,500))||!Array.isArray(handoffRequest.acceptanceCriteria)||handoffRequest.acceptanceCriteria.length<1||handoffRequest.acceptanceCriteria.length>20||handoffRequest.acceptanceCriteria.some(x=>!text(x,500))||!["read","analyze","draft","internal_task"].includes(handoffRequest.actionClass)))throw new Error("Invalid structured Task handoff details");
       const keyHash=hash("task-handoff:"+idempotencyKey);
       return tx(async c=>{
@@ -278,12 +278,19 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
           const p=prior.rows[0].payload;
           const priorRequest=p.handoffRequest||null;
           const sameRequest=priorRequest===null?handoffRequest===null:!!handoffRequest&&priorRequest.reason===handoffRequest.reason&&priorRequest.actionClass===handoffRequest.actionClass&&JSON.stringify(priorRequest.deliverables)===JSON.stringify(handoffRequest.deliverables)&&JSON.stringify(priorRequest.acceptanceCriteria)===JSON.stringify(handoffRequest.acceptanceCriteria);
-          if(p.fromAgentId!==fromAgentId||p.toAgentId!==toAgentId||p.fromDepartmentId!==fromDepartmentId||p.toDepartmentId!==toDepartmentId||(p.resultResourceId||null)!==resultResourceId||!sameRequest)throw new Error("Handoff idempotency key replayed with different target or payload");
+          if(p.fromAgentId!==fromAgentId||p.toAgentId!==toAgentId||p.toWorkerId!==targetWorkerId||p.fromDepartmentId!==fromDepartmentId||p.toDepartmentId!==toDepartmentId||(p.resultResourceId||null)!==resultResourceId||!sameRequest)throw new Error("Handoff idempotency key replayed with different target or payload");
           return {created:false,task:clone(p),version:Number(prior.rows[0].aggregate_version)};
         }
         await assertLease(c,lease);
         if(lease.resourceKey!=="task:"+taskId)throw new Error("Handoff Task Lease mismatch");
         const worker=await c.query("SELECT worker_id,agent_id,department_id,current_task_id,lease_resource_key,fencing_token,version FROM jarvis.worker_registry WHERE worker_id=$1 FOR UPDATE",[lease.ownerId]);
+        // Lock and revalidate the destination inside the same transaction as the Task/event handoff.
+        const target=await c.query("SELECT worker_id,agent_id,department_id,status,current_task_id,heartbeat_at,version FROM jarvis.worker_registry WHERE worker_id=$1 FOR UPDATE",[targetWorkerId]);
+        if(!target.rows[0]||target.rows[0].agent_id!==toAgentId||target.rows[0].department_id!==toDepartmentId||target.rows[0].status!=="idle"||target.rows[0].current_task_id!==null)throw new Error("Handoff target Worker is no longer idle or does not match the requested Agent/Department");
+        const targetHeartbeat=Date.parse(target.rows[0].heartbeat_at||"");
+        if(!Number.isFinite(targetHeartbeat)||Date.parse(clock())-targetHeartbeat>120000)throw new Error("Handoff target Worker heartbeat is stale");
+        const targetGrant=await c.query("SELECT grant_id FROM jarvis.worker_scope_grants WHERE worker_id=$1 AND project_id=(SELECT payload->>'projectId' FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$2 ORDER BY aggregate_version DESC LIMIT 1) AND conversation_id=(SELECT payload->>'ownerConversation' FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$2 ORDER BY aggregate_version DESC LIMIT 1) AND revoked_at IS NULL FOR SHARE",[targetWorkerId,taskId]);
+        if(!targetGrant.rows[0])throw new Error("Handoff target Worker has no active Project/Conversation Grant");
         await assertAgentsActive(c,[fromAgentId,toAgentId]);
         if(!worker.rows[0]||worker.rows[0].current_task_id!==taskId||worker.rows[0].lease_resource_key!==lease.resourceKey||Number(worker.rows[0].fencing_token)!==lease.fencingToken)throw new Error("Handoff Worker binding is stale");
         await lock(c,"task:"+taskId);
@@ -298,7 +305,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         await c.query("UPDATE jarvis.coordination_leases SET expires_at=$1::timestamptz,updated_at=$1::timestamptz WHERE resource_key=$2 AND owner_id=$3 AND fencing_token=$4",[now,lease.resourceKey,lease.ownerId,lease.fencingToken]);
         const released=await c.query("UPDATE jarvis.worker_registry SET status='idle',current_task_id=NULL,lease_resource_key=NULL,fencing_token=NULL,version=version+1,updated_at=$1 WHERE worker_id=$2 AND version=$3 RETURNING worker_id",[now,lease.ownerId,Number(worker.rows[0].version)]);
         if(released.rowCount!==1)throw new Error("Handoff Worker release lost concurrency race");
-        await append(c,taskId,"agent_handoff",{...next,fromAgentId,toAgentId,fromDepartmentId,toDepartmentId,fromWorkerId:lease.ownerId,handoffRequest:handoffRequest?clone(handoffRequest):null,handoffAt:now},keyHash);
+        await append(c,taskId,"agent_handoff",{...next,fromAgentId,toAgentId,toWorkerId:targetWorkerId,fromDepartmentId,toDepartmentId,fromWorkerId:lease.ownerId,handoffRequest:handoffRequest?clone(handoffRequest):null,handoffAt:now},keyHash);
         return {created:true,task:clone(next),version:current.version+1,event:{eventType:"agent_handoff",fromAgentId,toAgentId,fromDepartmentId,toDepartmentId,workerId:lease.ownerId,createdAt:now}};
       });
     },
