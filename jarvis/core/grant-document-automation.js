@@ -108,8 +108,8 @@ function evaluateChecklist(requirements, documents, now = new Date()) {
     if (!candidates.length) return {documentType:req.documentType, required:req.required === true, status:req.required === true ? "MISSING" : "OPTIONAL_MISSING"};
     const valid = candidates.find(doc => {
       if (req.targetFiscalYear && doc.fiscalYear !== req.targetFiscalYear) return false;
-      if (req.maxAgeDays && doc.issuedAt && now.getTime() - new Date(doc.issuedAt).getTime() > req.maxAgeDays * 86400000) return false;
-      if (doc.validUntil && new Date(doc.validUntil).getTime() < now.getTime()) return false;
+      if (req.maxAgeDays && (!validDate(doc.issuedAt) || now.getTime() - new Date(doc.issuedAt).getTime() > req.maxAgeDays * 86400000)) return false;
+      if (doc.validUntil && (!validDate(doc.validUntil) || new Date(doc.validUntil).getTime() < now.getTime())) return false;
       return true;
     });
     return {documentType:req.documentType, required:req.required === true, status:valid ? "PRESENT" : "EXPIRED_OR_MISMATCH", documentId:valid?.fileId || candidates[0].fileId};
