@@ -73,7 +73,7 @@ test("retries transient failures with bounded attempts only", async () => {
 });
 
 test("connection errors are sanitized at health boundary", async () => {
-  const pool = fakePool(); pool.connect = async () => { throw new Error("postgres://secret@host/db"); };
+  const pool = fakePool(); pool.query = async () => { throw new Error("postgres://secret@host/db"); };
   const store = createPostgresEventStore({ pool });
   const result = await store.health();
   assert.deepEqual(result, { ok: false, storage: "postgresql", error: "database_unavailable" });
