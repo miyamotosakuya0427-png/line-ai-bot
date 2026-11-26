@@ -231,6 +231,30 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
     await registry.releaseLease({lease:grantRaceClaim.lease});
   }
 
+  // Agent revocation is serialized through the same advisory lock as Handoff.
+  const agentRaceTask=await makeTask("handoff-agent-revoke-race",loserId);
+  const agentRaceClaim=await registry.claimTaskForWorker({taskId:agentRaceTask.task.taskId,workerId:loserId,leaseMs:5000});
+  const agentRaceRunning=await registry.transitionTask({taskId:agentRaceTask.task.taskId,expectedVersion:agentRaceClaim.version,lease:agentRaceClaim.lease,status:"running"});
+  const agentRaceInput={taskId:agentRaceTask.task.taskId,expectedVersion:agentRaceRunning.version,lease:agentRaceClaim.lease,targetWorkerId:"worker-target-agent-race",fromAgentId:(loserId==="worker-a"?"agent-a":"agent-b"),toAgentId:"agent-target-agent-race",fromDepartmentId:"engineering",toDepartmentId:"management",idempotencyKey:"handoff-agent-revoke-race"};
+  const [agentRaceHandoff,agentRaceRevoke]=await Promise.allSettled([
+    runWorkerProcess("handoff",loserId,agentRaceTask.task.taskId,{JARVIS_EXECUTION_CHILD_HANDOFF_INPUT:JSON.stringify(agentRaceInput)}),
+    revocations.revoke({agentId:"agent-target-agent-race",revokedBy:"integration-test"})
+  ]);
+  assert.equal(agentRaceRevoke.status,"fulfilled","Agent revocation must serialize and complete");
+  const agentRaceAfter=await registry.getTask(agentRaceTask.task.taskId);
+  const agentRaceEvents=await registry.listTaskEvents({taskIds:[agentRaceTask.task.taskId],limit:20});
+  if(agentRaceHandoff.status==="fulfilled"){
+    assert.equal(agentRaceHandoff.value.created,true,"Handoff may commit only before Agent revocation");
+    assert.equal(agentRaceAfter.task.state,"queued");
+    await assert.rejects(registry.claimTaskForWorker({taskId:agentRaceTask.task.taskId,workerId:"worker-target-agent-race",leaseMs:5000}),/Agent credential is revoked/);
+  }else{
+    assert.equal(agentRaceAfter.task.state,"running","Agent revocation wins without partially committing Handoff");
+    assert.equal(agentRaceEvents.some(event=>event.eventType==="agent_handoff"),false);
+    await registry.transitionTask({taskId:agentRaceTask.task.taskId,expectedVersion:agentRaceRunning.version,lease:agentRaceClaim.lease,status:"failed",patch:{nextAction:"Agent revocation race test cleanup"}});
+    await kernel.completeWorkerTask({workerId:loserId,taskId:agentRaceTask.task.taskId,lease:agentRaceClaim.lease,finalState:"failed"});
+    await registry.releaseLease({lease:agentRaceClaim.lease});
+  }
+
   const resourceAttempts=await Promise.all([
    registry.acquireLease({resourceKey:"resource:race",ownerId:"worker-a",leaseMs:5000}),
    registry.acquireLease({resourceKey:"resource:race",ownerId:"worker-b",leaseMs:5000})
