@@ -67,3 +67,32 @@ test("Owner OIDC refreshes JWKS once when a signing key rotates",async()=>{
  assert.equal(identity.subject,"owner-subject-1");
  assert.equal(calls,2,"unknown kid forces exactly one JWKS refresh");
 });
+
+
+test("Owner OIDC rejects JWKS keys without signature-only public-key use",async()=>{
+ const badKeys=[
+  {...jwk,use:"enc"},
+  {...jwk,key_ops:["sign"]},
+  {...jwk,d:"private-material"}
+ ];
+ for(const bad of badKeys){
+  const check=verifier({resolveJwks:async()=>({keys:[bad]})});
+  await assert.rejects(check.verify(token(),{expectedNonce:"nonce-expected"}),/signing key is unavailable or ambiguous/);
+ }
+});
+
+test("Owner OIDC bounds JWKS response size and rejects unsafe endpoint URL components",async()=>{
+ const check=createOwnerOidcVerifier({
+  issuer:"https://mock-idp.example/",audience:"client",ownerGroup:"owners",
+  jwksUri:"https://mock-idp.example/jwks",resolveJwks:async()=>({keys:[jwk],padding:"x".repeat(70000)})
+ });
+ await assert.rejects(check.verify(token(),{expectedNonce:"nonce-expected"}),/JWKS response is invalid/);
+ assert.throws(()=>createOwnerOidcVerifier({
+  issuer:"https://user:pass@mock-idp.example/",audience:"client",ownerGroup:"owners",
+  jwksUri:"https://mock-idp.example/jwks",resolveJwks:async()=>({keys:[jwk]})
+ }),/configuration is incomplete or unsafe/);
+ assert.throws(()=>createPkceLoginRequest({
+  authorizationEndpoint:"https://mock-idp.example/authorize#fragment",clientId:"client",
+  redirectUri:"https://jarvis.example/callback"
+ }),/Invalid OIDC authorization configuration/);
+});
