@@ -19,28 +19,15 @@ import { canStartListening } from "./audio-policy";
 export default function App() {
   const [status, setStatus] = useState("停止中");
   const [consent, setConsent] = useState(false);
-  const [permission, setPermission] = useState(false);
-  const [level, setLevel] = useState(0);
   const [appState, setAppState] = useState(AppState.currentState);
   const [busy, setBusy] = useState(false);
 
-  const onBuffer = useCallback((buffer) => {
-    // PCM is inspected synchronously in memory. No audio buffer, file or transcript is retained.
-    const samples = new Int16Array(buffer.data);
-    if (samples.length === 0) return;
-    let sum = 0;
-    for (let i = 0; i < samples.length; i += 1) {
-      const sample = samples[i] / 32768;
-      sum += sample * sample;
-    }
-    setLevel(Math.min(1, Math.sqrt(sum / samples.length) * 4));
-  }, []);
-
+  // Deliberately omit onBuffer: continuous PCM must not cross into JavaScript.
+  // Native capture remains a Stage 2 capability test; no KWS model is bundled.
   const { stream, isStreaming } = useAudioStream({
     sampleRate: 16000,
     channels: 1,
-    encoding: "int16",
-    onBuffer
+    encoding: "int16"
   });
 
   useEffect(() => {
@@ -60,7 +47,6 @@ export default function App() {
         allowsBackgroundRecording: false
       });
     } catch (_) {}
-    setLevel(0);
     setStatus(reason);
   }, [stream]);
 
@@ -70,7 +56,6 @@ export default function App() {
     try {
       // Permission prompt is only reached after the explicit consent checkbox and button.
       const result = await requestRecordingPermissionsAsync();
-      setPermission(Boolean(result.granted));
       if (!canStartListening({
         platform: require("react-native").Platform.OS,
         explicitConsent: consent,
@@ -86,7 +71,7 @@ export default function App() {
         interruptionMode: "doNotMix"
       });
       await stream.start();
-      setStatus("マイク動作テスト中（ローカル処理）");
+      setStatus("マイク動作テスト中（ネイティブ取得・PCM非転送）");
     } catch (_) {
       setStatus("音声を開始できません。権限・端末状態を確認してください");
       try { stream.stop(); } catch (_) {}
@@ -100,15 +85,13 @@ export default function App() {
     setConsent(false);
   }, [stopListening]);
 
-  const meterWidth = Math.round(level * 100);
-
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="light-content" />
       <View style={styles.container}>
         <Text style={styles.eyebrow}>PRIVATE COMPANY ASSISTANT</Text>
         <Text style={styles.title}>ONE JARVIS</Text>
-        <Text style={styles.subtitle}>ネイティブ音声基盤・第2工程</Text>
+        <Text style={styles.subtitle}>ネイティブ音声基盤・第2工程／第3工程準備</Text>
 
         <View style={styles.panel}>
           <View style={styles.row}>
@@ -120,16 +103,13 @@ export default function App() {
               ? "マイク使用中です。停止ボタンでいつでも終了できます。"
               : "音声待機は初期状態で停止しています。"}
           </Text>
-          <View style={styles.meterTrack}>
-            <View style={[styles.meterFill, { width: meterWidth + "%" }]} />
-          </View>
           <Text style={styles.meta}>アプリ状態: {appState} ／ 音声取得: {isStreaming ? "稼働" : "停止"}</Text>
         </View>
 
         <View style={styles.consentPanel}>
           <Text style={styles.sectionTitle}>マイク利用について</Text>
           <Text style={styles.note}>
-            同意後、OSのマイク権限を要求します。待機中は端末内メモリで音声レベルを確認します。
+            同意後、OSのマイク権限を要求します。音声取得はネイティブ側で行い、連続PCMをJavaScriptへ転送しません。
             この試作には「ジャービス」を判定するウェイクワードモデルはまだ組み込まれていません。
             音声ファイルの保存やクラウド送信は行いません。
           </Text>
@@ -185,8 +165,6 @@ const styles = StyleSheet.create({
   idleDot: { backgroundColor: "#63768a" },
   status: { color: "#f4f8fc", fontSize: 16, fontWeight: "700" },
   note: { color: "#b7c6d4", fontSize: 13, lineHeight: 20 },
-  meterTrack: { height: 7, backgroundColor: "#263d53", borderRadius: 8, overflow: "hidden" },
-  meterFill: { height: 7, backgroundColor: "#65c7d2" },
   meta: { color: "#8fa4b8", fontSize: 11 },
   consentPanel: { gap: 10 },
   sectionTitle: { color: "#f4f8fc", fontWeight: "700", fontSize: 15 },
