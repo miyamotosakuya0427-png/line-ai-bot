@@ -22,7 +22,7 @@ export default function App() {
   const [appState, setAppState] = useState(AppState.currentState);
   const [busy, setBusy] = useState(false);
 
-  // Deliberately omit onBuffer: continuous PCM must not cross into JavaScript.
+  // Deliberately omit the PCM callback: continuous audio data must not cross into JavaScript.
   // Native capture remains a Stage 2 capability test; no KWS model is bundled.
   const { stream, isStreaming } = useAudioStream({
     sampleRate: 16000,
