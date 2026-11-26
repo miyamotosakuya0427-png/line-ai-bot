@@ -62,6 +62,7 @@ on:
       - "jarvis/core/task-event-outbox.js"
       - "jarvis/core/postgres-execution-kernel.integration.test.js"
       - "jarvis/coordination/COMMAND_CENTER_STAGE5.md"
+      - "jarvis/coordination/COMMAND_CENTER_STAGE10.md"
       - ".github/workflows/jarvis-task-registry.yml"
   push:
     branches:
