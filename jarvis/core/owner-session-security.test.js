@@ -28,7 +28,7 @@ test("CSRF tokens are random opaque values and compared in constant time",()=>{
   const token=createCsrfToken();
   assert.match(token,/^[A-Za-z0-9_-]{43}$/);
   assert.equal(verifyCsrfToken(token,token),true);
-  assert.equal(verifyCsrfToken(token,token.slice(0,-1)+"A"),false);
+  assert.equal(verifyCsrfToken(token,token.slice(0,-1)+(token.endsWith("A")?"B":"A")),false);
   assert.equal(verifyCsrfToken(token,undefined),false);
 });
 
