@@ -49,8 +49,14 @@ jobs:
           pg_dump --version
           pg_restore --version
           psql -X -v ON_ERROR_STOP=1 -d postgres -Atc "SHOW server_version;"
-      - name: Run isolated backup, restore and reconciliation
-        run: bash jarvis/scripts/postgres-backup-restore-rehearsal.sh
+      - name: Run isolated backup, restore and reconciliation with matching PostgreSQL 16 tools
+        run: |
+          docker run --rm --network host \
+            -v "$GITHUB_WORKSPACE:/workspace" -w /workspace \
+            -e PGHOST=127.0.0.1 -e PGPORT=5432 -e PGUSER=postgres \
+            -e PGPASSWORD="$PGPASSWORD" \
+            -e STAGE12_ARTIFACT_DIR=stage12-artifacts \
+            postgres:16 bash jarvis/scripts/postgres-backup-restore-rehearsal.sh
       - name: Upload backup and reconciliation evidence
         if: always()
         uses: actions/upload-artifact@v4
