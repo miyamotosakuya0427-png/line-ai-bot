@@ -16,7 +16,7 @@ jarvis/core/grant-document-automation.js は、原本を上書きしない読取
 ## 依存関係
 - pdfjs-dist@4.10.38 — Apache-2.0。PDF.jsのNode 20互換系を固定。
 - exceljs@4.4.0 — MIT。Excelブック・セル・数式・印刷設定。
-- jszip@3.10.1 — MIT。DOCXパッケージ内のXML読取。
+- jszip@3.10.2 — MIT OR GPL-3.0-or-later（MITを選択可能）。DOCXパッケージ内のXML読取。
 - 既存の node:test を使用。OCR用依存は追加していない。
 
 ライセンス・バージョンの確認資料：
