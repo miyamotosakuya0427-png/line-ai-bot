@@ -312,6 +312,82 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         return {created:true,task:clone(next),version:current.version+1,event:{eventType:"agent_handoff",fromAgentId,toAgentId,fromDepartmentId,toDepartmentId,workerId:lease.ownerId,createdAt:now}};
       });
     },
+    async recoverPostCommitHandoff({taskId,expectedVersion,candidateWorkerId=null,maxAttempts=3}={}) {
+      await init();
+      if(!text(taskId,200)||!Number.isSafeInteger(expectedVersion)||(candidateWorkerId!==null&&!text(candidateWorkerId,160))||!Number.isInteger(maxAttempts)||maxAttempts<1||maxAttempts>3)throw new Error("Invalid Handoff recovery request");
+      return tx(async c=>{
+        await lock(c,"task-handoff-recovery:"+taskId);
+        const currentSnapshot=await latest(c,taskId);
+        if(!currentSnapshot)throw new Error("Handoff recovery Task does not exist");
+        const handoffs=await c.query("SELECT event_id,aggregate_version,event_type,payload FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1 AND event_type IN ('agent_handoff','handoff_reselected','handoff_recovery_waiting','handoff_recovery_exhausted') ORDER BY aggregate_version ASC",[taskId]);
+        const original=handoffs.rows.find(row=>row.event_type==="agent_handoff");
+        if(!original)throw new Error("Task has no committed Handoff to recover");
+        const latestHandoff=handoffs.rows[handoffs.rows.length-1];
+        const originalPayload=original.payload;
+        const latestPayload=latestHandoff.payload;
+        const originVersion=Number(original.aggregate_version);
+        const attempts=handoffs.rows.filter(row=>row.event_type==="handoff_reselected"||row.event_type==="handoff_recovery_waiting"||row.event_type==="handoff_recovery_exhausted").length;
+        const attempt=attempts+1;
+        const recoveryKey=hash(["handoff-post-commit-recovery",taskId,String(originVersion),String(attempt),candidateWorkerId||"waiting"].join(":"));
+        const prior=await c.query("SELECT aggregate_version,payload FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1 AND idempotency_key=$2 LIMIT 1",[taskId,recoveryKey]);
+        if(prior.rows[0])return {created:false,replayed:true,task:clone(prior.rows[0].payload),version:Number(prior.rows[0].aggregate_version),attempt};
+        if(currentSnapshot.version!==expectedVersion)throw new Error("Stale Task version for Handoff recovery");
+        const current=currentSnapshot.task;
+        if(!["queued","waiting"].includes(current.state||current.status))throw new Error("Handoff recovery only accepts queued or waiting Tasks");
+        if(current.projectId!==originalPayload.projectId||current.ownerConversation!==originalPayload.ownerConversation||current.departmentId!==originalPayload.toDepartmentId||current.ownerAgent!==latestPayload.toAgentId)throw new Error("Handoff recovery Project/Conversation/Agent scope mismatch");
+        if(attempt>maxAttempts){
+          const next={...current,status:"waiting",state:"waiting",updatedAt:clock(),nextAction:"Handoff recovery attempt limit reached; Owner review required"};
+          await lock(c,"task:"+taskId);
+          const latestNow=await latest(c,taskId);
+          if(!latestNow||latestNow.version!==expectedVersion)throw new Error("Task changed during Handoff recovery");
+          await append(c,taskId,"handoff_recovery_exhausted",{...next,originalHandoffVersion:originVersion,attempt,maxAttempts,reason:"maximum_attempts"},recoveryKey);
+          return {created:true,replayed:false,task:clone(next),version:expectedVersion+1,attempt,waiting:true};
+        }
+        const oldWorkerId=latestPayload.toWorkerId||null;
+        const ids=[oldWorkerId,candidateWorkerId].filter(Boolean);
+        const locked=ids.length?await c.query("SELECT worker_id,agent_id,department_id,status,current_task_id,heartbeat_at,version FROM jarvis.worker_registry WHERE worker_id=ANY($1::text[]) ORDER BY worker_id FOR UPDATE",[ids]):{rows:[]};
+        const oldWorker=locked.rows.find(row=>row.worker_id===oldWorkerId)||null;
+        const candidate=locked.rows.find(row=>row.worker_id===candidateWorkerId)||null;
+        let oldGrant=false,oldRevoked=false;
+        if(oldWorker){
+          const grant=await c.query("SELECT grant_id FROM jarvis.worker_scope_grants WHERE worker_id=$1 AND project_id=$2 AND conversation_id=$3 AND revoked_at IS NULL FOR SHARE",[oldWorkerId,current.projectId,current.ownerConversation]);
+          oldGrant=!!grant.rows[0];
+          if(requireAgentRevocation){
+            await lock(c,"agent-revocation:"+oldWorker.agent_id);
+            const revoked=await c.query("SELECT 1 FROM jarvis.task_registry_agent_revocations WHERE agent_id=$1",[oldWorker.agent_id]);
+            oldRevoked=!!revoked.rows[0];
+          }
+        }
+        const oldHeartbeat=Date.parse(oldWorker?.heartbeat_at||"");
+        const oldUnavailable=!oldWorker||oldWorker.agent_id!==latestPayload.toAgentId||oldWorker.department_id!==current.departmentId||oldWorker.status!=="idle"||oldWorker.current_task_id!==null||!Number.isFinite(oldHeartbeat)||Date.parse(clock())-oldHeartbeat>120000||!oldGrant||oldRevoked;
+        if(!oldUnavailable)return {created:false,replayed:false,reason:"CURRENT_HANDOFF_TARGET_STILL_ELIGIBLE",task:clone(current),version:currentSnapshot.version,attempt:attempts};
+        let candidateValid=false;
+        if(candidateWorkerId&&candidate){
+          if(candidate.worker_id===oldWorkerId||candidate.agent_id===latestPayload.toAgentId||candidate.department_id!==current.departmentId||candidate.status!=="idle"||candidate.current_task_id!==null)throw new Error("Handoff recovery candidate Worker is not eligible");
+          const heartbeat=Date.parse(candidate.heartbeat_at||"");
+          if(!Number.isFinite(heartbeat)||Date.parse(clock())-heartbeat>120000)throw new Error("Handoff recovery candidate heartbeat is stale");
+          const candidateGrant=await c.query("SELECT grant_id FROM jarvis.worker_scope_grants WHERE worker_id=$1 AND project_id=$2 AND conversation_id=$3 AND revoked_at IS NULL FOR SHARE",[candidateWorkerId,current.projectId,current.ownerConversation]);
+          if(!candidateGrant.rows[0])throw new Error("Handoff recovery candidate has no active Project/Conversation Grant");
+          await assertAgentsActive(c,[candidate.agent_id]);
+          const seen=handoffs.rows.some(row=>row.payload?.toAgentId===candidate.agent_id||row.payload?.toWorkerId===candidate.worker_id);
+          if(seen)throw new Error("Handoff recovery candidate would create an Agent/Worker cycle");
+          candidateValid=true;
+        } else if(candidateWorkerId) {
+          throw new Error("Handoff recovery candidate Worker does not exist");
+        }
+        await lock(c,"task:"+taskId);
+        const latestNow=await latest(c,taskId);
+        if(!latestNow||latestNow.version!==expectedVersion)throw new Error("Task changed during Handoff recovery");
+        const now=clock();
+        const next=candidateValid
+          ? {...current,ownerAgent:candidate.agent_id,status:"queued",state:"queued",leaseOwner:null,leaseTokenHash:null,leaseExpiresAt:null,fencingToken:0,updatedAt:now,nextAction:"Handoff target automatically reselected after destination became unavailable"}
+          : {...current,status:"waiting",state:"waiting",leaseOwner:null,leaseTokenHash:null,leaseExpiresAt:null,fencingToken:0,updatedAt:now,nextAction:"No eligible replacement Handoff Worker; awaiting safe retry"};
+        const eventType=candidateValid?"handoff_reselected":"handoff_recovery_waiting";
+        const payload={...next,eventType,originalHandoffVersion:originVersion,previousWorkerId:oldWorkerId,previousAgentId:latestPayload.toAgentId||null,toWorkerId:candidateValid?candidate.worker_id:null,toAgentId:candidateValid?candidate.agent_id:null,attempt,maxAttempts,projectId:current.projectId,conversationId:current.ownerConversation,recoveredAt:now};
+        await append(c,taskId,eventType,payload,recoveryKey);
+        return {created:true,replayed:false,task:clone(next),version:expectedVersion+1,attempt,waiting:!candidateValid,selectedWorker:candidateValid?{workerId:candidate.worker_id,agentId:candidate.agent_id,departmentId:candidate.department_id}:null};
+      });
+    },
     async transitionTask(input={}){
       await init();
       return tx(c=>transitionInTx(c,input));
