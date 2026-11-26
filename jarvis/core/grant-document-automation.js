@@ -256,6 +256,11 @@ function extractStructuredValues(parsed) {
     if(cell.result!==null&&cell.result!==undefined) add(String(cell.result),{sheet:sheet.name,cell:cell.address,kind:"formula-result"},0.9);
   }
   for(const paragraph of parsed?.paragraphs||[]) add(paragraph.text,paragraph.location,0.9);
+  for(const table of parsed?.tables||[]) for(let rowIndex=0;rowIndex<(table.rows||[]).length;rowIndex++) {
+    for(let cellIndex=0;cellIndex<(table.rows[rowIndex]||[]).length;cellIndex++) {
+      add(String(table.rows[rowIndex][cellIndex] ?? ""),{...table.location,row:rowIndex+1,cell:cellIndex+1},0.9);
+    }
+  }
   const dates=[], amounts=[];
   const datePattern=/(?:令和|平成|昭和)\s*[元0-9０-９]{1,4}年\s*[0-9０-９]{1,2}月\s*[0-9０-９]{1,2}日|20[0-9０-９]{2}[年\/-][0-9０-９]{1,2}[月\/-][0-9０-９]{1,2}日?/g;
   const amountPattern=/(?:¥|￥)?\s*[0-9０-９][0-9０-９,，]*(?:\.[0-9０-９]+)?\s*(?:円|万円|千円)/g;
