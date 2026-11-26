@@ -89,7 +89,7 @@ function startWorker(data, timeoutMs = 15000) {
 }
 
 async function runIngest(testDatabaseUrl, input, timeoutMs) {
-  const { message } = await startWorker({ databaseUrl, input }, timeoutMs);
+  const { message } = await startWorker({ databaseUrl: testDatabaseUrl, input }, timeoutMs);
   return message.result;
 }
 
