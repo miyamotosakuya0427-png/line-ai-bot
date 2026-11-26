@@ -62,7 +62,7 @@ These normal CI tests do not constitute physical iPhone/PC checks or live produc
 ## 5. Owner OIDC / Session / Owner audit — NOT production-integrated
 
 - Existing Mock IdP verification remains in place.
-- No authorization-code exchange client, trusted live IdP HTTP transport, server session store, Secure/HttpOnly/SameSite cookie lifecycle, CSRF middleware, logout/revocation route, or approved real IdP configuration was added.
+- Added isolated policy primitives in `jarvis/core/owner-session-security.js` and tests for `__Host-` Secure/HttpOnly/SameSite cookie formatting, CSRF token generation/constant-time comparison, absolute/idle expiry, revocation decisions, and session-ID rotation triggers.\n- These helpers are not wired into an HTTP authentication route or persistent session store. No authorization-code exchange client, trusted live IdP HTTP transport, CSRF middleware integration, logout/revocation route, or approved real IdP configuration was added.
 - No production Owner token or IdP settings were changed.
 - The Owner audit migration remains a proposal: nullable issuer/subject/request ID/action, issuer-subject paired-null constraint, append-only enforcement, legacy shared-token operations unattributed, and no retroactive identity attribution.
 - Owner decisions remain required for IdP issuer/audience/client/group/redirect, session lifetime and idle timeout, recent-auth policy, dual control, break-glass custodians/expiry/alerts, shared Owner-token migration window and retirement date, audit retention and data residency.
