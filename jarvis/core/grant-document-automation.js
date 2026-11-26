@@ -152,6 +152,24 @@ async function readPdf(buffer, options = {}) {
   }
   return {fileType:"pdf", pageCount:pages.length, pages, text:pages.map(p=>p.text).join("\n"), requiresOcr:pages.some(p=>p.ocrStatus==="OCR_REQUIRED"), extractionVersion:"pdfjs-dist/4.10.38"};
 }
+async function loadSafeZip(buffer, options = {}) {
+  const limits={...DEFAULT_LIMITS,...(options.limits||{})};
+  const JSZip=options.JSZip || require("jszip");
+  const zip=await JSZip.loadAsync(buffer,{checkCRC32:true,createFolders:false});
+  const entries=Object.entries(zip.files);
+  if(entries.length>limits.maxDocxEntries) throw new Error("TOO_MANY_ARCHIVE_ENTRIES");
+  let expanded=0;
+  for(const [name,entry] of entries) {
+    if(name.startsWith("/") || name.split("/").includes("..")) throw new Error("UNSAFE_ARCHIVE_PATH");
+    if(entry.dir) continue;
+    const size=Number(entry._data?.uncompressedSize || 0);
+    const compressed=Number(entry._data?.compressedSize || 0);
+    expanded+=size;
+    if(expanded>limits.maxExpandedZipBytes) throw new Error("ARCHIVE_EXPANSION_LIMIT");
+    if(compressed>0 && size/compressed>limits.maxZipExpansionRatio) throw new Error("ARCHIVE_EXPANSION_RATIO_LIMIT");
+  }
+  return zip;
+}
 async function readExcel(buffer, options = {}) {
   const limits = {...DEFAULT_LIMITS, ...(options.limits || {})};
   assertBuffer(buffer, limits);
@@ -292,5 +310,5 @@ function buildFieldMapping(templateFields, profile) {
 module.exports={
   DEFAULT_LIMITS, COMPANY_PROFILE_FIELDS, sha256, detectFileType, makeDocumentRecord, evidence,
   createCompanyProfile, compareField, compareApplicationFields, evaluateChecklist,
-  readPdf, readExcel, readWord, readDocument, extractStructuredValues, auditExtraction, buildFieldMapping
+  readPdf, readExcel, readWord, readDocument, loadSafeZip, extractStructuredValues, auditExtraction, buildFieldMapping
 };
