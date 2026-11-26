@@ -371,7 +371,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
           const candidateGrant=await c.query("SELECT grant_id FROM jarvis.worker_scope_grants WHERE worker_id=$1 AND project_id=$2 AND conversation_id=$3 AND revoked_at IS NULL FOR SHARE",[candidateWorkerId,current.projectId,current.ownerConversation]);
           if(!candidateGrant.rows[0])throw new Error("Handoff recovery candidate has no active Project/Conversation Grant");
           await assertAgentsActive(c,[candidate.agent_id]);
-          const seen=handoffs.rows.some(row=>row.payload?.toAgentId===candidate.agent_id||row.payload?.toWorkerId===candidate.worker_id);
+          const seen=handoffs.rows.some(row=>row.payload?.toAgentId===candidate.agent_id||row.payload?.toWorkerId===candidate.worker_id||row.payload?.fromAgentId===candidate.agent_id||row.payload?.fromWorkerId===candidate.worker_id);
           if(seen)throw new Error("Handoff recovery candidate would create an Agent/Worker cycle");
           candidateValid=true;
         } else if(candidateWorkerId) {
