@@ -101,6 +101,9 @@ fi
 if psql -X -v ON_ERROR_STOP=1 -d "$RESTORE_DB" -c "UPDATE jarvis.owner_audit_events SET action='tampered' WHERE request_id='stage12-request-oidc'" >/dev/null 2>&1; then
   echo "FAIL: Owner audit ledger accepted UPDATE" >&2; exit 1
 fi
+if psql -X -v ON_ERROR_STOP=1 -d "$RESTORE_DB" -c "DELETE FROM jarvis.owner_audit_events WHERE request_id='stage12-request-oidc'" >/dev/null 2>&1; then
+  echo "FAIL: Owner audit ledger accepted DELETE" >&2; exit 1
+fi
 if psql -X -v ON_ERROR_STOP=1 -d "$RESTORE_DB" -c "TRUNCATE jarvis.owner_audit_events" >/dev/null 2>&1; then
   echo "FAIL: Owner audit ledger accepted TRUNCATE" >&2; exit 1
 fi
