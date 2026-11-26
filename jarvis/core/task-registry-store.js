@@ -383,7 +383,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
           ? {...current,ownerAgent:candidate.agent_id,status:"queued",state:"queued",leaseOwner:null,leaseTokenHash:null,leaseExpiresAt:null,fencingToken:0,updatedAt:now,nextAction:"Handoff target automatically reselected after destination became unavailable"}
           : {...current,status:"waiting",state:"waiting",leaseOwner:null,leaseTokenHash:null,leaseExpiresAt:null,fencingToken:0,updatedAt:now,nextAction:"No eligible replacement Handoff Worker; awaiting safe retry"};
         const eventType=candidateValid?"handoff_reselected":"handoff_recovery_waiting";
-        const payload={...next,eventType,originalHandoffVersion:originVersion,previousWorkerId:oldWorkerId,previousAgentId:latestPayload.toAgentId||null,toWorkerId:candidateValid?candidate.worker_id:null,toAgentId:candidateValid?candidate.agent_id:null,attempt,maxAttempts,projectId:current.projectId,conversationId:current.ownerConversation,recoveredAt:now};
+        const payload={...next,eventType,originalHandoffVersion:originVersion,previousWorkerId:oldWorkerId,previousAgentId:latestPayload.toAgentId||null,toWorkerId:candidateValid?candidate.worker_id:oldWorkerId,toAgentId:candidateValid?candidate.agent_id:(latestPayload.toAgentId||null),attempt,maxAttempts,projectId:current.projectId,conversationId:current.ownerConversation,recoveredAt:now};
         await append(c,taskId,eventType,payload,recoveryKey);
         return {created:true,replayed:false,task:clone(next),version:expectedVersion+1,attempt,waiting:!candidateValid,selectedWorker:candidateValid?{workerId:candidate.worker_id,agentId:candidate.agent_id,departmentId:candidate.department_id}:null};
       });
