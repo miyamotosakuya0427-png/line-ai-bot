@@ -233,12 +233,17 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
       await new Promise(resolve => setTimeout(resolve, 50));
     }
     assert.equal(rollbackRowCount, 0, "uncommitted source row must disappear after forced Worker termination");
+    const rollbackConnections = await pool.query(
+      "SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname=current_database() AND application_name='one-jarvis-stage6-worker-rollback-probe'"
+    );
+    assert.equal(Number(rollbackConnections.rows[0].count), 0, "forced Worker database connection must be closed");
     const rollbackKeyHash = crypto.createHash("sha256").update(rollbackKey).digest("hex");
     console.log("STAGE6_ROLLBACK_EVIDENCE " + JSON.stringify({
       probe: "market_data_sources",
       sourceKeySha256: rollbackKeyHash,
       rowCountAfterForcedTermination: rollbackRowCount,
-      workerTerminationCode: forcedExitCode
+      workerTerminationCode: forcedExitCode,
+      activeRollbackConnections: Number(rollbackConnections.rows[0].count)
     }));
 
     const activeWorkerConnections = await pool.query(
@@ -250,6 +255,7 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
     }));
 
     const retried = await runIngest(testDatabaseUrl, retryInput);
+    counters.success++;
     counters.retry++;
     assert.equal(retried.quality, "completed");
 
