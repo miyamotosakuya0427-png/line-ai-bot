@@ -48,6 +48,8 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false
+      - name: Syntax-check soak harness
+        run: node --check scripts/command-center-sse-soak.js
       - name: Install isolated test dependencies
         run: npm install --ignore-scripts
       - name: Apply migrations to isolated PostgreSQL 16
