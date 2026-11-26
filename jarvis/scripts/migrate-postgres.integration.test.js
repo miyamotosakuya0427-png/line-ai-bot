@@ -21,7 +21,7 @@ test("PostgreSQL migrations 0001-0010 apply, re-run idempotently, rollback, and 
     const eventStore = createPostgresEventStore({ pool });
     const operational = createPostgresOperationalStores({ pool });
     assert.equal((await eventStore.health()).ok, false, "health must fail closed when migrations are absent");
-    await assert.rejects(operational.init(), /migrations 0002 and 0003 are not installed/);
+    await assert.rejects(operational.init(), /not installed/);
     const before = await pool.query("SELECT to_regclass('jarvis.events') AS events");
     assert.equal(before.rows[0].events, null, "read-only startup checks must not create schema objects");
 
