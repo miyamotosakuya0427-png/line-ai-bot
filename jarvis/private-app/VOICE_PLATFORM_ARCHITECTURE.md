@@ -86,9 +86,9 @@ Required device evidence: OS/version, app build, permission state, screen state,
 
 ## 6. Delivery sequence
 
-1. Stage 2 — identity and secure session integration design/implementation, isolated tests only. Existing Owner OIDC primitives and LINE identity verification must be reused only after verifying their exact contracts. Do not configure a live IdP or modify production environment variables.
-2. Stage 3 — native app workspace and platform capability spike: Expo prebuild/dev builds, audio permission UX, foreground/background audio proof, local wake-engine interface, no JARVIS API connection yet.
-3. Stage 4 — local wake-word benchmark and native integration. Japanese 「ジャービス」 accuracy, false activations, battery and privacy gates.
+1. Stage 2 — native audio capability spike: isolated Expo workspace, explicit microphone consent, in-memory PCM stream, platform background-recording configuration and automated policy tests. No JARVIS API connection.
+2. Stage 3 — local wake-word engine benchmark and native integration. Compare sherpa-onnx and licensed candidates using Japanese 「ジャービス」 test data, false activations, latency, CPU/RAM, battery and thermal gates.
+3. Stage 4 — employee identity and secure session integration. Reuse existing Owner OIDC/session primitives only after verifying their exact contracts; isolated tests only, no live IdP or production environment changes.
 4. Stage 5 — authenticated JARVIS conversation adapter, speech recognition, text/audio response, server-side roles and approval-gated actions.
 5. Stage 6 — Windows client and cross-platform design parity.
 6. Stage 7 — physical-device matrix, security review, accessibility, privacy disclosures, crash/battery/thermal testing.
