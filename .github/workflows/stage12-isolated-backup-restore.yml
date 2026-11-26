@@ -51,7 +51,7 @@ jobs:
           psql -X -v ON_ERROR_STOP=1 -d postgres -Atc "SHOW server_version;"
       - name: Run isolated backup, restore and reconciliation with matching PostgreSQL 16 tools
         run: |
-          docker run --rm --network host \
+          docker run --rm --network host -u "$(id -u):$(id -g)" \
             -v "$GITHUB_WORKSPACE:/workspace" -w /workspace \
             -e PGHOST=127.0.0.1 -e PGPORT=5432 -e PGUSER=postgres \
             -e PGPASSWORD="$PGPASSWORD" \
