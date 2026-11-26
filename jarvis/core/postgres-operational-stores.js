@@ -18,10 +18,24 @@ function digest(v){return crypto.createHash("sha256").update(canonicalJson(v)).d
 function approvalRequestDigest(a){if(a.digestVersion!==2)return digest({departmentId:a.departmentId,actionClass:a.actionClass,summary:a.summary,details:a.details});return digest({departmentId:a.departmentId,actionClass:a.actionClass,summary:a.summary,details:a.details,resourceId:a.resourceId||null,operationPayload:a.operationPayload??null,expiresAt:a.expiresAt||null});}
 function createPostgresOperationalStores({pool,clock=()=>new Date().toISOString(),authorizeActor=null}={}){
  if(!pool||typeof pool.connect!=="function"||typeof pool.query!=="function")throw new Error("PostgreSQL pool is required");
- let readyPromise;
+ let readyPromise;let migrationPromise;
+ async function assertSchema(){
+  const base=await pool.query("SELECT to_regclass('jarvis.events') AS events, to_regclass('jarvis.schema_migrations') AS migrations");
+  const baseRow=base.rows[0]||{};
+  if(!baseRow.events||!baseRow.migrations)throw new Error("Operational store base migration 0001 is not installed");
+  const r=await pool.query("SELECT EXISTS(SELECT 1 FROM jarvis.schema_migrations WHERE version='0002_job_approval_stores') AS migration_0002, EXISTS(SELECT 1 FROM jarvis.schema_migrations WHERE version='0003_append_only_event_ledger') AS migration_0003, EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('jarvis.events') AND tgname='jarvis_events_append_only_row' AND NOT tgisinternal) AS append_only_row, EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('jarvis.events') AND tgname='jarvis_events_append_only_truncate' AND NOT tgisinternal) AS append_only_truncate");
+  const x=r.rows[0]||{};
+  if(x.migration_0002!==true||x.migration_0003!==true||x.append_only_row!==true||x.append_only_truncate!==true)throw new Error("Operational store migrations 0002 and 0003 are not installed");
+  return {ok:true};
+ }
  async function init(){
   if(readyPromise)return readyPromise;
-  readyPromise=(async()=>{
+  readyPromise=assertSchema();
+  try{return await readyPromise;}catch(e){readyPromise=null;throw e;}
+ }
+ async function migrate(){
+  if(migrationPromise)return migrationPromise;
+  migrationPromise=(async()=>{
    const client=await pool.connect();
    try{
     await client.query("BEGIN");
@@ -39,7 +53,7 @@ function createPostgresOperationalStores({pool,clock=()=>new Date().toISOString(
     return{ok:true};
    }catch(e){try{await client.query("ROLLBACK");}catch{}throw e;}finally{client.release();}
   })();
-  try{return await readyPromise;}catch(e){readyPromise=null;throw e;}
+  try{return await migrationPromise;}catch(e){migrationPromise=null;throw e;}
  }
  async function tx(fn){
   const c=await pool.connect();
@@ -224,6 +238,6 @@ function createPostgresOperationalStores({pool,clock=()=>new Date().toISOString(
    });
   }
  };
- return {jobs:{...jobs,claimNext:claimNextJob,heartbeat:heartbeatJob},approvals,init,close:()=>pool.end()};
+ return {jobs:{...jobs,claimNext:claimNextJob,heartbeat:heartbeatJob},approvals,init,assertSchema,migrate,close:()=>pool.end()};
 }
 module.exports={createPostgresOperationalStores};
