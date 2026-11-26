@@ -50,7 +50,8 @@ function createOwnerOidcVerifier({issuer,audience,ownerGroup,groupClaim="groups"
     let response;
     try{response=await resolveJwks({uri:jwksUrl.toString(),forceRefresh,redirect:"error",requireTls:true});}
     catch{if(cached&&now-cachedAt<cacheMs)return cached;throw new Error("Owner OIDC JWKS unavailable; authentication denied");}
-    let encodedSize;try{encodedSize=Buffer.byteLength(JSON.stringify(response));}catch{throw new Error("Owner OIDC JWKS response is invalid");}\n    if(!response||!Array.isArray(response.keys)||response.keys.length<1||response.keys.length>100||encodedSize>maxJwksBytes||response.keys.some(key=>!key||typeof key!=="object"||Array.isArray(key)))throw new Error("Owner OIDC JWKS response is invalid");
+    let encodedSize;try{encodedSize=Buffer.byteLength(JSON.stringify(response));}catch{throw new Error("Owner OIDC JWKS response is invalid");}
+    if(!response||!Array.isArray(response.keys)||response.keys.length<1||response.keys.length>100||encodedSize>maxJwksBytes||response.keys.some(key=>!key||typeof key!=="object"||Array.isArray(key)))throw new Error("Owner OIDC JWKS response is invalid");
     cached=response;
     cachedAt=now;
     return cached;
