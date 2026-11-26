@@ -79,7 +79,7 @@ Added additive migration `jarvis/migrations/0011_owner_audit_identity.sql`:
 - UPDATE, DELETE and TRUNCATE are rejected by append-only triggers; PUBLIC table/sequence privileges are revoked.
 - Migration is idempotent in the same style as the prior additive migrations.
 
-The isolated backup/restore rehearsal was extended to seed one verified-identity-shaped OIDC audit row and one unattributed legacy shared-token row, compare both across restore, reject half-populated issuer/subject, reject UPDATE/DELETE/TRUNCATE, re-run Migration 0011, and confirm both rows remain. The migration has not been applied to production. The next successful Stage 12 backup/restore run is the evidence gate for this addition.
+The isolated backup/restore rehearsal was extended to seed one verified-identity-shaped OIDC audit row and one unattributed legacy shared-token row, compare both across restore, reject half-populated issuer/subject, reject UPDATE/DELETE/TRUNCATE, re-run Migration 0011, and confirm both rows remain. This validation passed in run `45821276554` at exact tested Head `01d91ff972b5e0d97549c11e6f058c9a09b8dfa2`. The artifact is `one-jarvis-stage12-backup-restore` (ID `15116979275`, 9,575 bytes). Backup size was 42,604 bytes; SHA-256 `54da41091c2c9d31d0dc1fd360611cb0a303b4b0e901a282c462e47d9ebea39c`. Migration 0011 has not been applied to production.
 
 ## 6. DB Chaos / outcome_unknown / Dashboard
 
