@@ -30,7 +30,7 @@ The PostgreSQL dispatch runtime runs a bounded, non-overlapping, 15-second inter
 - Concurrent recovery attempts using the same pre-recovery Task version: exactly one transition may commit; the stale contender fails closed.
 - Runtime unit tests: authorized replacement selection and safe waiting when no replacement exists.
 
-These checks are pending the final exact-Head CI run until GitHub Actions completes.
+The final exact-Head results are recorded in the PR body after all workflows complete.
 
 ## 2. Owner OIDC — isolated module and Mock IdP verification
 
@@ -58,14 +58,14 @@ Mock tests use locally generated test-only signing keys and cover valid identity
 ### Audit migration proposal — not applied
 A future additive migration may add nullable `operator_issuer`, `operator_subject`, `request_id`, and `action` fields to the relevant append-only Owner audit ledger. Issuer and subject must be both present or both absent. Legacy shared-token events remain explicitly unattributed; no historical identity backfill is allowed. The write boundary must accept a typed identity object only from verified OIDC middleware.
 
-The OIDC module currently provides verification primitives and a PKCE request/callback validator. It does not yet implement the complete server-side authorization-code exchange/session-cookie lifecycle or production HTTP/JWKS transport. A trusted resolver must enforce TLS, redirect rejection, response size/time limits, and issuer metadata pinning before any live use.
+The OIDC module currently provides verification primitives and a PKCE request/callback validator. It does not yet implement the complete server-side authorization-code exchange/session-cookie lifecycle or production HTTP/JWKS transport. A trusted resolver must enforce TLS, redirect rejection, response size/time limits, and issuer metadata pinning before any live use.\n\n### Shared-token transition / Break-glass proposal — requires Owner approval\n- Keep the current shared Owner token unchanged during an explicitly time-limited parallel-validation window; do not silently convert its audit entries into named human identities.\n- During the window, all shared-token actions remain recorded as unattributed legacy actions. New high-risk Owner actions should move to verified OIDC plus explicit approval before the shared-token retirement date.\n- After the approved cutoff, disable ordinary shared-token use. Do not remove the legacy audit trail or backfill operator identity.\n- Emergency Break-glass should use a separately held credential, dual control, a short approved expiry (proposed maximum 15 minutes), mandatory reason/request ID, immediate alerting, and mandatory post-use rotation/review. It must never bypass append-only audit or external-action approval gates.\n- No such migration window, expiry, credential, or policy has been configured.
 
 ## 3. SSE and event delivery
 
 Existing automated coverage confirms:
 - 3 global SSE connections and 1 connection per Agent.
 - 25 sequential reconnect/cancel cycles with listener cleanup.
-- 15-second principal revalidation and stream closure on authorization withdrawal.
+- 15-second principal revalidation and stream closure on authorization withdrawal.\n- Stage 10 moved periodic reauthorization onto an independent timer so quiet polling or slow notification wakeups cannot defer the check; the timer is cleared when the stream closes.
 - Scoped Last-Event-ID replay and durable Outbox reads; NOTIFY is a wake-up hint rather than the source of truth.
 - SSE payload allowlisting excludes credentials and hashes.
 
