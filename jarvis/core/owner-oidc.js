@@ -79,10 +79,10 @@ function createOwnerOidcVerifier({issuer,audience,ownerGroup,groupClaim="groups"
     if(!valid)throw new Error("Owner OIDC JWT signature verification failed");
     const now=Math.floor(clock()/1000),skew=Math.floor(clockSkewMs/1000);
     if(claims.iss!==issuerUrl.toString()||!(claims.aud===audience||(Array.isArray(claims.aud)&&claims.aud.includes(audience))))throw new Error("Owner OIDC issuer or audience mismatch");
-    if(Array.isArray(claims.aud)&&claims.aud.length>1&&claims.azp!==audience)throw new Error("Owner OIDC authorized party mismatch");
+    if((Array.isArray(claims.aud)&&claims.aud.length>1&&claims.azp!==audience)||(claims.azp!==undefined&&claims.azp!==audience))throw new Error("Owner OIDC authorized party mismatch");
     if(!Number.isFinite(claims.exp)||claims.exp<=now-skew||!Number.isFinite(claims.nbf)||claims.nbf>now+skew||!Number.isFinite(claims.iat)||claims.iat>now+skew||claims.iat<now-86400-skew)throw new Error("Owner OIDC token time claims are invalid");
     if(typeof claims.sub!=="string"||!claims.sub.trim()||claims.sub.length>255)throw new Error("Owner OIDC subject is missing or invalid");
-    if(expectedNonce!==null&&!safeEqual(claims.nonce,expectedNonce))throw new Error("Owner OIDC nonce mismatch");
+    if(typeof expectedNonce!=="string"||!expectedNonce.trim()||!safeEqual(claims.nonce,expectedNonce))throw new Error("Owner OIDC nonce mismatch");
     const groups=claims[groupClaim];
     if(!(groups===ownerGroup||(Array.isArray(groups)&&groups.includes(ownerGroup))))throw new Error("Owner OIDC group authorization denied");
     return Object.freeze({issuer:claims.iss,subject:claims.sub,requestId:typeof requestId==="string"&&requestId.length<=128?requestId:null});
