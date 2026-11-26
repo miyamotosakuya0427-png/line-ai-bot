@@ -187,7 +187,7 @@ async function main() {
     pool: { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount },
     finishedAt: new Date().toISOString()
   };
-  console.log(JSON.stringify(final));
+  fs.writeFileSync(path.join(__dirname, "..", "stage12-sse-metrics.json"), JSON.stringify(final, null, 2) + "\\n", { mode: 0o600 });\n  console.log(JSON.stringify(final));
   await new Promise(resolve => server.close(resolve));
   await pool.end();
   if (final.elapsedSeconds < 3600 || final.eventsReceived.some((n,i)=>i===1 ? n<1 : n<versions[i]-5) ||
