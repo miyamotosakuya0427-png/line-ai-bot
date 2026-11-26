@@ -177,6 +177,11 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
       idempotencyKey: "worker-revision-" + sourceId + "-" + i,
       bars: [fixtureBar(sourceId, revisionTime, close)], findings: []
     })));
+    assert.equal(revisions.filter(result => result.inserted === 1).length, 1,
+      "concurrent revision race must create exactly one initial bar");
+    assert.equal(revisions.filter(result => result.revised === 1).length, 1,
+      "concurrent revision race must record exactly one changed-candle revision");
+    counters.success += revisions.filter(result => !result.idempotentReplay).length;
     const revisionRows = await pool.query(
       "SELECT r.revision_no FROM market_bar_revisions r JOIN market_bars b ON b.id=r.bar_id WHERE b.source_id=$1 AND b.open_time_utc=$2 ORDER BY r.revision_no",
       [sourceId, revisionTime]
@@ -247,7 +252,7 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
     }));
 
     const activeWorkerConnections = await pool.query(
-      "SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname=current_database() AND application_name='one-jarvis-market-data-worker'"
+      "SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname=current_database() AND application_name IN ('one-jarvis-market-data-worker','one-jarvis-stage6-worker-rollback-probe')"
     );
     assert.equal(Number(activeWorkerConnections.rows[0].count), 0, "worker Pool connections must be closed before parent completion");
     console.log("STAGE6_POOL_CLOSE_EVIDENCE " + JSON.stringify({
@@ -274,7 +279,7 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
       ["worker-%-" + sourceId + "%"]
     );
     assert.ok(ownBatches.rows[0].count >= 4);
-    assert.deepEqual(counters, { success: 3, failure: 1, duplicate: 5, retry: 1 });
+    assert.deepEqual(counters, { success: 5, failure: 1, duplicate: 5, retry: 1 });
   } finally {
     await pool.end();
     await bootstrapPool.query('DROP SCHEMA IF EXISTS "' + schemaName + '" CASCADE');
