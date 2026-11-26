@@ -1,6 +1,6 @@
 "use strict";
 const crypto=require("node:crypto");
-const STATUS=new Set(["MATCH","MISMATCH","UNKNOWN","EXPIRED"]);
+const STATUS=new Set(["MATCH","MISMATCH","UNKNOWN","EXPIRED","CANDIDATE_VERIFIED"]);
 const sha256=v=>crypto.createHash("sha256").update(v).digest("hex");
 const xmlEscape=v=>String(v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;");
 const xmlDecode=v=>v.replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&amp;/g,"&");
