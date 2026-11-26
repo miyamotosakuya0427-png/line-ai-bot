@@ -55,6 +55,8 @@ test("event and operational migrations remain explicit maintenance operations", 
   const pool = recordingPool();
   const eventStore = createPostgresEventStore({ pool });
   const operational = createPostgresOperationalStores({ pool });
+  assert.equal(typeof eventStore.assertSchema, "function");
+  assert.equal(typeof operational.assertSchema, "function");
   assert.equal(typeof eventStore.migrate, "function");
   assert.equal(typeof operational.migrate, "function");
 });
