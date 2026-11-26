@@ -163,7 +163,8 @@ async function main() {
   finished = true;
   for (const controller of activeControllers) controller.abort();
   await Promise.all(consumers);
-  await delay(1000);\n  const counts = await pool.query(
+  await delay(1000);
+  const counts = await pool.query(
     "SELECT project_id,conversation_id,count(*)::int AS outbox_rows,max(scope_cursor)::bigint AS max_cursor FROM jarvis.task_event_outbox WHERE project_id LIKE 'stage12-project-%' GROUP BY project_id,conversation_id ORDER BY project_id"
   );
   const dbListeners = await pool.query(
@@ -184,10 +185,12 @@ async function main() {
     processRssBytes: rss,
     processCpuUserMicros: cpu.user,
     processCpuSystemMicros: cpu.system,
+    resourceSamples,
     pool: { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount },
     finishedAt: new Date().toISOString()
   };
-  fs.writeFileSync(path.join(__dirname, "..", "stage12-sse-metrics.json"), JSON.stringify(final, null, 2) + "\\n", { mode: 0o600 });\n  console.log(JSON.stringify(final));
+  fs.writeFileSync(path.join(__dirname, "..", "stage12-sse-metrics.json"), JSON.stringify(final, null, 2), { mode: 0o600 });
+  console.log(JSON.stringify(final));
   await new Promise(resolve => server.close(resolve));
   await pool.end();
   if (final.elapsedSeconds < 3600 || final.eventsReceived.some((n,i)=>i===1 ? n<1 : n<versions[i]-5) ||
