@@ -37,7 +37,7 @@ test("Owner session expires on absolute TTL, idle timeout or revocation",()=>{
   const base={createdAt:now-1000,lastSeenAt:now-1000,now,absoluteTtlMs:3600000,idleTimeoutMs:900000};
   assert.equal(evaluateOwnerSessionLifetime(base).valid,true);
   assert.equal(evaluateOwnerSessionLifetime({...base,createdAt:now-3600000}).reason,"absolute_expiry");
-  assert.equal(evaluateOwnerSessionLifetime({...base,lastSeenAt:now-900000}).reason,"idle_timeout");
+  assert.equal(evaluateOwnerSessionLifetime({...base,createdAt:now-1000000,lastSeenAt:now-900000}).reason,"idle_timeout");
   assert.equal(evaluateOwnerSessionLifetime({...base,revokedAt:now}).reason,"revoked");
   assert.equal(evaluateOwnerSessionLifetime({...base,lastSeenAt:now+1}).reason,"invalid_session_metadata");
 });
