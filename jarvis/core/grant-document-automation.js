@@ -225,7 +225,8 @@ function xmlText(xml) {
   return decodeXml(xml.replace(/<w:tab\b[^>]*\/>/g,"\t").replace(/<w:br\b[^>]*\/>/g,"\n").replace(/<[^>]+>/g,"").replace(/\s+/g," ").trim());
 }
 function extractDocxParagraphs(xml, sourcePart) {
-  return [...xml.matchAll(/<w:p(?:\s[^>]*)?>([\s\S]*?)<\/w:p>/g)].map((match, index) => ({
+  const withoutTables=xml.replace(/<w:tbl(?:\s[^>]*)?>[\s\S]*?<\/w:tbl>/g, "");
+  return [...withoutTables.matchAll(/<w:p(?:\s[^>]*)?>([\s\S]*?)<\/w:p>/g)].map((match, index) => ({
     text:xmlText(match[1]),
     location:{part:sourcePart, paragraph:index + 1},
     style:(match[1].match(/<w:pStyle[^>]*w:val="([^"]+)"/) || [])[1] || null
