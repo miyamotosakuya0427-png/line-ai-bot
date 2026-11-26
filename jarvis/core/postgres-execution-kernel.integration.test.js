@@ -169,7 +169,7 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   await revocations.revoke({agentId:"agent-target",revokedBy:"integration-test"});
   await registerScopedWorker({workerId:"worker-target-replacement",agentId:"agent-target-replacement",departmentId:"management",instanceId:"instance-target-replacement",processId:"900"});
   const originalHandoffEvent=handoffEvents.find(row=>row.eventType==="agent_handoff");
-  const postCommitRecovery=await registry.recoverPostCommitHandoff({taskId:handoffTask.task.taskId,expectedVersion:originalHandoffEvent.version,candidateWorkerId:"worker-target-replacement",maxAttempts:3});
+  const postCommitRecovery=await registry.recoverPostCommitHandoff({taskId:handoffTask.task.taskId,expectedVersion:originalHandoffEvent.version,candidateWorkerId:"worker-target-replacement",oldAgentAuthorized:false,maxAttempts:3});
   assert.equal(postCommitRecovery.created,true,"post-commit recovery must append a durable re-selection event");
   assert.equal(postCommitRecovery.selectedWorker.workerId,"worker-target-replacement");
   assert.equal(postCommitRecovery.task.ownerAgent,"agent-target-replacement");
