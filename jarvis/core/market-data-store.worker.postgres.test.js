@@ -8,6 +8,7 @@ const fs = require("node:fs");
 const { Worker } = require("node:worker_threads");
 const { Pool } = require("pg");
 const { verifyChain } = require("./market-data-audit");
+const { stable } = require("./market-data-normalizer");
 
 const databaseUrl = process.env.MARKET_DATA_TEST_DATABASE_URL;
 const enabled = Boolean(databaseUrl);
@@ -200,9 +201,26 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
       sourceId, batchId: crypto.randomUUID(), idempotencyKey: retryKey,
       bars: [fixtureBar(sourceId, new Date(base + 180000).toISOString())], findings: []
     };
-    const rollbackKey = "worker-rollback-" + sourceId;
+    const rollbackKey = retryKey;
+    const retryBar = retryInput.bars[0];
+    const retryPayloadHash = crypto.createHash("sha256").update(stable({
+      sourceId,
+      bars: [{ normalizedHash: retryBar.normalizedHash, rawPayloadHash: retryBar.rawPayloadHash || null }],
+      findings: [],
+      findingCorrections: []
+    })).digest("hex");
     const rollbackWorker = new Worker(workerPath, {
-      workerData: { mode: "transaction-hold", databaseUrl: testDatabaseUrl, sourceKey: rollbackKey }
+      workerData: {
+        mode: "transaction-hold",
+        databaseUrl: testDatabaseUrl,
+        batchId: retryInput.batchId,
+        sourceId,
+        idempotencyKey: retryKey,
+        symbol: retryBar.symbol,
+        interval: retryBar.interval,
+        inputCount: 1,
+        payloadHash: retryPayloadHash
+      }
     });
     await new Promise((resolve, reject) => {
       const readyTimer = setTimeout(() => reject(new Error("Transaction-hold Worker readiness timeout")), 5000);
@@ -225,7 +243,7 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
     let rollbackRowCount = 1;
     for (let attempt = 0; attempt < 20; attempt++) {
       const rollbackCheck = await pool.query(
-        "SELECT count(*)::int AS count FROM market_data_sources WHERE source_key=$1",
+        "SELECT count(*)::int AS count FROM market_ingest_batches WHERE idempotency_key=$1",
         [rollbackKey]
       );
       rollbackRowCount = Number(rollbackCheck.rows[0].count);
@@ -239,8 +257,8 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
     assert.equal(Number(rollbackConnections.rows[0].count), 0, "forced Worker database connection must be closed");
     const rollbackKeyHash = crypto.createHash("sha256").update(rollbackKey).digest("hex");
     console.log("STAGE6_ROLLBACK_EVIDENCE " + JSON.stringify({
-      probe: "market_data_sources",
-      sourceKeySha256: rollbackKeyHash,
+      probe: "market_ingest_batches",
+      idempotencyKeySha256: rollbackKeyHash,
       rowCountAfterForcedTermination: rollbackRowCount,
       workerTerminationCode: forcedExitCode,
       activeRollbackConnections: Number(rollbackConnections.rows[0].count)
@@ -258,6 +276,11 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
     counters.success++;
     counters.retry++;
     assert.equal(retried.quality, "completed");
+    const retriedBatch = await pool.query(
+      "SELECT status FROM market_ingest_batches WHERE idempotency_key=$1",
+      [retryKey]
+    );
+    assert.equal(retriedBatch.rows[0].status, "completed");
 
     const audit = await pool.query(
       "SELECT payload, previous_hash AS \"previousHash\", event_hash AS \"eventHash\" FROM market_data_audit_events ORDER BY id"

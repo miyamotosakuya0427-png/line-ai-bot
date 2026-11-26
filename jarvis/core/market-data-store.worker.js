@@ -24,9 +24,9 @@ async function main() {
     const client = await pool.connect();
     await client.query("BEGIN");
     await client.query(
-      "INSERT INTO market_data_sources(source_key,provider,license_id,venue_allowlist,currency_allowlist,enabled,license_approved,license_evidence_ref,license_reviewed_at) " +
-      "VALUES($1,'Stage6 rollback probe','synthetic-worker-license',ARRAY['BINANCE_PUBLIC'],ARRAY['JPY'],TRUE,TRUE,'synthetic-worker-evidence',now())",
-      [workerData.sourceKey]
+      "INSERT INTO market_ingest_batches(id,source_id,idempotency_key,symbol,interval,status,input_count,raw_payload_hash) " +
+      "VALUES($1,$2,$3,$4,$5,'running',$6,$7)",
+      [workerData.batchId,workerData.sourceId,workerData.idempotencyKey,workerData.symbol,workerData.interval,workerData.inputCount,workerData.payloadHash]
     );
     parentPort.postMessage({ ready: true });
     setInterval(() => {}, 1000);
