@@ -42,7 +42,7 @@ test("Owner OIDC fails closed on unavailable or ambiguous JWKS keys",async()=>{
 
 test("Owner OIDC rejects unapproved signing algorithms",async()=>{
  await assert.rejects(verifier().verify(token({}, {alg:"none"})),/algorithm or key ID/);
- assert.throws(()=>createOwnerOidcVerifier({issuer:"http://mock-idp.example/",audience:"client",ownerGroup:"owners",jwksUri:"https://mock-idp.example/jwks",resolveJwks:async()=>({keys:[jwk]}),allowedAlgorithms:["HS256"]}),/algorithm allowlist/);
+ assert.throws(()=>createOwnerOidcVerifier({issuer:"https://mock-idp.example/",audience:"client",ownerGroup:"owners",jwksUri:"https://mock-idp.example/jwks",resolveJwks:async()=>({keys:[jwk]}),allowedAlgorithms:["HS256"]}),/algorithm allowlist/);
 });
 
 test("OIDC login request uses PKCE S256, state and nonce; callback validates both",()=>{
