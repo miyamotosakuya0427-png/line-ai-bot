@@ -88,7 +88,7 @@ function startWorker(data, timeoutMs = 15000) {
   });
 }
 
-async function runIngest(databaseUrl, input, timeoutMs) {
+async function runIngest(testDatabaseUrl, input, timeoutMs) {
   const { message } = await startWorker({ databaseUrl, input }, timeoutMs);
   return message.result;
 }
@@ -100,7 +100,13 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
   assert.ok(["localhost", "127.0.0.1", "::1"].includes(parsed.hostname),
     "Worker integration tests may only use isolated localhost PostgreSQL");
 
-  const pool = new Pool({ connectionString: databaseUrl, max: 8 });
+  const schemaName = "stage6_worker_" + crypto.randomUUID().replace(/-/g, "");
+  const bootstrapPool = new Pool({ connectionString: databaseUrl, max: 1 });
+  await bootstrapPool.query('CREATE SCHEMA "' + schemaName + '"');
+  const isolatedUrl = new URL(databaseUrl);
+  isolatedUrl.searchParams.set("options", "-c search_path=" + schemaName + ",public");
+  const testDatabaseUrl = isolatedUrl.toString();
+  const pool = new Pool({ connectionString: testDatabaseUrl, max: 8 });
   const migrationsDir = path.join(__dirname, "..", "migrations");
   try {
     try {
@@ -116,6 +122,8 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
     }
   } catch (error) {
     await pool.end();
+    await bootstrapPool.query('DROP SCHEMA IF EXISTS "' + schemaName + '" CASCADE');
+    await bootstrapPool.end();
     throw error;
   }
   const sourceId = crypto.randomUUID();
@@ -136,8 +144,8 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
       bars: [samePayload], findings: []
     });
     const two = await Promise.all([
-      runIngest(databaseUrl, sameInput()),
-      runIngest(databaseUrl, sameInput())
+      runIngest(testDatabaseUrl, sameInput()),
+      runIngest(testDatabaseUrl, sameInput())
     ]);
     counters.success += two.filter(x => !x.idempotentReplay).length;
     counters.duplicate += two.filter(x => x.idempotentReplay).length;
@@ -145,7 +153,7 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
     assert.equal(counters.duplicate, 1);
 
     const fiveBar = fixtureBar(sourceId, new Date(base + 60000).toISOString());
-    const five = await Promise.all(Array.from({ length: 5 }, () => runIngest(databaseUrl, {
+    const five = await Promise.all(Array.from({ length: 5 }, () => runIngest(testDatabaseUrl, {
       sourceId, batchId: crypto.randomUUID(),
       idempotencyKey: "worker-5-" + sourceId,
       bars: [fiveBar], findings: []
@@ -155,7 +163,7 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
     assert.equal(five.filter(x => !x.idempotentReplay).length, 1);
     assert.equal(five.filter(x => x.idempotentReplay).length, 4);
 
-    await assert.rejects(() => runIngest(databaseUrl, {
+    await assert.rejects(() => runIngest(testDatabaseUrl, {
       sourceId, batchId: crypto.randomUUID(),
       idempotencyKey: "worker-2-" + sourceId,
       bars: [fixtureBar(sourceId, new Date(base).toISOString(), "102")],
@@ -164,7 +172,7 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
     counters.failure++;
 
     const revisionTime = new Date(base + 120000).toISOString();
-    const revisions = await Promise.all(["101", "102"].map((close, i) => runIngest(databaseUrl, {
+    const revisions = await Promise.all(["101", "102"].map((close, i) => runIngest(testDatabaseUrl, {
       sourceId, batchId: crypto.randomUUID(),
       idempotencyKey: "worker-revision-" + sourceId + "-" + i,
       bars: [fixtureBar(sourceId, revisionTime, close)], findings: []
@@ -194,7 +202,7 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
     };
     const rollbackKey = "worker-rollback-" + sourceId;
     const rollbackWorker = new Worker(workerPath, {
-      workerData: { mode: "transaction-hold", databaseUrl, sourceKey: rollbackKey }
+      workerData: { mode: "transaction-hold", databaseUrl: testDatabaseUrl, sourceKey: rollbackKey }
     });
     await new Promise((resolve, reject) => {
       const readyTimer = setTimeout(() => reject(new Error("Transaction-hold Worker readiness timeout")), 5000);
@@ -241,7 +249,7 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
       activeWorkerConnections: Number(activeWorkerConnections.rows[0].count)
     }));
 
-    const retried = await runIngest(databaseUrl, retryInput);
+    const retried = await runIngest(testDatabaseUrl, retryInput);
     counters.retry++;
     assert.equal(retried.quality, "completed");
 
@@ -263,6 +271,8 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
     assert.deepEqual(counters, { success: 3, failure: 1, duplicate: 5, retry: 1 });
   } finally {
     await pool.end();
+    await bootstrapPool.query('DROP SCHEMA IF EXISTS "' + schemaName + '" CASCADE');
+    await bootstrapPool.end();
   }
 });
 
