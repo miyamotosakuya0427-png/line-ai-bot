@@ -184,14 +184,22 @@ test("independent Worker timeout and forced termination are bounded", {
   assert.ok(["localhost", "127.0.0.1", "::1"].includes(parsed.hostname));
   const worker = new Worker(workerPath, { workerData: { mode: "hold" } });
   await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("Worker readiness timeout")), 5000);
+    const readyTimer = setTimeout(() => reject(new Error("Worker readiness timeout")), 5000);
     worker.once("message", message => {
-      clearTimeout(timer);
+      clearTimeout(readyTimer);
       assert.equal(message.ready, true);
       resolve();
     });
     worker.once("error", reject);
   });
-  const terminated = await worker.terminate();
-  assert.equal(typeof terminated, "number");
+  let timedOut = false;
+  const terminationCode = await Promise.race([
+    new Promise(resolve => setTimeout(() => {
+      timedOut = true;
+      worker.terminate().then(resolve, resolve);
+    }, 100)),
+    new Promise(resolve => worker.once("exit", resolve))
+  ]);
+  assert.equal(timedOut, true);
+  assert.equal(typeof terminationCode, "number");
 });
