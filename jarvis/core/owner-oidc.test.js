@@ -26,22 +26,22 @@ test("Owner OIDC verifies signed Mock IdP JWT and returns only verified issuer a
 test("Owner OIDC rejects forged signatures, issuer, audience, expiry, not-before, nonce and Owner group",async()=>{
  const check=verifier();
  await assert.rejects(check.verify(token(),{expectedNonce:"wrong"}),/nonce mismatch/);
- await assert.rejects(check.verify(token({iss:"https://attacker.example/"})),/issuer or audience mismatch/);
- await assert.rejects(check.verify(token({aud:"other-client"})),/issuer or audience mismatch/);
- await assert.rejects(check.verify(token({exp:Math.floor(now/1000)-600})),/time claims/);
- await assert.rejects(check.verify(token({nbf:Math.floor(now/1000)+900})),/time claims/);
- await assert.rejects(check.verify(token({groups:["not-owner"]})),/group authorization denied/);
+ await assert.rejects(check.verify(token({iss:"https://attacker.example/"}),{expectedNonce:"nonce-expected"}),/issuer or audience mismatch/);
+ await assert.rejects(check.verify(token({aud:"other-client"}),{expectedNonce:"nonce-expected"}),/issuer or audience mismatch/);
+ await assert.rejects(check.verify(token({exp:Math.floor(now/1000)-600}),{expectedNonce:"nonce-expected"}),/time claims/);
+ await assert.rejects(check.verify(token({nbf:Math.floor(now/1000)+900}),{expectedNonce:"nonce-expected"}),/time claims/);
+ await assert.rejects(check.verify(token({groups:["not-owner"]}),{expectedNonce:"nonce-expected"}),/group authorization denied/);
  const parts=token().split(".");parts[1]=Buffer.from(JSON.stringify({sub:"attacker"})).toString("base64url");
- await assert.rejects(check.verify(parts.join(".")),/signature verification failed/);
+ await assert.rejects(check.verify(parts.join("."),{expectedNonce:"nonce-expected"}),/signature verification failed/);
 });
 
 test("Owner OIDC fails closed on unavailable or ambiguous JWKS keys",async()=>{
- await assert.rejects(verifier({resolveJwks:async()=>{throw new Error("network failure");}}).verify(token()),/JWKS unavailable/);
- await assert.rejects(verifier({resolveJwks:async()=>({keys:[jwk,{...jwk}]})}).verify(token()),/unavailable or ambiguous/);
+ await assert.rejects(verifier({resolveJwks:async()=>{throw new Error("network failure");}}).verify(token(),{expectedNonce:"nonce-expected"}),/JWKS unavailable/);
+ await assert.rejects(verifier({resolveJwks:async()=>({keys:[jwk,{...jwk}]})}).verify(token(),{expectedNonce:"nonce-expected"}),/unavailable or ambiguous/);
 });
 
 test("Owner OIDC rejects unapproved signing algorithms",async()=>{
- await assert.rejects(verifier().verify(token({}, {alg:"none"})),/algorithm or key ID/);
+ await assert.rejects(verifier().verify(token({}, {alg:"none"}),{expectedNonce:"nonce-expected"}),/algorithm or key ID/);
  assert.throws(()=>createOwnerOidcVerifier({issuer:"https://mock-idp.example/",audience:"client",ownerGroup:"owners",jwksUri:"https://mock-idp.example/jwks",resolveJwks:async()=>({keys:[jwk]}),allowedAlgorithms:["HS256"]}),/algorithm allowlist/);
 });
 
