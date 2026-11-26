@@ -92,3 +92,42 @@ test("revoked target Agent is excluded and the Task waits without committing a H
  assert.equal(result.task.resultResourceId,"task-result-task-1-v3");
  assert.equal(calls.includes("record-handoff"),false);
 });
+
+
+function recoveryFixture({candidateRows=[]}={}){
+ const calls=[];
+ const task={taskId:"task-recovery",projectId:"project-a",ownerConversation:"conversation-a",ownerAgent:"agent-old",departmentId:"management",status:"queued",state:"queued"};
+ const events=[{eventType:"agent_handoff",version:7,payload:{fromAgentId:"agent-source",toAgentId:"agent-old",toWorkerId:"worker-old",fromDepartmentId:"engineering",toDepartmentId:"management"}}];
+ const registry={
+  async listTasks({status}){return status==="queued"?[{task,version:7}]:[];},
+  async listTaskEvents(){return events;},
+  async recoverPostCommitHandoff(input){calls.push(input);return input.candidateWorkerId?{created:true,selectedWorker:{workerId:input.candidateWorkerId}}:{created:true,waiting:true};},
+  async getTask(){return null;},async claimTaskForWorker(){return null;},async transitionTask(){},async heartbeatLease(){},async releaseLease(){}
+ };
+ const executionKernel={async listWorkersForScope(){return candidateRows;},async heartbeatWorker(){},async completeWorkerTask(){}};
+ const handlers=Object.fromEntries(DEPARTMENTS.map(department=>["department."+department.id,async()=>({answer:"unused"})]));
+ const runtime=createPostgresTaskDispatchRuntime({registry,executionKernel,authorizeAgent:async agentId=>({agentId,conversationId:"conversation-a",projectIds:["project-a"],scopes:["tasks:dispatch","tasks:claim"]}),handlers,rateLimiter:{async consume(){return{allowed:true};}}});
+ return{runtime,calls};
+}
+
+test("post-commit Handoff recovery selects a different authorized Worker with the same scope",async()=>{
+ const {runtime,calls}=recoveryFixture({candidateRows:[{worker_id:"worker-new",agent_id:"agent-new",department_id:"management",status:"idle",current_task_id:null,grant_id:"grant-new",heartbeat_at:new Date().toISOString()}]});
+ try{
+  const result=await runtime.recoverPostCommitHandoffs();
+  assert.deepEqual(result,{scanned:1,recovered:1,waiting:0,skipped:false});
+  assert.equal(calls.length,1);
+  assert.equal(calls[0].taskId,"task-recovery");
+  assert.equal(calls[0].expectedVersion,7);
+  assert.equal(calls[0].candidateWorkerId,"worker-new");
+  assert.equal(calls[0].maxAttempts,3);
+ }finally{runtime.stopHandoffRecovery();}
+});
+
+test("post-commit Handoff recovery parks Task when no replacement Worker is eligible",async()=>{
+ const {runtime,calls}=recoveryFixture();
+ try{
+  const result=await runtime.recoverPostCommitHandoffs();
+  assert.deepEqual(result,{scanned:1,recovered:0,waiting:1,skipped:false});
+  assert.equal(calls[0].candidateWorkerId,null);
+ }finally{runtime.stopHandoffRecovery();}
+});
