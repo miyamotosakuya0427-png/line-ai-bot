@@ -68,7 +68,10 @@ function evidence(value, sourceDocumentId, sourceHash, location, confidence = nu
   };
 }
 function createCompanyProfile(fields = {}) {
-  const profile = {};
+  const profile = Object.fromEntries(COMPANY_PROFILE_FIELDS.map(key => [key, Object.freeze({
+    value:null, sourceDocumentId:null, sourceHash:null, verifiedAt:null, validUntil:null,
+    verificationStatus:"UNKNOWN", verifiedBy:null, confidence:null, notes:""
+  })]));
   for (const [key, field] of Object.entries(fields)) {
     const item = field && typeof field === "object" && Object.prototype.hasOwnProperty.call(field, "value") ? field : {value: field};
     const status = VERIFICATION.has(item.verificationStatus) ? item.verificationStatus : "UNKNOWN";
@@ -244,8 +247,7 @@ function extractDocxTables(xml, sourcePart) {
 async function readWord(buffer, options = {}) {
   const limits={...DEFAULT_LIMITS,...(options.limits||{})};
   assertBuffer(buffer,limits);
-  const JSZip=options.JSZip || require("jszip");
-  const zip=await JSZip.loadAsync(buffer,{checkCRC32:true,createFolders:false});
+  const zip=await loadSafeZip(buffer,options);
   const names=Object.keys(zip.files);
   if (names.length>limits.maxDocxEntries) throw new Error("TOO_MANY_DOCX_ENTRIES");
   const parts=names.filter(name=>/^word\/(document|header\d*|footer\d*)\.xml$/.test(name)).sort();
@@ -287,7 +289,7 @@ function extractStructuredValues(parsed) {
   const amountPattern=/(?:¥|￥)?\s*[0-9０-９][0-9０-９,，]*(?:\.[0-9０-９]+)?\s*(?:円|万円|千円)/g;
   for(const fragment of fragments) {
     for(const match of fragment.text.matchAll(datePattern)) dates.push({value:match[0],location:fragment.location,confidence:fragment.confidence});
-    for(const match of fragment.text.matchAll(amountPattern)) amounts.push({value:match[0],location:fragment.location,confidence:fragment.confidence});
+    for(const match of fragment.text.matchAll(amountPattern)) amounts.push({value:match[0].trim(),location:fragment.location,confidence:fragment.confidence});
   }
   return {dates,amounts,sourceFragments:fragments.length};
 }
