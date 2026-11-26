@@ -164,6 +164,21 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
    assert.deepEqual(handoffEvents.find(row=>row.eventType==="agent_handoff").payload.handoffRequest,{reason:"経営部門の専門確認が必要です",deliverables:["KPI分析"],acceptanceCriteria:["根拠資料を明記"],actionClass:"analyze"},"PostgreSQL persists structured Handoff details in the atomic event");
   const handoffReplay=await registry.recordTaskHandoff({taskId:handoffTask.task.taskId,expectedVersion:handoffRunning.version,lease:handoffClaim.lease,targetWorkerId:"worker-target",fromAgentId:(loserId==="worker-a"?"agent-a":"agent-b"),toAgentId:"agent-target",fromDepartmentId:"engineering",toDepartmentId:"management",idempotencyKey:"handoff-once",resultResourceId:"task-result-handoff",handoffRequest:{reason:"経営部門の専門確認が必要です",deliverables:["KPI分析"],acceptanceCriteria:["根拠資料を明記"],actionClass:"analyze"}});
   assert.equal(handoffReplay.created,false,"handoff idempotency key must prevent duplicate transfer events");
+  // A committed Handoff whose destination Agent is later revoked must be
+  // recovered without acquiring or fabricating a Task Lease.
+  await revocations.revoke({agentId:"agent-target",revokedBy:"integration-test"});
+  await registerScopedWorker({workerId:"worker-target-replacement",agentId:"agent-target-replacement",departmentId:"management",instanceId:"instance-target-replacement",processId:"900"});
+  const originalHandoffEvent=handoffEvents.find(row=>row.eventType==="agent_handoff");
+  const recovery=await registry.recoverPostCommitHandoff({taskId:handoffTask.task.taskId,expectedVersion:originalHandoffEvent.version,candidateWorkerId:"worker-target-replacement",maxAttempts:3});
+  assert.equal(recovery.created,true,"post-commit recovery must append a durable re-selection event");
+  assert.equal(recovery.selectedWorker.workerId,"worker-target-replacement");
+  assert.equal(recovery.task.ownerAgent,"agent-target-replacement");
+  assert.equal(recovery.task.state,"queued");
+  assert.equal(recovery.task.leaseOwner,null,"recovery must not fabricate a Task Lease");
+  const recoveredEvents=await registry.listTaskEvents({taskIds:[handoffTask.task.taskId],limit:20});
+  assert.equal(recoveredEvents.filter(row=>row.eventType==="handoff_reselected").length,1);
+  assert.equal(recoveredEvents.find(row=>row.eventType==="handoff_reselected").payload.originalHandoffVersion,originalHandoffEvent.version);
+  await assert.rejects(registry.recoverPostCommitHandoff({taskId:handoffTask.task.taskId,expectedVersion:originalHandoffEvent.version,candidateWorkerId:"worker-target-replacement",maxAttempts:3}),/Stale Task version/,"a replay using the pre-recovery version must not create a second transfer");
   const revokedTargetTask=await makeTask("handoff-revoked-target",loserId);
   const revokedTargetClaim=await registry.claimTaskForWorker({taskId:revokedTargetTask.task.taskId,workerId:loserId,leaseMs:5000});
   const revokedTargetRunning=await registry.transitionTask({taskId:revokedTargetTask.task.taskId,expectedVersion:revokedTargetClaim.version,lease:revokedTargetClaim.lease,status:"running"});
