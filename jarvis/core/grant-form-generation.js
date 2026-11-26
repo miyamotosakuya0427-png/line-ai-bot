@@ -4,10 +4,10 @@ const STATUS=new Set(["MATCH","MISMATCH","UNKNOWN","EXPIRED"]);
 const sha256=v=>crypto.createHash("sha256").update(v).digest("hex");
 const xmlEscape=v=>String(v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;");
 const xmlDecode=v=>v.replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&amp;/g,"&");
-function safeName(v,max=80){return String(v||"").normalize("NFKC").replace(/[\\/:*?"<>|\\u0000-\\u001f]/g,"_").replace(/\\s+/g,"_").slice(0,max)||"document";}
+function safeName(v,max=80){return String(v||"").normalize("NFKC").replaceAll("/","_").replace(/[\\:*?"<>|]/g,"_").replace(/[\x00-\x1f]/g,"_").replace(/\s+/g,"_").slice(0,max)||"document";}
 function outputFileName({company="株式会社One",program,document,date=new Date(),version=1,extension}){
  const ymd=date instanceof Date?date.toISOString().slice(0,10).replace(/-/g,""):String(date).replace(/[^0-9]/g,"").slice(0,8);
- const ext=String(extension||"").replace(/^\\./,"").toLowerCase(); if(!["pdf","xlsx","xlsm","docx"].includes(ext))throw Error("UNSUPPORTED_OUTPUT_EXTENSION");
+ const ext=String(extension||"").replace(/^\./,"").toLowerCase(); if(!["pdf","xlsx","xlsm","docx"].includes(ext))throw Error("UNSUPPORTED_OUTPUT_EXTENSION");
  return safeName(company)+"_"+safeName(program)+"_"+safeName(document)+"_"+ymd+"_v"+String(version).padStart(3,"0")+"."+ext;
 }
 function resolveTransferValue(x,now=new Date()){
@@ -63,18 +63,18 @@ async function fillExcelTemplate(buffer,mappings,options={}){
  const out=Buffer.from(await wb.xlsx.writeBuffer());report.outputHash=sha256(out);report.blocked=report.filled.length===0||report.skipped.length>0||!report.structuralPreservation;report.reason=report.blocked?"REVIEW_REQUIRED":"GENERATED_REQUIRES_RENDERED_VISUAL_REVIEW";return{buffer:report.blocked?null:out,report};
 }
 function replaceIsolatedPlaceholder(paragraph,placeholder,value){
- const nodes=[...paragraph.matchAll(/<w:t(?:\\s[^>]*)?>([\\s\\S]*?)<\\/w:t>/g)];if(!nodes.length)return{paragraph,changed:false,reason:"PLACEHOLDER_NOT_FOUND"};
+ const nodes=[...paragraph.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)];if(!nodes.length)return{paragraph,changed:false,reason:"PLACEHOLDER_NOT_FOUND"};
  const joined=nodes.map(n=>xmlDecode(n[1])).join("");const token="{{"+placeholder+"}}";if(!joined.includes(token))return{paragraph,changed:false,reason:"PLACEHOLDER_NOT_FOUND"};if(joined.trim()!==token)return{paragraph,changed:false,reason:"WORD_PLACEHOLDER_NOT_ISOLATED"};
- let i=0;const rewritten=paragraph.replace(/<w:t(\\s[^>]*)?>([\\s\\S]*?)<\\/w:t>/g,(_w,attrs)=>{const t=i++===0?xmlEscape(value):"";const preserve=t.startsWith(" ")||t.endsWith(" ")?' xml:space="preserve"':"";return"<w:t"+(attrs||"")+preserve+">"+t+"</w:t>";});return{paragraph:rewritten,changed:true};
+ let i=0;const rewritten=paragraph.replace(/<w:t(\s[^>]*)?>([\s\S]*?)<\/w:t>/g,(_w,attrs)=>{const t=i++===0?xmlEscape(value):"";const preserve=t.startsWith(" ")||t.endsWith(" ")?' xml:space="preserve"':"";return"<w:t"+(attrs||"")+preserve+">"+t+"</w:t>";});return{paragraph:rewritten,changed:true};
 }
 async function fillWordTemplate(buffer,mappings,options={}){
  const JSZip=options.JSZip||require("jszip");const zip=await JSZip.loadAsync(buffer,{checkCRC32:true,createFolders:false});const sum=summarizeMappings(mappings,options.now||new Date());const report={format:"docx",templateHash:sha256(buffer),filled:[],skipped:[],mismatches:sum.mismatches.map(x=>x.placeholder)};
  if(sum.mismatches.length)return{buffer:null,report:{...report,blocked:true,reason:"MISMATCH_PRESENT"}};
- const parts=Object.keys(zip.files).filter(n=>/^word\\/(document|header\\d*|footer\\d*)\\.xml$/.test(n));
+ const parts=Object.keys(zip.files).filter(n=>/^word\/(document|header\d*|footer\d*)\.xml$/.test(n));
  for(const item of sum.results){
   const placeholder=item.placeholder||item.targetField;if(!item.resolution.eligible){report.skipped.push({placeholder,status:item.resolution.status,reason:item.resolution.reason});continue;}
   let replaced=false,unsafe=false;
-  for(const part of parts){const entry=zip.file(part);if(!entry)continue;let xml=await entry.async("string");xml=xml.replace(/<w:p(?:\\s[^>]*)?>[\\s\\S]*?<\\/w:p>/g,p=>{if(!p.includes("{{"+placeholder+"}}"))return p;const r=replaceIsolatedPlaceholder(p,placeholder,String(item.resolution.value));if(r.reason==="WORD_PLACEHOLDER_NOT_ISOLATED")unsafe=true;if(r.changed)replaced=true;return r.paragraph;});zip.file(part,xml);}
+  for(const part of parts){const entry=zip.file(part);if(!entry)continue;let xml=await entry.async("string");xml=xml.replace(/<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g,p=>{if(!p.includes("{{"+placeholder+"}}"))return p;const r=replaceIsolatedPlaceholder(p,placeholder,String(item.resolution.value));if(r.reason==="WORD_PLACEHOLDER_NOT_ISOLATED")unsafe=true;if(r.changed)replaced=true;return r.paragraph;});zip.file(part,xml);}
   if(replaced)report.filled.push({placeholder,value:String(item.resolution.value),evidence:item.resolution.evidence});else report.skipped.push({placeholder,status:"UNKNOWN",reason:unsafe?"WORD_PLACEHOLDER_NOT_ISOLATED":"PLACEHOLDER_NOT_FOUND"});
  }
  const out=Buffer.from(await zip.generateAsync({type:"nodebuffer",compression:"DEFLATE",compressionOptions:{level:6}}));report.outputHash=sha256(out);report.blocked=report.filled.length===0||report.skipped.length>0;report.reason=report.blocked?"REVIEW_REQUIRED":"GENERATED_REQUIRES_WORD_RENDER_VISUAL_REVIEW";return{buffer:report.blocked?null:out,report};
