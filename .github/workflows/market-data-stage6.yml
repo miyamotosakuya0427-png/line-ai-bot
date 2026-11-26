@@ -58,7 +58,7 @@ jobs:
         with:
           node-version: "22"
       - name: Install JARVIS and isolated PostgreSQL test dependencies
-        run: npm install --ignore-scripts --no-audit --no-fund --no-package-lock
+        run: npm install --ignore-scripts --no-audit --no-fund --no-package-lock pg@8
       - name: Verify isolated PostgreSQL test target
         run: |
           test -n "$MARKET_DATA_TEST_DATABASE_URL"
