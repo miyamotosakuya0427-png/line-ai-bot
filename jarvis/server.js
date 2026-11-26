@@ -1017,8 +1017,9 @@ if (require.main===module) {
       const {createPostgresOperationalStores}=require("./core/postgres-operational-stores");
       postgresPool=createNeonPool({connectionString:process.env.DATABASE_URL});
       const eventStore=createPostgresEventStore({pool:postgresPool});
-      await eventStore.migrate();
+      await eventStore.assertSchema();
       const operational=createPostgresOperationalStores({pool:postgresPool});
+      await operational.assertSchema();
       jobStore=operational.jobs;approvalStore=operational.approvals;
       await jobStore.init();await approvalStore.init();
     }else{
