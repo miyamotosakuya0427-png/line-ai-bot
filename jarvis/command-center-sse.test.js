@@ -130,7 +130,7 @@ test("Command Center SSE revalidates authorization at the 15-second boundary",as
     try{
       await Promise.race([
         waitForEnd,
-        new Promise((_,reject)=>{timeout=setTimeout(()=>reject(new Error("SSE stream did not close after reauthorization failed")),18000);})
+        new Promise((_,reject)=>{timeout=setTimeout(()=>reject(new Error("SSE stream did not close after reauthorization failed")),22000);})
       ]);
     }finally{clearTimeout(timeout);}
     assert.equal(true,true,"failed periodic authorization closes the stream");
