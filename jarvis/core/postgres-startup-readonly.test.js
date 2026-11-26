@@ -13,7 +13,7 @@ function recordingPool() {
     if (/to_regclass/i.test(sql)) {
       return { rows: [{
         events: "jarvis.events",
-        schema_migrations: "jarvis.schema_migrations",
+        migrations: "jarvis.schema_migrations",
         migration: true,
         migration_0002: true,
         migration_0003: true,
