@@ -84,8 +84,14 @@ function createCompanyProfile(fields = {}) {
   }
   return Object.freeze(profile);
 }
+function validDate(value) {
+  if (!value) return false;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed);
+}
 function compareField(masterField, expectedValue, now = new Date()) {
   if (!masterField || masterField.verificationStatus === "UNKNOWN" || masterField.value === null || masterField.value === undefined) return {status:"UNKNOWN", actual:masterField?.value ?? null, expected:expectedValue ?? null};
+  if (masterField.validUntil && !validDate(masterField.validUntil)) return {status:"UNKNOWN", actual:masterField.value, expected:expectedValue ?? null};
   if (masterField.validUntil && new Date(masterField.validUntil).getTime() < now.getTime()) return {status:"EXPIRED", actual:masterField.value, expected:expectedValue ?? null};
   if (masterField.verificationStatus !== "VERIFIED") return {status:"UNKNOWN", actual:masterField.value, expected:expectedValue ?? null};
   if (expectedValue === undefined || expectedValue === null || expectedValue === "") return {status:"UNKNOWN", actual:masterField.value, expected:expectedValue ?? null};
