@@ -35,38 +35,60 @@ function startWorker(data, timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
     const worker = new Worker(workerPath, { workerData: data });
     let settled = false;
-    const timer = setTimeout(async () => {
+    let messageReceived = false;
+    let exited = false;
+    let message;
+    let exitCode;
+    const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      await worker.terminate();
-      reject(new Error("Worker timed out"));
+      worker.terminate().then(
+        code => reject(new Error("Worker timed out (termination code " + code + ")")),
+        error => reject(new Error("Worker timed out; termination failed: " + error.message))
+      );
     }, timeoutMs);
-    worker.once("message", message => {
+
+    const fail = error => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve({ message, worker });
-    });
-    worker.once("error", error => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
+      worker.terminate().catch(() => {});
       reject(error);
-    });
-    worker.once("exit", code => {
-      if (!settled && code !== 0) {
-        settled = true;
-        clearTimeout(timer);
-        reject(new Error("Worker exited with code " + code));
+    };
+    const finishIfReady = () => {
+      if (settled || !messageReceived || !exited) return;
+      settled = true;
+      clearTimeout(timer);
+      if (exitCode !== 0) {
+        reject(new Error("Worker exited with code " + exitCode));
+      } else if (!message || message.ok !== true) {
+        reject(new Error(message && message.error ? message.error : "Worker exited without a successful result"));
+      } else {
+        resolve({ message, exitCode });
       }
+    };
+
+    worker.once("message", value => {
+      if (messageReceived) return fail(new Error("Worker sent more than one completion message"));
+      messageReceived = true;
+      message = value;
+      finishIfReady();
+    });
+    worker.once("error", fail);
+    worker.once("exit", code => {
+      exited = true;
+      exitCode = code;
+      if (!messageReceived || code !== 0) {
+        fail(new Error("Worker exited before successful completion (code " + code + ")"));
+        return;
+      }
+      finishIfReady();
     });
   });
 }
 
 async function runIngest(databaseUrl, input, timeoutMs) {
-  const { message, worker } = await startWorker({ databaseUrl, input }, timeoutMs);
-  await worker.terminate();
-  if (!message.ok) throw new Error(message.error);
+  const { message } = await startWorker({ databaseUrl, input }, timeoutMs);
   return message.result;
 }
 
@@ -79,7 +101,7 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
 
   const pool = new Pool({ connectionString: databaseUrl, max: 8 });
   const sourceId = crypto.randomUUID();
-  const counters = { success: 0, failure: 0, duplicate: 0, retry: 0, rollback: 0 };
+  const counters = { success: 0, failure: 0, duplicate: 0, retry: 0 };
   const base = Date.parse("2026-11-22T13:00:00.000Z");
 
   try {
@@ -130,7 +152,7 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
       bars: [fixtureBar(sourceId, revisionTime, close)], findings: []
     })));
     const revisionRows = await pool.query(
-      "SELECT revision_no FROM market_bar_revisions r JOIN market_bars b ON b.id=r.bar_id WHERE b.source_id=$1 AND b.open_time_utc=$2 ORDER BY revision_no",
+      "SELECT r.revision_no FROM market_bar_revisions r JOIN market_bars b ON b.id=r.bar_id WHERE b.source_id=$1 AND b.open_time_utc=$2 ORDER BY r.revision_no",
       [sourceId, revisionTime]
     );
     assert.deepEqual(revisionRows.rows.map(row => row.revision_no), [1]);
@@ -152,6 +174,55 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
       sourceId, batchId: crypto.randomUUID(), idempotencyKey: retryKey,
       bars: [fixtureBar(sourceId, new Date(base + 180000).toISOString())], findings: []
     };
+    const rollbackKey = "worker-rollback-" + sourceId;
+    const rollbackWorker = new Worker(workerPath, {
+      workerData: { mode: "transaction-hold", databaseUrl, sourceKey: rollbackKey }
+    });
+    await new Promise((resolve, reject) => {
+      const readyTimer = setTimeout(() => reject(new Error("Transaction-hold Worker readiness timeout")), 5000);
+      rollbackWorker.once("message", message => {
+        clearTimeout(readyTimer);
+        if (!message.ready) return reject(new Error("Transaction-hold Worker did not enter its transaction"));
+        resolve();
+      });
+      rollbackWorker.once("error", error => {
+        clearTimeout(readyTimer);
+        reject(error);
+      });
+      rollbackWorker.once("exit", code => {
+        clearTimeout(readyTimer);
+        reject(new Error("Transaction-hold Worker exited before readiness (code " + code + ")"));
+      });
+    });
+    const forcedExitCode = await rollbackWorker.terminate();
+    assert.equal(typeof forcedExitCode, "number");
+    let rollbackRowCount = 1;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const rollbackCheck = await pool.query(
+        "SELECT count(*)::int AS count FROM market_data_sources WHERE source_key=$1",
+        [rollbackKey]
+      );
+      rollbackRowCount = Number(rollbackCheck.rows[0].count);
+      if (rollbackRowCount === 0) break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.equal(rollbackRowCount, 0, "uncommitted source row must disappear after forced Worker termination");
+    const rollbackKeyHash = crypto.createHash("sha256").update(rollbackKey).digest("hex");
+    console.log("STAGE6_ROLLBACK_EVIDENCE " + JSON.stringify({
+      probe: "market_data_sources",
+      sourceKeySha256: rollbackKeyHash,
+      rowCountAfterForcedTermination: rollbackRowCount,
+      workerTerminationCode: forcedExitCode
+    }));
+
+    const activeWorkerConnections = await pool.query(
+      "SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname=current_database() AND application_name='one-jarvis-market-data-worker'"
+    );
+    assert.equal(Number(activeWorkerConnections.rows[0].count), 0, "worker Pool connections must be closed before parent completion");
+    console.log("STAGE6_POOL_CLOSE_EVIDENCE " + JSON.stringify({
+      activeWorkerConnections: Number(activeWorkerConnections.rows[0].count)
+    }));
+
     const retried = await runIngest(databaseUrl, retryInput);
     counters.retry++;
     assert.equal(retried.quality, "completed");
@@ -171,35 +242,19 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
       ["worker-%-" + sourceId + "%"]
     );
     assert.ok(ownBatches.rows[0].count >= 4);
-    assert.deepEqual(counters, { success: 3, failure: 1, duplicate: 5, retry: 1, rollback: 0 });
+    assert.deepEqual(counters, { success: 3, failure: 1, duplicate: 5, retry: 1 });
   } finally {
     await pool.end();
   }
 });
 
-test("independent Worker timeout and forced termination are bounded", {
+test("independent Worker timeout is bounded and terminates the Worker", {
   skip: !enabled
 }, async () => {
   const parsed = new URL(databaseUrl);
   assert.ok(["localhost", "127.0.0.1", "::1"].includes(parsed.hostname));
-  const worker = new Worker(workerPath, { workerData: { mode: "hold" } });
-  await new Promise((resolve, reject) => {
-    const readyTimer = setTimeout(() => reject(new Error("Worker readiness timeout")), 5000);
-    worker.once("message", message => {
-      clearTimeout(readyTimer);
-      assert.equal(message.ready, true);
-      resolve();
-    });
-    worker.once("error", reject);
-  });
-  let timedOut = false;
-  const terminationCode = await Promise.race([
-    new Promise(resolve => setTimeout(() => {
-      timedOut = true;
-      worker.terminate().then(resolve, resolve);
-    }, 100)),
-    new Promise(resolve => worker.once("exit", resolve))
-  ]);
-  assert.equal(timedOut, true);
-  assert.equal(typeof terminationCode, "number");
+  await assert.rejects(
+    () => startWorker({ mode: "hold" }, 100),
+    /Worker timed out/
+  );
 });
