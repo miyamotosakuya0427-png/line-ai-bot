@@ -45,7 +45,7 @@ test("Command Center SSE replays scoped events and excludes sensitive payload fi
 test("Command Center SSE closes when Task Registry authorization is revoked during connection",async()=>{
   let authCalls=0,listenerClosed=0;
   const outbox={async replay(){return [];},async listen(){return async()=>{listenerClosed++;};}};
-  const {server,url}=await startServer({outbox,authorizeTaskRegistry:async()=>++authCalls===1?principal:null});
+  const {server,url}=await startServer({outbox,authorizeTaskRegistry:async()=>++authCalls<=2?principal:null});
   try{
     const response=await fetch(url,{headers:{Authorization:"Bearer "+API_TOKEN,"X-Task-Registry-Authorization":"Bearer "+REGISTRY_TOKEN}});
     assert.equal(response.status,200);
@@ -130,7 +130,7 @@ test("Command Center SSE revalidates authorization at the 15-second boundary",as
       new Promise((_,reject)=>setTimeout(()=>reject(new Error("SSE stream did not close after reauthorization failed")),18000))
     ]);
     assert.equal(true,true,"failed periodic authorization closes the stream");
-    assert.ok(authCalls>=2,"authorization is rechecked after the 15-second interval");
+    assert.ok(authCalls>=3,"authorization is rechecked after the 15-second interval");
     assert.equal(listenerClosed,1,"periodic authorization failure releases the listener");
   }finally{await closeServer(server);}
 });
