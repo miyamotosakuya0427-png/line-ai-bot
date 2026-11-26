@@ -65,3 +65,8 @@ ONE JARVISのPostgreSQL runtime startupからDDL/DMLを排除し、Migrationを�
 ## 禁止事項
 
 既存LINE本番、Neon production、Render設定・deploy、main、PR merge、環境変数/秘密情報、課金、R2実バケット、動画生成、外部投稿・公開、データ削除には触れない。必要な場合は実行せず、代表者の明示承認を待つ。
+
+
+## Parent branch synchronization
+
+2026-11-26: PR #85 base was synchronized to the latest PR #78 head `38bb5fbc739d16eb6d082107727f409479b5b3ed` after the concurrent integration branch completed its CI successfully. No parent files were overwritten.
