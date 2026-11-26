@@ -71,7 +71,8 @@ function createOwnerOidcVerifier({issuer,audience,ownerGroup,groupClaim="groups"
     const expectedKty=header.alg==="RS256"?"RSA":"EC";
     if(jwk.kty!==expectedKty||(header.alg==="ES256"&&jwk.crv!=="P-256"))throw new Error("Owner OIDC signing key type is invalid");
     let publicKey;
-    try{publicKey=crypto.createPublicKey({key:jwk,format:"jwk"});}catch{throw new Error("Owner OIDC signing key is invalid");}\n    if(header.alg==="RS256"&&(publicKey.asymmetricKeyDetails?.modulusLength||0)<2048)throw new Error("Owner OIDC RSA signing key is too small");
+    try{publicKey=crypto.createPublicKey({key:jwk,format:"jwk"});}catch{throw new Error("Owner OIDC signing key is invalid");}
+    if(header.alg==="RS256"&&(publicKey.asymmetricKeyDetails?.modulusLength||0)<2048)throw new Error("Owner OIDC RSA signing key is too small");
     const signingInput=Buffer.from(parts[0]+"."+parts[1]);
     const signature=decodePart(parts[2],"signature");
     const valid=header.alg==="RS256"
