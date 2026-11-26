@@ -62,6 +62,7 @@ test("event and operational migrations remain explicit maintenance operations", 
 });
 
 // Startup must stay read-only even when the parent Command Center branch evolves.
+// Parent base synchronized to ba8d8ffa06deed60514a6970a22567e3fd6cc024.
 test("PostgreSQL server startup uses schema checks and does not call migration methods", () => {
   const serverPath = path.join(__dirname, "..", "server.js");
   const source = fs.readFileSync(serverPath, "utf8");
