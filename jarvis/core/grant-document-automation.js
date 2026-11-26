@@ -173,7 +173,8 @@ async function loadSafeZip(buffer, options = {}) {
 async function readExcel(buffer, options = {}) {
   const limits = {...DEFAULT_LIMITS, ...(options.limits || {})};
   assertBuffer(buffer, limits);
-  await loadSafeZip(buffer, options);\n  const ExcelJS = options.ExcelJS || require("exceljs");
+  await loadSafeZip(buffer, options);
+  const ExcelJS = options.ExcelJS || require("exceljs");
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer);
   if (workbook.worksheets.length > limits.maxWorkbookSheets) throw new Error("TOO_MANY_SHEETS");
