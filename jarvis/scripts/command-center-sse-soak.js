@@ -1,4 +1,6 @@
 "use strict";
+const fs = require("node:fs");
+const path = require("node:path");
 const { Pool } = require("pg");
 const { createServer } = require("../server");
 const { createTaskEventOutbox } = require("../core/task-event-outbox");
@@ -155,12 +157,13 @@ async function main() {
       metrics.listenerTerminationInjected = listeners.rows.length > 0;
     }
     if (elapsed >= 30*60*1000 && !revoked.has(scopes[1].agentId)) revoked.add(scopes[1].agentId);
+    if (tick % 60 === 0) resourceSamples.push({ elapsedSeconds: Math.round((Date.now()-startedAtMs)/1000), rssBytes: process.memoryUsage().rss, heapUsedBytes: process.memoryUsage().heapUsed, poolTotal: pool.totalCount, poolIdle: pool.idleCount, poolWaiting: pool.waitingCount, cpu: process.cpuUsage() });
     await delay(Math.max(0, 1000 - (Date.now() - (startedAtMs + tick*1000))));
   }
   finished = true;
   for (const controller of activeControllers) controller.abort();
   await Promise.all(consumers);
-  const counts = await pool.query(
+  await delay(1000);\n  const counts = await pool.query(
     "SELECT project_id,conversation_id,count(*)::int AS outbox_rows,max(scope_cursor)::bigint AS max_cursor FROM jarvis.task_event_outbox WHERE project_id LIKE 'stage12-project-%' GROUP BY project_id,conversation_id ORDER BY project_id"
   );
   const dbListeners = await pool.query(
