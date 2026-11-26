@@ -1,0 +1,33 @@
+name: Grant form generation CI
+
+on:
+  push:
+    branches:
+      - feature/one-jarvis-grant-form-generation-stage4
+    paths:
+      - "jarvis/**"
+      - ".github/workflows/grant-form-generation-ci.yml"
+  pull_request:
+    branches:
+      - feature/one-jarvis-grant-document-automation-stage3
+    paths:
+      - "jarvis/**"
+      - ".github/workflows/grant-form-generation-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  form-generation:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: jarvis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --ignore-scripts
+      - run: npm test
+      - run: node --check core/grant-form-generation.js
