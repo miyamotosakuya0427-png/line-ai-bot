@@ -45,7 +45,7 @@ test("Command Center SSE replays scoped events and excludes sensitive payload fi
 test("Command Center SSE closes when Task Registry authorization is revoked during connection",async()=>{
   let authCalls=0,listenerClosed=0;
   const outbox={async replay(){return [];},async listen(){return async()=>{listenerClosed++;};}};
-  const {server,url}=await startServer({outbox,authorizeTaskRegistry:async()=>++authCalls<=2?principal:null});
+  const {server,url}=await startServer({outbox,authorizeTaskRegistry:async()=>++authCalls===1?principal:null});
   try{
     const response=await fetch(url,{headers:{Authorization:"Bearer "+API_TOKEN,"X-Task-Registry-Authorization":"Bearer "+REGISTRY_TOKEN}});
     assert.equal(response.status,200);
@@ -119,7 +119,7 @@ test("Command Center SSE enforces global/per-Agent limits and releases capacity 
 test("Command Center SSE revalidates authorization at the 15-second boundary",async()=>{
   let authCalls=0,listenerClosed=0;
   const outbox={async replay(){return [];},async listen(){return async()=>{listenerClosed++;};}};
-  const {server,url}=await startServer({outbox,authorizeTaskRegistry:async()=>++authCalls===1?principal:null});
+  const {server,url}=await startServer({outbox,authorizeTaskRegistry:async()=>++authCalls<=2?principal:null});
   try{
     const response=await fetch(url,{headers:{Authorization:"Bearer "+API_TOKEN,"X-Task-Registry-Authorization":"Bearer "+REGISTRY_TOKEN}});
     assert.equal(response.status,200);
