@@ -1,6 +1,9 @@
 "use strict";
 const crypto=require("node:crypto");
 const STATUS=new Set(["MATCH","MISMATCH","UNKNOWN","EXPIRED","CANDIDATE_VERIFIED"]);
+const MAX_INPUT_BYTES=20*1024*1024;
+function assertInputBuffer(buffer){if(!Buffer.isBuffer(buffer)||buffer.length===0)throw Error("INVALID_INPUT_BUFFER");if(buffer.length>MAX_INPUT_BYTES)throw Error("FILE_TOO_LARGE");}
+async function loadSafeOfficeZip(buffer,JSZip){return require("./grant-document-automation").loadSafeZip(buffer,{JSZip});}
 const sha256=v=>crypto.createHash("sha256").update(v).digest("hex");
 const xmlEscape=v=>String(v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&apos;");
 const xmlDecode=v=>v.replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&amp;/g,"&");
@@ -25,11 +28,11 @@ function summarizeMappings(mappings,now=new Date()){
  return{results,missing:results.filter(x=>!x.resolution.eligible&&x.resolution.status!=="MISMATCH"),mismatches:results.filter(x=>x.resolution.status==="MISMATCH"),eligible:results.every(x=>x.resolution.eligible)};
 }
 async function inspectPdfForm(buffer,options={}){
- const {PDFDocument}=options.pdfLib||require("pdf-lib");const pdf=await PDFDocument.load(buffer,{updateMetadata:false,ignoreEncryption:false});const fields=pdf.getForm().getFields().map(f=>({name:f.getName(),type:f.constructor?.name||"Unknown",readOnly:typeof f.isReadOnly==="function"?f.isReadOnly():false}));
+ assertInputBuffer(buffer);const {PDFDocument}=options.pdfLib||require("pdf-lib");const pdf=await PDFDocument.load(buffer,{updateMetadata:false,ignoreEncryption:false});const fields=pdf.getForm().getFields().map(f=>({name:f.getName(),type:f.constructor?.name||"Unknown",readOnly:typeof f.isReadOnly==="function"?f.isReadOnly():false}));
  return{pageCount:pdf.getPageCount(),fields,hasAcroForm:fields.length>0};
 }
 async function fillPdfForm(buffer,mappings,options={}){
- const {PDFDocument}=options.pdfLib||require("pdf-lib");const fontkit=options.fontkit||require("@pdf-lib/fontkit");const pdf=await PDFDocument.load(buffer,{updateMetadata:false,ignoreEncryption:false});const form=pdf.getForm();const fields=form.getFields();const byName=new Map(fields.map(f=>[f.getName(),f]));const sum=summarizeMappings(mappings,options.now||new Date());
+ assertInputBuffer(buffer);const {PDFDocument}=options.pdfLib||require("pdf-lib");const fontkit=options.fontkit||require("@pdf-lib/fontkit");const pdf=await PDFDocument.load(buffer,{updateMetadata:false,ignoreEncryption:false});const form=pdf.getForm();const fields=form.getFields();const byName=new Map(fields.map(f=>[f.getName(),f]));const sum=summarizeMappings(mappings,options.now||new Date());
  const report={format:"pdf",templateHash:sha256(buffer),pageCountBefore:pdf.getPageCount(),filled:[],skipped:[],layoutChecks:{pageCountPreserved:null,visualInspectionRequired:true,fontEmbedded:Boolean(options.fontBytes)}};
  if(!fields.length)return{buffer:null,report:{...report,blocked:true,reason:"PDF_HAS_NO_ACROFORM"}};
  if(sum.mismatches.length)return{buffer:null,report:{...report,blocked:true,reason:"MISMATCH_PRESENT"}};
@@ -47,7 +50,7 @@ async function fillPdfForm(buffer,mappings,options={}){
  report.blocked=report.filled.length===0||!report.layoutChecks.pageCountPreserved||report.skipped.length>0;report.reason=report.blocked?"REVIEW_REQUIRED":"GENERATED_VISUAL_REVIEW_REQUIRED";return{buffer:report.blocked?null:out,report};
 }
 async function fillExcelTemplate(buffer,mappings,options={}){
- const ExcelJS=options.ExcelJS||require("exceljs");const wb=new ExcelJS.Workbook();await wb.xlsx.load(buffer);
+ assertInputBuffer(buffer);const ExcelJS=options.ExcelJS||require("exceljs");const JSZip=options.JSZip||require("jszip");await loadSafeOfficeZip(buffer,JSZip);const wb=new ExcelJS.Workbook();await wb.xlsx.load(buffer);
  const before=wb.worksheets.map(s=>({name:s.name,state:s.state,merges:[...(s.model.merges||[])],pageSetup:JSON.stringify(s.pageSetup||{}),views:JSON.stringify(s.views||[])}));const sum=summarizeMappings(mappings,options.now||new Date());
  const report={format:"xlsx",templateHash:sha256(buffer),filled:[],skipped:[],mismatches:sum.mismatches.map(x=>x.targetField||x.cellAddress)};
  if(sum.mismatches.length)return{buffer:null,report:{...report,blocked:true,reason:"MISMATCH_PRESENT"}};
@@ -68,7 +71,7 @@ function replaceIsolatedPlaceholder(paragraph,placeholder,value){
  let i=0;const rewritten=paragraph.replace(/<w:t(\s[^>]*)?>([\s\S]*?)<\/w:t>/g,(_w,attrs)=>{const t=i++===0?xmlEscape(value):"";const preserve=t.startsWith(" ")||t.endsWith(" ")?' xml:space="preserve"':"";return"<w:t"+(attrs||"")+preserve+">"+t+"</w:t>";});return{paragraph:rewritten,changed:true};
 }
 async function fillWordTemplate(buffer,mappings,options={}){
- const JSZip=options.JSZip||require("jszip");const zip=await JSZip.loadAsync(buffer,{checkCRC32:true,createFolders:false});const sum=summarizeMappings(mappings,options.now||new Date());const report={format:"docx",templateHash:sha256(buffer),filled:[],skipped:[],mismatches:sum.mismatches.map(x=>x.placeholder)};
+ assertInputBuffer(buffer);const JSZip=options.JSZip||require("jszip");const zip=await loadSafeOfficeZip(buffer,JSZip);const sum=summarizeMappings(mappings,options.now||new Date());const report={format:"docx",templateHash:sha256(buffer),filled:[],skipped:[],mismatches:sum.mismatches.map(x=>x.placeholder)};
  if(sum.mismatches.length)return{buffer:null,report:{...report,blocked:true,reason:"MISMATCH_PRESENT"}};
  const parts=Object.keys(zip.files).filter(n=>/^word\/(document|header\d*|footer\d*)\.xml$/.test(n));
  for(const item of sum.results){
