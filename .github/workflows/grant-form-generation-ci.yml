@@ -9,7 +9,7 @@ on:
       - ".github/workflows/grant-form-generation-ci.yml"
   pull_request:
     branches:
-      - one-jarvis-foundation
+      - feature/one-jarvis-grant-document-automation-stage3
     paths:
       - "jarvis/**"
       - ".github/workflows/grant-form-generation-ci.yml"
