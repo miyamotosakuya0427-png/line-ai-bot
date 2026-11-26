@@ -67,6 +67,20 @@ These normal CI tests do not constitute physical iPhone/PC checks or live produc
 - The Owner audit migration remains a proposal: nullable issuer/subject/request ID/action, issuer-subject paired-null constraint, append-only enforcement, legacy shared-token operations unattributed, and no retroactive identity attribution.
 - Owner decisions remain required for IdP issuer/audience/client/group/redirect, session lifetime and idle timeout, recent-auth policy, dual control, break-glass custodians/expiry/alerts, shared Owner-token migration window and retirement date, audit retention and data residency.
 
+
+## 5A. Owner audit identity migration proposal — implemented for isolated validation only
+
+Added additive migration `jarvis/migrations/0011_owner_audit_identity.sql`:
+- New append-only `jarvis.owner_audit_events` ledger.
+- `actor_kind` distinguishes verified `oidc_owner`, `legacy_shared_owner_token`, and `system`.
+- Adds `operator_issuer`, `operator_subject`, `request_id`, `action`, metadata and timestamp.
+- Database CHECK constraints require issuer and subject to be both null or both present. OIDC Owner rows require an HTTPS issuer, non-empty subject and request ID.
+- Legacy shared-token and system events require issuer/subject to remain NULL. No retroactive identity backfill is permitted.
+- UPDATE, DELETE and TRUNCATE are rejected by append-only triggers; PUBLIC table/sequence privileges are revoked.
+- Migration is idempotent in the same style as the prior additive migrations.
+
+The isolated backup/restore rehearsal was extended to seed one verified-identity-shaped OIDC audit row and one unattributed legacy shared-token row, compare both across restore, reject half-populated issuer/subject, reject UPDATE/DELETE/TRUNCATE, re-run Migration 0011, and confirm both rows remain. The migration has not been applied to production. The next successful Stage 12 backup/restore run is the evidence gate for this addition.
+
 ## 6. DB Chaos / outcome_unknown / Dashboard
 
 - The soak harness deliberately terminates the isolated PostgreSQL LISTEN backend; the pool and durable polling path must recover. It does not stop/restart the PostgreSQL service container or simulate a full network partition.
