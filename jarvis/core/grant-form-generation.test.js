@@ -95,3 +95,10 @@ test("review bundle excludes output unless independent audit passes",()=>{
  const blocked=engine.buildReviewBundle({program:"grant",document:"form",format:"pdf",templateBuffer:template,outputBuffer:output,report:{blocked:false},audit:{passed:false}});
  assert.equal(blocked.outputBuffer,null);assert.equal(blocked.manifest.externalSubmissionPerformed,false);
 });
+
+test("Office form generation rejects oversized and unsafe archive inputs",async()=>{
+ const tooLarge=Buffer.alloc(20*1024*1024+1);
+ await assert.rejects(()=>engine.fillWordTemplate(tooLarge,[],{}),/FILE_TOO_LARGE/);
+ const unsafeZip={files:{"../outside.xml":{dir:false,_data:{uncompressedSize:4,compressedSize:4}}}};
+ await assert.rejects(()=>engine.fillWordTemplate(Buffer.from("zip"),[],{JSZip:{loadAsync:async()=>unsafeZip}}),/UNSAFE_ARCHIVE_PATH/);
+});
