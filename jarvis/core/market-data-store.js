@@ -81,6 +81,33 @@ class MarketDataStore {
         );
       }
 
+      // Serialize overlapping candle identities before touching the natural-key
+      // and source_record_id unique indexes. Acquire every lock in one global
+      // lexical order so multi-bar batches cannot deadlock on reversed input order.
+      const barLockKeys = [];
+      for (const bar of bars) {
+        barLockKeys.push("market-data-bar:" + stable({
+          sourceId,
+          venue: bar.venue,
+          symbol: bar.symbol,
+          interval: bar.interval,
+          openTimeUtc: bar.openTimeUtc,
+          adjustmentState: bar.adjustmentState
+        }));
+        if (bar.sourceRecordId) {
+          barLockKeys.push("market-data-source-record:" + stable({
+            sourceId,
+            sourceRecordId: bar.sourceRecordId
+          }));
+        }
+      }
+      for (const lockKey of [...new Set(barLockKeys)].sort()) {
+        await client.query(
+          "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+          [lockKey]
+        );
+      }
+
       let inserted = 0;
       let revised = 0;
       const barIds = [];
