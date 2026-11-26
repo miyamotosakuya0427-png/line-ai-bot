@@ -7,11 +7,11 @@ const {createPkceLoginRequest,validateOidcCallback,createOwnerOidcVerifier}=requ
 const now=Date.parse("2026-11-26T12:00:00.000Z");
 const {privateKey,publicKey}=crypto.generateKeyPairSync("rsa",{modulusLength:2048});
 const jwk={...publicKey.export({format:"jwk"}),kid:"mock-key-1",alg:"RS256",use:"sig"};
-function token(claimOverrides={},headerOverrides={}){
+function token(claimOverrides={},headerOverrides={},signingKey=privateKey){
  const header=Buffer.from(JSON.stringify({alg:"RS256",kid:"mock-key-1",typ:"JWT",...headerOverrides})).toString("base64url");
  const claims=Buffer.from(JSON.stringify({iss:"https://mock-idp.example/",aud:"one-jarvis-test-client",sub:"owner-subject-1",iat:Math.floor(now/1000)-30,nbf:Math.floor(now/1000)-30,exp:Math.floor(now/1000)+600,nonce:"nonce-expected",groups:["one-jarvis-owners"],...claimOverrides})).toString("base64url");
  const input=header+"."+claims;
- return input+"."+crypto.sign("RSA-SHA256",Buffer.from(input),privateKey).toString("base64url");
+ return input+"."+crypto.sign("RSA-SHA256",Buffer.from(input),signingKey).toString("base64url");
 }
 function verifier({resolveJwks=async()=>({keys:[jwk]})}={}){
  return createOwnerOidcVerifier({issuer:"https://mock-idp.example/",audience:"one-jarvis-test-client",ownerGroup:"one-jarvis-owners",groupClaim:"groups",jwksUri:"https://mock-idp.example/.well-known/jwks.json",resolveJwks,clock:()=>now,allowedAlgorithms:["RS256"]});
@@ -55,4 +55,15 @@ test("OIDC login request uses PKCE S256, state and nonce; callback validates bot
  assert.equal(url.searchParams.get("nonce"),login.nonce);
  assert.deepEqual(validateOidcCallback({state:login.state,expectedState:login.state,nonce:login.nonce,expectedNonce:login.nonce,code:"mock-auth-code"}),{code:"mock-auth-code"});
  assert.throws(()=>validateOidcCallback({state:"wrong",expectedState:login.state,nonce:login.nonce,expectedNonce:login.nonce,code:"mock-auth-code"}),/callback state/);
+});
+
+test("Owner OIDC refreshes JWKS once when a signing key rotates",async()=>{
+ const rotated=crypto.generateKeyPairSync("rsa",{modulusLength:2048});
+ const rotatedJwk={...rotated.publicKey.export({format:"jwk"}),kid:"mock-key-2",alg:"RS256",use:"sig"};
+ let calls=0;
+ const check=createOwnerOidcVerifier({issuer:"https://mock-idp.example/",audience:"one-jarvis-test-client",ownerGroup:"one-jarvis-owners",jwksUri:"https://mock-idp.example/.well-known/jwks.json",clock:()=>now,allowedAlgorithms:["RS256"],resolveJwks:async({forceRefresh})=>{calls++;return{keys:forceRefresh?[rotatedJwk]:[jwk]};}});
+ const rotatedToken=token({}, {kid:"mock-key-2"},rotated.privateKey);
+ const identity=await check.verify(rotatedToken,{expectedNonce:"nonce-expected"});
+ assert.equal(identity.subject,"owner-subject-1");
+ assert.equal(calls,2,"unknown kid forces exactly one JWKS refresh");
 });
