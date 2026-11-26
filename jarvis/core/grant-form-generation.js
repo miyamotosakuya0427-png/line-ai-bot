@@ -74,7 +74,7 @@ async function fillWordTemplate(buffer,mappings,options={}){
  for(const item of sum.results){
   const placeholder=item.placeholder||item.targetField;if(!item.resolution.eligible){report.skipped.push({placeholder,status:item.resolution.status,reason:item.resolution.reason});continue;}
   let replaced=false,unsafe=false;
-  for(const part of parts){const entry=zip.file(part);if(!entry)continue;let xml=await entry.async("string");xml=xml.replace(/<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g,p=>{if(!p.includes("{{"+placeholder+"}}"))return p;const r=replaceIsolatedPlaceholder(p,placeholder,String(item.resolution.value));if(r.reason==="WORD_PLACEHOLDER_NOT_ISOLATED")unsafe=true;if(r.changed)replaced=true;return r.paragraph;});zip.file(part,xml);}
+  for(const part of parts){const entry=zip.file(part);if(!entry)continue;let xml=await entry.async("string");xml=xml.replace(/<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g,p=>{const r=replaceIsolatedPlaceholder(p,placeholder,String(item.resolution.value));if(r.reason==="WORD_PLACEHOLDER_NOT_ISOLATED")unsafe=true;if(r.changed)replaced=true;return r.paragraph;});zip.file(part,xml);}
   if(replaced)report.filled.push({placeholder,value:String(item.resolution.value),evidence:item.resolution.evidence});else report.skipped.push({placeholder,status:"UNKNOWN",reason:unsafe?"WORD_PLACEHOLDER_NOT_ISOLATED":"PLACEHOLDER_NOT_FOUND"});
  }
  const out=Buffer.from(await zip.generateAsync({type:"nodebuffer",compression:"DEFLATE",compressionOptions:{level:6}}));report.outputHash=sha256(out);report.blocked=report.filled.length===0||report.skipped.length>0;report.reason=report.blocked?"REVIEW_REQUIRED":"GENERATED_REQUIRES_WORD_RENDER_VISUAL_REVIEW";return{buffer:report.blocked?null:out,report};
