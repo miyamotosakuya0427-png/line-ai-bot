@@ -16,11 +16,12 @@ function createPostgresTaskDispatchRuntime({registry,executionKernel,authorizeAg
       principal.scopes.includes("tasks:dispatch")&&principal.scopes.includes("tasks:claim")&&
       principal.projectIds.includes(task.projectId)&&task.ownerConversation===principal.conversationId;
   }
-  async function selectWorker({task,principal,targetAgentId=null,sourceWorker=null}={}){
+  async function selectWorker({task,principal,targetAgentId=null,sourceWorker=null,excludeAgentIds=[],excludeWorkerIds=[]}={}){
     const agentId=targetAgentId||(sourceWorker?null:principal?.agentId);
     const rows=await executionKernel.listWorkersForScope({projectId:task.projectId,conversationId:principal.conversationId});
     const now=Date.now();
-    const eligible=rows.filter(row=>(agentId===null||row.agent_id===agentId)&&(!sourceWorker||row.agent_id!==sourceWorker.agentId)&&row.department_id===task.departmentId&&
+    const excludedAgents=new Set(excludeAgentIds),excludedWorkers=new Set(excludeWorkerIds);
+    const eligible=rows.filter(row=>(agentId===null||row.agent_id===agentId)&&(!sourceWorker||row.agent_id!==sourceWorker.agentId)&&!excludedAgents.has(row.agent_id)&&!excludedWorkers.has(row.worker_id)&&row.department_id===task.departmentId&&
       row.status==="idle"&&!row.current_task_id&&!!row.grant_id&&
       (!!row.heartbeat_at&&Number.isFinite(Date.parse(row.heartbeat_at))&&now-Date.parse(row.heartbeat_at)<=120000));
     if(!eligible.length)return null;
@@ -50,6 +51,38 @@ function createPostgresTaskDispatchRuntime({registry,executionKernel,authorizeAg
   }
   const departmentHandlers=Object.fromEntries(Object.entries(handlers).filter(([key,value])=>key.startsWith("department.")&&typeof value==="function").map(([key,value])=>[key.slice("department.".length),value]));
   if(Object.keys(departmentHandlers).length!==13)throw new Error("All 13 formal Department Handlers must be registered");
-  return createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEligible,selectWorker,handlers:departmentHandlers,resultWriter,rateLimiter,leaseMs,heartbeatMs});
+  let recoveryBusy=false;
+  async function recoverPostCommitHandoffs({limit=50}={}) {
+    if(recoveryBusy||typeof registry.recoverPostCommitHandoff!=="function"||typeof registry.listTaskEvents!=="function")return {scanned:0,recovered:0,waiting:0,skipped:true};
+    recoveryBusy=true;
+    let scanned=0,recovered=0,waiting=0;
+    try{
+      for(const status of ["queued","waiting"]){
+        const tasks=await registry.listTasks({status,limit});
+        for(const item of tasks){
+          const task=item.task;
+          if(!task?.taskId||!task.projectId||!task.ownerConversation||!task.ownerAgent)continue;
+          const events=await registry.listTaskEvents({taskIds:[task.taskId],limit:100});
+          const ordered=[...events].sort((a,b)=>Number(a.version)-Number(b.version));
+          const latest=ordered[ordered.length-1];
+          if(!latest||!["agent_handoff","handoff_reselected","handoff_recovery_waiting","handoff_recovery_exhausted"].includes(latest.eventType))continue;
+          scanned++;
+          const visitedAgents=ordered.filter(row=>["agent_handoff","handoff_reselected"].includes(row.eventType)).map(row=>row.payload?.toAgentId).filter(Boolean);
+          const visitedWorkers=ordered.filter(row=>["agent_handoff","handoff_reselected"].includes(row.eventType)).map(row=>row.payload?.toWorkerId).filter(Boolean);
+          const principal={agentId:"system-handoff-recovery",projectIds:[task.projectId],conversationId:task.ownerConversation,scopes:["tasks:dispatch","tasks:claim"],allowed:true};
+          const candidate=await selectWorker({task,principal,sourceWorker:{agentId:task.ownerAgent},excludeAgentIds:visitedAgents,excludeWorkerIds:visitedWorkers});
+          const result=await registry.recoverPostCommitHandoff({taskId:task.taskId,expectedVersion:item.version,candidateWorkerId:candidate?.workerId||null,maxAttempts:3});
+          if(result?.created&&result.waiting)waiting++;
+          else if(result?.created&&result.selectedWorker)recovered++;
+        }
+      }
+      return {scanned,recovered,waiting,skipped:false};
+    }finally{recoveryBusy=false;}
+  }
+  const recoveryTimer=setInterval(()=>{recoverPostCommitHandoffs().catch(()=>{});},15000);
+  recoveryTimer.unref?.();
+  recoverPostCommitHandoffs().catch(()=>{});
+  const dispatcher=createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEligible,selectWorker,handlers:departmentHandlers,resultWriter,rateLimiter,leaseMs,heartbeatMs});
+  return {...dispatcher,recoverPostCommitHandoffs,stopHandoffRecovery(){clearInterval(recoveryTimer);}};
 }
 module.exports={createPostgresTaskDispatchRuntime};
