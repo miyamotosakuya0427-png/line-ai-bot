@@ -103,7 +103,11 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
   const pool = new Pool({ connectionString: databaseUrl, max: 8 });
   const migrationsDir = path.join(__dirname, "..", "migrations");
   try {
-    await pool.query("DO $ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='jarvis_audit_readonly') THEN CREATE ROLE jarvis_audit_readonly NOLOGIN; END IF; END $;");
+    try {
+      await pool.query("CREATE ROLE jarvis_audit_readonly NOLOGIN");
+    } catch (error) {
+      if (error.code !== "42710") throw error;
+    }
     await pool.query("CREATE TABLE IF NOT EXISTS schema_migrations(version TEXT PRIMARY KEY)");
     for (const file of ["002_market_data_quality.sql", "003_market_data_license_and_currency.sql", "004_market_data_raw_provenance.sql"]) {
       const sql = fs.readFileSync(path.join(migrationsDir, file), "utf8");
