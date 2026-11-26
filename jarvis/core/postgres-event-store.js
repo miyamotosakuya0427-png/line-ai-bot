@@ -89,8 +89,20 @@ function createPostgresEventStore({ pool, clock = () => new Date().toISOString()
     catch (error) { migrationPromise = null; throw error; }
   }
 
+  async function assertSchema() {
+    const result = await pool.query(
+      "SELECT to_regclass('jarvis.events') AS events, to_regclass('jarvis.schema_migrations') AS migrations, EXISTS(SELECT 1 FROM jarvis.schema_migrations WHERE version = $1) AS migration",
+      [MIGRATION_VERSION]
+    );
+    const row = result.rows[0] || {};
+    if (!row.events || !row.migrations || row.migration !== true) {
+      throw new Error("Event store migration 0001 is not installed");
+    }
+    return { ok: true, version: MIGRATION_VERSION };
+  }
+
   async function append({ aggregateType, aggregateId, eventType, payload, idempotencyKey = null, expectedVersion = null } = {}) {
-    await migrate();
+    await assertSchema();
     aggregateType = validText(aggregateType, "aggregate type", 80);
     aggregateId = validText(aggregateId, "aggregate id", 200);
     eventType = validText(eventType, "event type", 100);
@@ -128,7 +140,7 @@ function createPostgresEventStore({ pool, clock = () => new Date().toISOString()
   }
 
   async function list({ aggregateType, aggregateId, afterVersion = 0, limit = 500 } = {}) {
-    await migrate();
+    await assertSchema();
     aggregateType = validText(aggregateType, "aggregate type", 80);
     aggregateId = validText(aggregateId, "aggregate id", 200);
     safeInteger(afterVersion, "after version", 0);
@@ -141,11 +153,16 @@ function createPostgresEventStore({ pool, clock = () => new Date().toISOString()
   }
 
   async function health() {
-    try { await migrate(); await pool.query("SELECT 1"); return { ok: true, storage: "postgresql", schemaVersion: MIGRATION_VERSION }; }
-    catch { return { ok: false, storage: "postgresql", error: "database_unavailable" }; }
+    try {
+      const schema = await assertSchema();
+      await pool.query("SELECT 1");
+      return { ok: true, storage: "postgresql", schemaVersion: schema.version };
+    } catch {
+      return { ok: false, storage: "postgresql", error: "database_unavailable" };
+    }
   }
 
-  return { migrate, append, list, health, close: () => pool.end() };
+  return { migrate, assertSchema, append, list, health, close: () => pool.end() };
 }
 
 module.exports = { MIGRATION_VERSION, createNeonPool, createPostgresEventStore, retryTransient, isTransient };
