@@ -81,6 +81,7 @@ SELECT 'grants',count(*),coalesce(string_agg(grant_id::text||':'||worker_id||':'
 SELECT 'outbox',count(*),coalesce(string_agg(source_event_id::text||':'||scope_cursor::text||':'||project_id||':'||conversation_id||':'||task_id,',' ORDER BY outbox_id),'') FROM jarvis.task_event_outbox;
 SELECT 'cursors',count(*),coalesce(string_agg(project_id||':'||conversation_id||':'||last_cursor::text,',' ORDER BY project_id,conversation_id),'') FROM jarvis.task_event_outbox_cursors;
 SELECT 'revocations',count(*),coalesce(string_agg(agent_id||':'||revoked_by,',' ORDER BY agent_id),'') FROM jarvis.task_registry_agent_revocations;
+SELECT 'owner_audit',count(*),coalesce(string_agg(actor_kind||':'||coalesce(operator_issuer,'NULL')||':'||coalesce(operator_subject,'NULL')||':'||coalesce(request_id,'NULL')||':'||action,',' ORDER BY audit_event_id),'') FROM jarvis.owner_audit_events;
 SQL
 
 diff -u "$ARTIFACT_DIR/source-fingerprint.txt" "$ARTIFACT_DIR/restore-fingerprint.txt"
@@ -106,7 +107,7 @@ fi
 if psql -X -v ON_ERROR_STOP=1 -d "$RESTORE_DB" -c "INSERT INTO jarvis.owner_audit_events(actor_kind,operator_issuer,operator_subject,request_id,action) VALUES ('oidc_owner','https://mock-owner.example/',NULL,'stage12-invalid-pair','task.approve')" >/dev/null 2>&1; then
   echo "FAIL: Owner audit ledger accepted a half-populated issuer/subject pair" >&2; exit 1
 fi
-# Re-run only idempotent 0009/0010 DDL in the isolated restore DB; do not reset data.
+# Re-run only idempotent 0009/0010/0011 DDL in the isolated restore DB; do not reset data.
 psql -X -v ON_ERROR_STOP=1 -d "$RESTORE_DB" -f jarvis/migrations/0009_task_event_outbox.sql >/dev/null
 psql -X -v ON_ERROR_STOP=1 -d "$RESTORE_DB" -f jarvis/migrations/0010_task_registry_agent_revocations.sql >/dev/null
 psql -X -v ON_ERROR_STOP=1 -d "$RESTORE_DB" -f jarvis/migrations/0011_owner_audit_identity.sql >/dev/null
