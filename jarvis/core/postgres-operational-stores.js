@@ -20,9 +20,12 @@ function createPostgresOperationalStores({pool,clock=()=>new Date().toISOString(
  if(!pool||typeof pool.connect!=="function"||typeof pool.query!=="function")throw new Error("PostgreSQL pool is required");
  let readyPromise;let migrationPromise;
  async function assertSchema(){
-  const r=await pool.query("SELECT to_regclass('jarvis.events') AS events, EXISTS(SELECT 1 FROM jarvis.schema_migrations WHERE version='0002_job_approval_stores') AS migration_0002, EXISTS(SELECT 1 FROM jarvis.schema_migrations WHERE version='0003_append_only_event_ledger') AS migration_0003, EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('jarvis.events') AND tgname='jarvis_events_append_only_row' AND NOT tgisinternal) AS append_only_row, EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('jarvis.events') AND tgname='jarvis_events_append_only_truncate' AND NOT tgisinternal) AS append_only_truncate");
+  const base=await pool.query("SELECT to_regclass('jarvis.events') AS events, to_regclass('jarvis.schema_migrations') AS migrations");
+  const baseRow=base.rows[0]||{};
+  if(!baseRow.events||!baseRow.migrations)throw new Error("Operational store base migration 0001 is not installed");
+  const r=await pool.query("SELECT EXISTS(SELECT 1 FROM jarvis.schema_migrations WHERE version='0002_job_approval_stores') AS migration_0002, EXISTS(SELECT 1 FROM jarvis.schema_migrations WHERE version='0003_append_only_event_ledger') AS migration_0003, EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('jarvis.events') AND tgname='jarvis_events_append_only_row' AND NOT tgisinternal) AS append_only_row, EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('jarvis.events') AND tgname='jarvis_events_append_only_truncate' AND NOT tgisinternal) AS append_only_truncate");
   const x=r.rows[0]||{};
-  if(!x.events||x.migration_0002!==true||x.migration_0003!==true||x.append_only_row!==true||x.append_only_truncate!==true)throw new Error("Operational store migrations 0002 and 0003 are not installed");
+  if(x.migration_0002!==true||x.migration_0003!==true||x.append_only_row!==true||x.append_only_truncate!==true)throw new Error("Operational store migrations 0002 and 0003 are not installed");
   return {ok:true};
  }
  async function init(){
