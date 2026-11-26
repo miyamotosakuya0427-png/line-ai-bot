@@ -9,6 +9,7 @@ const good={status:"MATCH",verificationStatus:"VERIFIED",value:"Example Co Ltd",
 
 test("only verified evidence with provenance is transferable",()=>{
  assert.equal(engine.resolveTransferValue({...good}).eligible,true);
+ assert.equal(engine.resolveTransferValue({...good,status:"CANDIDATE_VERIFIED"}).eligible,true);
  assert.equal(engine.resolveTransferValue({...good,status:"UNKNOWN"}).value,null);
  assert.equal(engine.resolveTransferValue({...good,status:"MISMATCH"}).status,"MISMATCH");
  assert.equal(engine.resolveTransferValue({...good,status:"EXPIRED"}).status,"EXPIRED");
