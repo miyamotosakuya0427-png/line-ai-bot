@@ -31,7 +31,7 @@ on:
 permissions:
   contents: read
 jobs:
-  market-data-stage6:
+  localhost-postgres:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -58,7 +58,7 @@ jobs:
         with:
           node-version: "22"
       - name: Install JARVIS and isolated PostgreSQL test dependencies
-        run: npm install --ignore-scripts --no-audit --no-fund --no-package-lock pg@8
+        run: npm install --ignore-scripts --no-audit --no-fund --no-package-lock
       - name: Verify isolated PostgreSQL test target
         run: |
           test -n "$MARKET_DATA_TEST_DATABASE_URL"
@@ -70,4 +70,23 @@ jobs:
           done
       - name: Stage 6 market-data unit and PostgreSQL integration tests
         run: |
-          node --test core/market-data-gateway-adapter.test.js core/market-data-store.test.js core/market-data-migration.test.js core/market-data-quality.test.js core/backtest-data-gate.test.js core/paper-trading-jsonl-parity.test.js core/market-data-store.postgres.test.js core/paper-trading.test.js core/execution-cost-model.test.js
+          node --test core/market-data-gateway-adapter.test.js core/market-data-store.test.js core/market-data-migration.test.js core/market-data-quality.test.js core/backtest-data-gate.test.js core/paper-trading-jsonl-parity.test.js core/market-data-store.postgres.test.js core/market-data-store.worker.postgres.test.js core/paper-trading.test.js core/execution-cost-model.test.js
+
+  neon-stage6:
+    needs: localhost-postgres
+    runs-on: ubuntu-latest
+    env:
+      NEON_STAGE6_DATABASE_URL: ${{ secrets.NEON_STAGE6_DATABASE_URL }}
+      EXPECTED_NEON_STAGE6_HOST: ep-small-credit-a7khxjqz.ap-southeast-2.aws.neon.tech
+    steps:
+      - name: Fail closed when Stage6 Secret is missing or targets another branch
+        run: |
+          if [ -z "$NEON_STAGE6_DATABASE_URL" ]; then
+            echo "::error::NEON_STAGE6_DATABASE_URL is not configured; Neon integration is NOT PASSED."
+            exit 1
+          fi
+          node -e 'const u = new URL(process.env.NEON_STAGE6_DATABASE_URL); if (u.hostname !== process.env.EXPECTED_NEON_STAGE6_HOST) { console.error("::error::Neon endpoint does not match the verified Stage6 endpoint; connection refused."); process.exit(1); } console.log("Stage6 endpoint host matched. No connection attempted.");'
+      - name: Block until a dedicated least-privilege Stage6 test role is provisioned
+        run: |
+          echo "::error::No dedicated Stage6 write-test role is currently provisioned. Neon connection and writes are intentionally blocked."
+          exit 1
