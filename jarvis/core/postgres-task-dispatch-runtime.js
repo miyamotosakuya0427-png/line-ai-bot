@@ -81,7 +81,6 @@ function createPostgresTaskDispatchRuntime({registry,executionKernel,authorizeAg
   }
   const recoveryTimer=setInterval(()=>{recoverPostCommitHandoffs().catch(()=>{});},15000);
   recoveryTimer.unref?.();
-  recoverPostCommitHandoffs().catch(()=>{});
   const dispatcher=createTaskDispatcher({registry,executionKernel,authorizeTask,isAgentEligible,selectWorker,handlers:departmentHandlers,resultWriter,rateLimiter,leaseMs,heartbeatMs});
   return {...dispatcher,recoverPostCommitHandoffs,stopHandoffRecovery(){clearInterval(recoveryTimer);}};
 }
