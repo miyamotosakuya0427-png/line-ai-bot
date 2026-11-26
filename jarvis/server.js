@@ -240,7 +240,7 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
           return json(res,503,{ok:false,error:"Durable event replay unavailable; use authenticated polling"});
         }
         let closeListener;
-        let closed=false,wakeResolve=null,lastAuthAt=0,lastHeartbeatAt=Date.now(),cursor=cursorStart;
+        let closed=false,wakeResolve=null,lastHeartbeatAt=Date.now(),cursor=cursorStart,reauthTimer=null,reauthBusy=false;
         const wake=()=>{if(wakeResolve){const resolve=wakeResolve;wakeResolve=null;resolve();}};
         const waitForWake=()=>new Promise(resolve=>{const timer=setTimeout(()=>{wakeResolve=null;resolve();},5000);wakeResolve=()=>{clearTimeout(timer);wakeResolve=null;resolve();};});
         const waitForDrain=()=>new Promise(resolve=>{
@@ -258,6 +258,15 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
             Array.isArray(refreshed.scopes)&&refreshed.scopes.includes("tasks:read")&&
             (refreshed.projectIds===undefined?["one-jarvis"]:refreshed.projectIds).includes(projectId);
         };
+        // Reauthorization runs on its own timer so a quiet stream or a slow
+        // notification loop cannot postpone the 15-second credential check.
+        reauthTimer=setInterval(async()=>{
+          if(closed||reauthBusy)return;
+          reauthBusy=true;
+          try{if(!(await revalidate())){closed=true;wake();}}
+          finally{reauthBusy=false;}
+        },15000);
+        reauthTimer.unref?.();
         try{
           closeListener=await taskEventOutbox.listen(wake);
           res.writeHead(200,{"Content-Type":"text/event-stream; charset=utf-8","Cache-Control":"no-store, no-transform","Connection":"keep-alive","X-Accel-Buffering":"no","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer"});
@@ -277,9 +286,8 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
             return true;
           };
           if(!(await revalidate()))closed=true;
-          else{lastAuthAt=Date.now();if(!(await streamBatch(initial)))closed=true;}
+          else{if(!(await streamBatch(initial)))closed=true;}
           while(!closed&&!res.destroyed){
-            if(Date.now()-lastAuthAt>=15000){if(!(await revalidate())){closed=true;break;}lastAuthAt=Date.now();}
             if(Date.now()-lastHeartbeatAt>=15000){if(!res.write(": heartbeat\n\n")&&!(await waitForDrain())){closed=true;break;}lastHeartbeatAt=Date.now();}
             let batch;
             try{batch=await taskEventOutbox.replay({projectId,conversationId,afterCursor:cursor,limit:100});}
@@ -290,6 +298,7 @@ function createServer({token=TOKEN,ownerToken=process.env.JARVIS_OWNER_TOKEN||""
         }catch(error){if(!res.headersSent)return json(res,503,{ok:false,error:"Secure event stream unavailable; use authenticated polling"});closed=true;}
         finally{
           closed=true;wake();
+          if(reauthTimer)clearInterval(reauthTimer);
           if(closeListener)await closeListener().catch(()=>{});
           if(counted){
             counted=false;activeSseConnections--;
