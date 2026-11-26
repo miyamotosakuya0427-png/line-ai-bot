@@ -41,7 +41,7 @@ test("prototype has no persistent browser token or conversation storage and no A
   const app=fs.readFileSync(path.join(root,"app.js"),"utf8");
   assert.doesNotMatch(app,/localStorage|sessionStorage|indexedDB/);
   assert.doesNotMatch(app,/fetch\s*\(/);
-  assert.match(app,/document\.visibilitychange/);assert.match(app,/pagehide/);
+  assert.match(app,/visibilitychange/);assert.match(app,/pagehide/);
 });
 test("microphone is not started automatically and the HTML explains provider-side speech processing",()=>{
   const app=fs.readFileSync(path.join(root,"app.js"),"utf8");
