@@ -4,6 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const path = require("node:path");
+const fs = require("node:fs");
 const { Worker } = require("node:worker_threads");
 const { Pool } = require("pg");
 const { verifyChain } = require("./market-data-audit");
@@ -100,6 +101,19 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
     "Worker integration tests may only use isolated localhost PostgreSQL");
 
   const pool = new Pool({ connectionString: databaseUrl, max: 8 });
+  const migrationsDir = path.join(__dirname, "..", "migrations");
+  try {
+    await pool.query("DO $ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='jarvis_audit_readonly') THEN CREATE ROLE jarvis_audit_readonly NOLOGIN; END IF; END $;");
+    await pool.query("CREATE TABLE IF NOT EXISTS schema_migrations(version TEXT PRIMARY KEY)");
+    for (const file of ["002_market_data_quality.sql", "003_market_data_license_and_currency.sql", "004_market_data_raw_provenance.sql"]) {
+      const sql = fs.readFileSync(path.join(migrationsDir, file), "utf8");
+      await pool.query(sql);
+      await pool.query(sql);
+    }
+  } catch (error) {
+    await pool.end();
+    throw error;
+  }
   const sourceId = crypto.randomUUID();
   const counters = { success: 0, failure: 0, duplicate: 0, retry: 0 };
   const base = Date.parse("2026-11-22T13:00:00.000Z");
