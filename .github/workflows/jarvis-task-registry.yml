@@ -1,4 +1,4 @@
-name: ONE JARVIS Task Registry PostgreSQL 16
+name: ONE JARVIS Task Registry PostgreSQL 16/18
 # Stage 5 + command center: Task State Machine, Dispatcher, recovery, shared API limiter, dashboard UI tests
 
 permissions:
@@ -6,6 +6,12 @@ permissions:
 on:
   pull_request:
     paths:
+      - "jarvis/core/postgres-event-store.js"
+      - "jarvis/core/postgres-event-store.test.js"
+      - "jarvis/core/postgres-operational-stores.js"
+      - "jarvis/core/postgres-operational-stores.test.js"
+      - "jarvis/core/postgres-operational-stores.integration.test.js"
+      - "jarvis/core/postgres-startup-readonly.test.js"
       - "jarvis/core/task-registry-store.js"
       - "jarvis/core/task-state-machine.js"
       - "jarvis/core/task-state-machine.test.js"
@@ -36,6 +42,9 @@ on:
       - "jarvis/coordination/COMMAND_CENTER_TELEMETRY_STAGE2.md"
       - "jarvis/coordination/COMMAND_CENTER_STAGE3.md"
       - "jarvis/coordination/COMMAND_CENTER_STAGE4.md"
+      - "jarvis/migrations/0001_neon_event_store.sql"
+      - "jarvis/migrations/0002_job_approval_stores.sql"
+      - "jarvis/migrations/0003_append_only_event_ledger.sql"
       - "jarvis/migrations/0004_task_registry.sql"
       - "jarvis/migrations/0005_task_registry_scoped_dedupe.sql"
       - "jarvis/migrations/0006_scheduling_reservation_store.sql"
@@ -64,7 +73,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        image: postgres:${{ matrix.postgres-version }}
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
