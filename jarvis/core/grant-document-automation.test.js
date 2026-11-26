@@ -11,10 +11,10 @@ test("SHA-256 and document manifest are stable and do not expose file content",(
   assert.equal(record.documentStatus,"RECEIVED");
   assert.equal(JSON.stringify(record).includes("synthetic fixture"),false);
 });
-test("rejects unsupported, empty, and oversized files",()=>{
+test("rejects unsupported, empty, and oversized files",async()=>{
   assert.throws(()=>engine.detectFileType("invoice.exe"),/UNSUPPORTED_FILE_TYPE/);
   assert.throws(()=>engine.makeDocumentRecord({fileId:"x",fileName:"x.pdf",buffer:Buffer.alloc(0)}),/EMPTY_FILE/);
-  assert.throws(()=>engine.readPdf(Buffer.alloc(9),{limits:{maxFileBytes:8},pdfjs:{}}),/FILE_TOO_LARGE/);
+  await assert.rejects(()=>engine.readPdf(Buffer.alloc(9),{limits:{maxFileBytes:8},pdfjs:{}}),/FILE_TOO_LARGE/);
 });
 test("company master retains provenance and unknowns never become matches",()=>{
   const profile=engine.createCompanyProfile({
