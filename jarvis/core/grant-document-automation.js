@@ -9,7 +9,9 @@ const DEFAULT_LIMITS = Object.freeze({
   maxWorkbookSheets: 100,
   maxCells: 200000,
   maxDocxEntries: 5000,
-  maxTextChars: 2_000_000
+  maxTextChars: 2_000_000,
+  maxExpandedZipBytes: 80 * 1024 * 1024,
+  maxZipExpansionRatio: 200
 });
 const ALLOWED_EXTENSIONS = new Set([".pdf", ".xlsx", ".xlsm", ".docx"]);
 const VERIFICATION = new Set(["VERIFIED", "UNVERIFIED", "UNKNOWN", "EXPIRED", "MISMATCH"]);
