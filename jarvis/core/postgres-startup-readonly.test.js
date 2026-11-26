@@ -10,17 +10,8 @@ function recordingPool() {
   const state = { statements: [] };
   async function query(sql) {
     state.statements.push(String(sql));
-    if (/to_regclass/i.test(sql)) {
-      return { rows: [{
-        events: "jarvis.events",
-        migrations: "jarvis.schema_migrations",
-        migration: true,
-        migration_0002: true,
-        migration_0003: true,
-        append_only_row: true,
-        append_only_truncate: true
-      }], rowCount: 1 };
-    }
+    if (/to_regclass/i.test(sql)) return { rows: [{ events: "jarvis.events", migrations: "jarvis.schema_migrations" }], rowCount: 1 };
+    if (/^\\s*SELECT EXISTS/i.test(sql)) return { rows: [{ migration: true, migration_0002: true, migration_0003: true, append_only_row: true, append_only_truncate: true }], rowCount: 1 };
     if (/^\s*SELECT\s+version\s+FROM/i.test(sql)) {
       return { rows: [{ version: "0001_neon_event_store" }], rowCount: 1 };
     }
