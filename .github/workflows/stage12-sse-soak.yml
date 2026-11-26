@@ -9,6 +9,8 @@ on:
       - "jarvis/migrations/**"
       - "jarvis/server.js"
       - "jarvis/core/task-event-outbox.js"
+      - "jarvis/core/owner-session-security.js"
+      - "jarvis/core/owner-session-security.test.js"
       - ".github/workflows/stage12-sse-soak.yml"
 
 permissions:
