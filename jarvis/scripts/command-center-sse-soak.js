@@ -49,6 +49,35 @@ const latency = metrics.latencyMs;
 let finished = false;
 let startedAtMs = Date.now();
 let versions = [0,0,0];
+const resourceSamples = [];
+let lastSampleAtMs = startedAtMs;
+let previousCpuUsage = process.cpuUsage();
+let sampleInProgress = false;
+const agentLatencyMs = [[], [], []];
+
+function writeMetricsSnapshot(extra = {}) {
+  const elapsedSeconds = Math.max(0, Math.round((Date.now() - startedAtMs) / 1000));
+  const sorted = [...latency].sort((a,b)=>a-b);
+  const percentile = p => sorted.length ? sorted[Math.min(sorted.length-1,Math.ceil(sorted.length*p)-1)] : null;
+  const snapshot = {
+    ...metrics, ...extra,
+    elapsedSeconds,
+    eventsWrittenPerScope: versions,
+    eventsReceivedPerAgent: metrics.eventsReceived,
+    duplicatesPerAgent: metrics.duplicates,
+    cursorGapsPerAgent: metrics.cursorGaps,
+    authorizationChecksPerAgent: metrics.authorizationChecks,
+    latency: { samples: sorted.length, p50: percentile(.50), p95: percentile(.95), p99: percentile(.99) },
+    agentLatencyMs: agentLatencyMs.map(values => {
+      const a=[...values].sort((x,y)=>x-y); const q=p=>a.length?a[Math.min(a.length-1,Math.ceil(a.length*p)-1)]:null;
+      return {samples:a.length,p50:q(.50),p95:q(.95),p99:q(.99)};
+    }),
+    resourceSamples,
+    finishedAt: new Date().toISOString()
+  };
+  fs.writeFileSync(path.join(__dirname, "..", "stage12-sse-metrics.json"), JSON.stringify(snapshot, null, 2), { mode: 0o600 });
+  return snapshot;
+}
 
 async function insertEvent(index) {
   const s = scopes[index];
@@ -113,9 +142,9 @@ async function consumeAgent(index, deadline) {
             cursor = eventCursor;
             metrics.eventsReceived[index]++;
             const created = Date.parse(event.createdAt);
-            if (Number.isFinite(created)) latency.push(Math.max(0, Date.now() - created));
+            if (Number.isFinite(created)) { const ms=Math.max(0, Date.now()-created); latency.push(ms); agentLatencyMs[index].push(ms); }
           });
-          if (index === 2) await delay(50);
+          if (index === 2) { metrics.slowReaderReadCount++; metrics.slowReaderBytes += part.value?.byteLength || 0; await delay(50); }
         }
       } finally {
         clearTimeout(reconnectTimer);
@@ -157,7 +186,30 @@ async function main() {
       metrics.listenerTerminationInjected = listeners.rows.length > 0;
     }
     if (elapsed >= 30*60*1000 && !revoked.has(scopes[1].agentId)) revoked.add(scopes[1].agentId);
-    if (tick % 60 === 0) resourceSamples.push({ elapsedSeconds: Math.round((Date.now()-startedAtMs)/1000), rssBytes: process.memoryUsage().rss, heapUsedBytes: process.memoryUsage().heapUsed, poolTotal: pool.totalCount, poolIdle: pool.idleCount, poolWaiting: pool.waitingCount, cpu: process.cpuUsage() });
+    if (Date.now() - lastSampleAtMs >= 15_000 && !sampleInProgress) {
+      sampleInProgress = true;
+      try {
+        const now = Date.now();
+        const elapsedMs = Math.max(1, now - lastSampleAtMs);
+        const cpuDelta = process.cpuUsage(previousCpuUsage);
+        previousCpuUsage = process.cpuUsage();
+        const listenerRows = await pool.query(
+          "SELECT count(*)::int AS count FROM pg_stat_activity WHERE application_name='stage12-sse-soak' AND query ILIKE 'LISTEN jarvis_task_events%'"
+        );
+        resourceSamples.push({
+          elapsedSeconds: Math.round((now-startedAtMs)/1000),
+          intervalSeconds: Number((elapsedMs/1000).toFixed(3)),
+          cpuUserMicrosDelta: cpuDelta.user,
+          cpuSystemMicrosDelta: cpuDelta.system,
+          cpuPercent: Number((((cpuDelta.user+cpuDelta.system)/1000)/elapsedMs*100).toFixed(3)),
+          rssBytes: process.memoryUsage().rss,
+          heapUsedBytes: process.memoryUsage().heapUsed,
+          dbPool: { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount },
+          listenerCount: listenerRows.rows[0]?.count ?? null
+        });
+        lastSampleAtMs = now;
+      } finally { sampleInProgress = false; }
+    }
     await delay(Math.max(0, 1000 - (Date.now() - (startedAtMs + tick*1000))));
   }
   finished = true;
@@ -186,6 +238,7 @@ async function main() {
     processCpuUserMicros: cpu.user,
     processCpuSystemMicros: cpu.system,
     resourceSamples,
+    agentLatencyMs: agentLatencyMs.map(values => { const a=[...values].sort((x,y)=>x-y); const q=p=>a.length?a[Math.min(a.length-1,Math.ceil(a.length*p)-1)]:null; return {samples:a.length,p50:q(.50),p95:q(.95),p99:q(.99)}; }),
     pool: { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount },
     finishedAt: new Date().toISOString()
   };
@@ -201,9 +254,14 @@ async function main() {
   }
 }
 main().catch(async error => {
-  console.error("Stage 12 isolated SSE soak failed: " + (error.message || "unknown failure"));
+  metrics.failure = String(error?.message || "unknown failure").slice(0, 500);
+  try { writeMetricsSnapshot({ status: "failed", failure: metrics.failure }); } catch (writeError) {
+    console.error("Metrics snapshot write failed: " + String(writeError?.message || "unknown"));
+  }
+  console.error("Stage 12 isolated SSE soak failed: " + metrics.failure);
   for (const controller of activeControllers) controller.abort();
-  try { server.close(); } catch {}
+  try { server.closeAllConnections?.(); } catch {}
+  try { await Promise.race([new Promise(resolve => server.close(resolve)), delay(2000)]); } catch {}
   try { await pool.end(); } catch {}
   process.exitCode = 1;
 });
