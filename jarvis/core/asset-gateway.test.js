@@ -73,3 +73,91 @@ test("download re-computes SHA-256 and refuses tampered content", async () => {
   assert.deepEqual(read.body, body);
   await assert.rejects(gateway.download({ key: uploaded.key, expectedSha256: "0".repeat(64) }), /integrity/);
 });
+
+test("download enforces the byte limit while consuming async-iterable streams", async () => {
+  const chunks = [Buffer.alloc(40, 1), Buffer.alloc(40, 2), Buffer.alloc(40, 3)];
+  let yieldedChunks = 0;
+  let transformCalls = 0;
+  const body = {
+    async *[Symbol.asyncIterator]() {
+      for (const chunk of chunks) {
+        yieldedChunks += 1;
+        yield chunk;
+      }
+    },
+    async transformToByteArray() {
+      transformCalls += 1;
+      return Buffer.concat(chunks);
+    }
+  };
+  const store = {
+    async putObject() {},
+    async headObject() {},
+    async getObject() {
+      return { Body: body, ContentType: "audio/wav", ContentLength: null, Metadata: {} };
+    }
+  };
+  const gateway = createAssetGateway({
+    objectStore: store, bucket: "jarvis-test", maxBytes: 64,
+    commitAssetMetadata: async () => {}
+  });
+  await assert.rejects(
+    gateway.download({ key: "audio/large.wav", expectedSha256: "0".repeat(64) }),
+    /maximum size/
+  );
+  assert.equal(yieldedChunks, 2);
+  assert.equal(transformCalls, 0);
+});
+
+test("download rejects transform-only bodies rather than buffering without a streaming bound", async () => {
+  let transformCalls = 0;
+  const body = {
+    async transformToByteArray() {
+      transformCalls += 1;
+      return wavFixture();
+    }
+  };
+  const store = {
+    async putObject() {},
+    async headObject() {},
+    async getObject() {
+      return { Body: body, ContentType: "audio/wav", ContentLength: null, Metadata: {} };
+    }
+  };
+  const gateway = createAssetGateway({
+    objectStore: store, bucket: "jarvis-test", maxBytes: 64,
+    commitAssetMetadata: async () => {}
+  });
+  await assert.rejects(
+    gateway.download({ key: "audio/unbounded.wav", expectedSha256: "0".repeat(64) }),
+    /bounded async iterable required/
+  );
+  assert.equal(transformCalls, 0);
+});
+
+test("download rejects an oversized declared ContentLength before reading the body", async () => {
+  let iterated = false;
+  const body = {
+    async *[Symbol.asyncIterator]() {
+      iterated = true;
+      yield wavFixture();
+    }
+  };
+  const store = {
+    async putObject() {},
+    async headObject() {},
+    async getObject() {
+      return { Body: body, ContentType: "audio/wav", ContentLength: 128, Metadata: {} };
+    }
+  };
+  const gateway = createAssetGateway({
+    objectStore: store, bucket: "jarvis-test", maxBytes: 64,
+    commitAssetMetadata: async () => {}
+  });
+  await assert.rejects(
+    gateway.download({ key: "audio/declared-large.wav", expectedSha256: "0".repeat(64) }),
+    /maximum size/
+  );
+  assert.equal(iterated, false);
+});
+

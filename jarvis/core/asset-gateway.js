@@ -39,11 +39,7 @@ async function toBuffer(body, maxBytes) {
     if (body.byteLength > maxBytes) throw new RangeError("Asset exceeds maximum size");
     return Buffer.from(body);
   }
-  if (body && typeof body.transformToByteArray === "function") {
-    const bytes = await body.transformToByteArray();
-    if (bytes.byteLength > maxBytes) throw new RangeError("Asset exceeds maximum size");
-    return Buffer.from(bytes);
-  }
+  // Consume streaming bodies incrementally so the size limit is enforced before buffering.
   if (body && typeof body[Symbol.asyncIterator] === "function") {
     const chunks = [];
     let size = 0;
@@ -55,7 +51,7 @@ async function toBuffer(body, maxBytes) {
     }
     return Buffer.concat(chunks, size);
   }
-  throw new TypeError("Unsupported object body");
+  throw new TypeError("Unsupported object body: bounded async iterable required");
 }
 
 function createR2ObjectStore({ accountId, accessKeyId, secretAccessKey, client } = {}) {
@@ -127,6 +123,10 @@ function createAssetGateway({ objectStore, bucket, commitAssetMetadata, maxBytes
         throw new TypeError("A valid expected SHA-256 is required");
       }
       const result = await objectStore.getObject({ bucket, key: safeKey });
+      const declaredLength = result.ContentLength == null ? null : Number(result.ContentLength);
+      if (declaredLength !== null && Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+        throw new RangeError("Asset exceeds maximum size");
+      }
       const bytes = await toBuffer(result.Body, maxBytes);
       const sha256 = crypto.createHash("sha256").update(bytes).digest("hex");
       const mimeType = result.ContentType;
