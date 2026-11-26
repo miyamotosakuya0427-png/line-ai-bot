@@ -70,8 +70,9 @@ function createPostgresTaskDispatchRuntime({registry,executionKernel,authorizeAg
           const visitedAgents=ordered.filter(row=>["agent_handoff","handoff_reselected"].includes(row.eventType)).flatMap(row=>[row.payload?.fromAgentId,row.payload?.toAgentId]).filter(Boolean);
           const visitedWorkers=ordered.filter(row=>["agent_handoff","handoff_reselected"].includes(row.eventType)).flatMap(row=>[row.payload?.fromWorkerId,row.payload?.toWorkerId]).filter(Boolean);
           const principal={agentId:"system-handoff-recovery",projectIds:[task.projectId],conversationId:task.ownerConversation,scopes:["tasks:dispatch","tasks:claim"],allowed:true};
+          const oldAgentPrincipal=await authorizeAgent(task.ownerAgent,{projectId:task.projectId,conversationId:task.ownerConversation,requiredScopes:["tasks:dispatch","tasks:claim"]}).catch(()=>null);
           const candidate=await selectWorker({task,principal,sourceWorker:{agentId:task.ownerAgent},excludeAgentIds:visitedAgents,excludeWorkerIds:visitedWorkers});
-          const result=await registry.recoverPostCommitHandoff({taskId:task.taskId,expectedVersion:item.version,candidateWorkerId:candidate?.workerId||null,maxAttempts:3});
+          const result=await registry.recoverPostCommitHandoff({taskId:task.taskId,expectedVersion:item.version,candidateWorkerId:candidate?.workerId||null,oldAgentAuthorized:!!oldAgentPrincipal,maxAttempts:3});
           if(result?.created&&result.waiting)waiting++;
           else if(result?.created&&result.selectedWorker)recovered++;
         }
