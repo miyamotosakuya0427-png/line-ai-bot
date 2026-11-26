@@ -132,3 +132,10 @@ test("checklist fails closed when a required issue date or expiry date is invali
   assert.deepEqual(result.missingRequired,["納税証明"]);
   assert.equal(engine.compareField({value:"法人名",verificationStatus:"VERIFIED",validUntil:"bad-date"},"法人名").status,"UNKNOWN");
 });
+
+test("structured extraction includes Word table cell evidence",()=>{
+  const values=engine.extractStructuredValues({tables:[{location:{part:"word/document.xml",table:1},rows:[["提出日 2026年11月26日","金額 5,000円"]]}]});
+  assert.equal(values.dates[0].value,"2026年11月26日");
+  assert.equal(values.amounts[0].value,"5,000円");
+  assert.deepEqual(values.amounts[0].location,{part:"word/document.xml",table:1,row:1,cell:2});
+});
