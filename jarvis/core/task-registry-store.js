@@ -312,9 +312,9 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         return {created:true,task:clone(next),version:current.version+1,event:{eventType:"agent_handoff",fromAgentId,toAgentId,fromDepartmentId,toDepartmentId,workerId:lease.ownerId,createdAt:now}};
       });
     },
-    async recoverPostCommitHandoff({taskId,expectedVersion,candidateWorkerId=null,maxAttempts=3}={}) {
+    async recoverPostCommitHandoff({taskId,expectedVersion,candidateWorkerId=null,oldAgentAuthorized=true,maxAttempts=3}={}) {
       await init();
-      if(!text(taskId,200)||!Number.isSafeInteger(expectedVersion)||(candidateWorkerId!==null&&!text(candidateWorkerId,160))||!Number.isInteger(maxAttempts)||maxAttempts<1||maxAttempts>3)throw new Error("Invalid Handoff recovery request");
+      if(!text(taskId,200)||!Number.isSafeInteger(expectedVersion)||(candidateWorkerId!==null&&!text(candidateWorkerId,160))||typeof oldAgentAuthorized!=="boolean"||!Number.isInteger(maxAttempts)||maxAttempts<1||maxAttempts>3)throw new Error("Invalid Handoff recovery request");
       return tx(async c=>{
         await lock(c,"task-handoff-recovery:"+taskId);
         const currentSnapshot=await latest(c,taskId);
@@ -361,7 +361,7 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
           }
         }
         const oldHeartbeat=Date.parse(oldWorker?.heartbeat_at||"");
-        const oldUnavailable=!oldWorker||oldWorker.agent_id!==latestPayload.toAgentId||oldWorker.department_id!==current.departmentId||oldWorker.status!=="idle"||oldWorker.current_task_id!==null||!Number.isFinite(oldHeartbeat)||Date.parse(clock())-oldHeartbeat>120000||!oldGrant||oldRevoked;
+        const oldUnavailable=!oldWorker||oldWorker.agent_id!==latestPayload.toAgentId||oldWorker.department_id!==current.departmentId||oldWorker.status!=="idle"||oldWorker.current_task_id!==null||!Number.isFinite(oldHeartbeat)||Date.parse(clock())-oldHeartbeat>120000||!oldGrant||oldRevoked||!oldAgentAuthorized;
         if(!oldUnavailable)return {created:false,replayed:false,reason:"CURRENT_HANDOFF_TARGET_STILL_ELIGIBLE",task:clone(current),version:currentSnapshot.version,attempt:attempts};
         let candidateValid=false;
         if(candidateWorkerId&&candidate){
