@@ -112,3 +112,14 @@ test("application field comparison never treats unknown as match",()=>{
   assert.equal(result.canDraft,true);
   assert.equal(result.hasUnknown,true);
 });
+
+test("company master exposes required evidence fields as UNKNOWN by default",()=>{
+  const profile=engine.createCompanyProfile({});
+  for(const field of engine.COMPANY_PROFILE_FIELDS) assert.equal(profile[field].verificationStatus,"UNKNOWN");
+});
+test("structured date and amount extraction keeps source locations",()=>{
+  const values=engine.extractStructuredValues({pages:[{items:[{text:"発行日 2026年11月26日 金額 12,500円",location:{page:3,x:1,y:2},confidence:0.9}]}]});
+  assert.equal(values.dates[0].value,"2026年11月26日");
+  assert.equal(values.amounts[0].value,"12,500円");
+  assert.deepEqual(values.dates[0].location,{page:3,x:1,y:2});
+});
