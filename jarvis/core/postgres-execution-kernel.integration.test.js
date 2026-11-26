@@ -71,6 +71,7 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   await kernel.registerWorker({workerId:"worker-target-no-grant",agentId:"agent-target-no-grant",departmentId:"management",instanceId:"instance-target-no-grant"});
   await registerScopedWorker({workerId:"worker-target-race",agentId:"agent-target-race",departmentId:"management",instanceId:"instance-target-race",processId:"500"});
   await registerScopedWorker({workerId:"worker-target-grant-revoked",agentId:"agent-target-grant-revoked",departmentId:"management",instanceId:"instance-target-grant-revoked",processId:"600"});
+  await registerScopedWorker({workerId:"worker-target-agent-race",agentId:"agent-target-agent-race",departmentId:"management",instanceId:"instance-target-agent-race",processId:"700"});
   const scopedWorkers=await kernel.listWorkersForScope({projectId:"one-jarvis",conversationId:"test-conversation"});
   assert.ok(scopedWorkers.some(row=>row.worker_id==="worker-a"&&row.grant_id),"only explicitly granted Workers are returned in a scope listing");
   const grantAudit=await kernel.listWorkerScopeGrants({limit:50});
@@ -172,6 +173,63 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   await kernel.completeWorkerTask({workerId:loserId,taskId:revokedTargetTask.task.taskId,lease:revokedTargetClaim.lease,finalState:"failed"});
   await registry.releaseLease({lease:revokedTargetClaim.lease});
 
+  // Rejected target identities/states/grants must roll back Task, Lease, Worker and Outbox together.
+  async function assertRejectedHandoff(suffix,targetWorkerId,toAgentId,toDepartmentId,pattern){
+    const task=await makeTask("handoff-reject-"+suffix,loserId);
+    const claim=await registry.claimTaskForWorker({taskId:task.task.taskId,workerId:loserId,leaseMs:5000});
+    const running=await registry.transitionTask({taskId:task.task.taskId,expectedVersion:claim.version,lease:claim.lease,status:"running"});
+    const input={taskId:task.task.taskId,expectedVersion:running.version,lease:claim.lease,targetWorkerId,fromAgentId:(loserId==="worker-a"?"agent-a":"agent-b"),toAgentId,fromDepartmentId:"engineering",toDepartmentId,idempotencyKey:"handoff-reject-"+suffix};
+    await assert.rejects(registry.recordTaskHandoff(input),pattern);
+    const after=await registry.getTask(task.task.taskId);
+    assert.equal(after.task.state,"running",suffix+" must preserve the source Task state");
+    assert.equal(after.version,running.version,suffix+" must not append a Task event");
+    assert.equal((await kernel.getWorker(loserId)).current_task_id,task.task.taskId,suffix+" must retain source Worker binding");
+    assert.equal((await pool.query("SELECT 1 FROM jarvis.coordination_leases WHERE resource_key=$1 AND owner_id=$2",[claim.lease.resourceKey,loserId])).rowCount,1,suffix+" must retain the source Lease");
+    assert.equal((await registry.listTaskEvents({taskIds:[task.task.taskId],limit:20})).some(event=>event.eventType==="agent_handoff"),false,suffix+" must not append Handoff event");
+    assert.equal((await outbox.replay({projectId:"one-jarvis",conversationId:"test-conversation",afterCursor:0,limit:500})).some(event=>event.taskId===task.task.taskId&&event.eventType==="agent_handoff"),false,suffix+" must not append Handoff Outbox event");
+    await registry.transitionTask({taskId:task.task.taskId,expectedVersion:running.version,lease:claim.lease,status:"failed",patch:{nextAction:"Isolated rejected-Handoff test cleanup"}});
+    await kernel.completeWorkerTask({workerId:loserId,taskId:task.task.taskId,lease:claim.lease,finalState:"failed"});
+    await registry.releaseLease({lease:claim.lease});
+  }
+  await assertRejectedHandoff("missing-worker","worker-does-not-exist","agent-target","management",/Handoff target Worker/);
+  await assertRejectedHandoff("agent-mismatch","worker-target","agent-not-target","management",/Handoff target Worker/);
+  await assertRejectedHandoff("department-mismatch","worker-target","agent-target","finance",/Handoff target Worker/);
+  await assertRejectedHandoff("no-grant","worker-target-no-grant","agent-target-no-grant","management",/no active Project\/Conversation Grant/);
+  const grantRowsForRejected=await kernel.listWorkersForScope({projectId:"one-jarvis",conversationId:"test-conversation"});
+  const revokedTargetGrant=grantRowsForRejected.find(row=>row.worker_id==="worker-target-grant-revoked").grant_id;
+  await kernel.revokeWorkerScope({grantId:revokedTargetGrant,revokedBy:"integration-test"});
+  await assertRejectedHandoff("revoked-grant","worker-target-grant-revoked","agent-target-grant-revoked","management",/no active Project\/Conversation Grant/);
+  let stoppedTarget=await kernel.getWorker("worker-target");
+  stoppedTarget=await kernel.transitionWorker({workerId:"worker-target",expectedVersion:Number(stoppedTarget.version),status:"stopped"});
+  await assertRejectedHandoff("stopped-worker","worker-target","agent-target","management",/Handoff target Worker/);
+  stoppedTarget=await kernel.transitionWorker({workerId:"worker-target",expectedVersion:Number(stoppedTarget.version),status:"recovering"});
+  await kernel.transitionWorker({workerId:"worker-target",expectedVersion:Number(stoppedTarget.version),status:"idle"});
+
+  // Grant revocation and Handoff use the same Worker -> Grant lock order.
+  const grantRaceTask=await makeTask("handoff-grant-revoke-race",loserId);
+  const grantRaceClaim=await registry.claimTaskForWorker({taskId:grantRaceTask.task.taskId,workerId:loserId,leaseMs:5000});
+  const grantRaceRunning=await registry.transitionTask({taskId:grantRaceTask.task.taskId,expectedVersion:grantRaceClaim.version,lease:grantRaceClaim.lease,status:"running"});
+  const grantRaceRows=await kernel.listWorkersForScope({projectId:"one-jarvis",conversationId:"test-conversation"});
+  const grantRaceId=grantRaceRows.find(row=>row.worker_id==="worker-target-race").grant_id;
+  const grantRaceInput={taskId:grantRaceTask.task.taskId,expectedVersion:grantRaceRunning.version,lease:grantRaceClaim.lease,targetWorkerId:"worker-target-race",fromAgentId:(loserId==="worker-a"?"agent-a":"agent-b"),toAgentId:"agent-target-race",fromDepartmentId:"engineering",toDepartmentId:"management",idempotencyKey:"handoff-grant-revoke-race"};
+  const [grantRaceHandoff,grantRaceRevoke]=await Promise.allSettled([
+    runWorkerProcess("handoff",loserId,grantRaceTask.task.taskId,{JARVIS_EXECUTION_CHILD_HANDOFF_INPUT:JSON.stringify(grantRaceInput)}),
+    kernel.revokeWorkerScope({grantId:grantRaceId,revokedBy:"integration-test"})
+  ]);
+  assert.equal(grantRaceRevoke.status,"fulfilled","Grant revocation must complete while serializing with Handoff");
+  const grantRaceAfter=await registry.getTask(grantRaceTask.task.taskId);
+  const grantRaceEvents=await registry.listTaskEvents({taskIds:[grantRaceTask.task.taskId],limit:20});
+  if(grantRaceHandoff.status==="fulfilled"){
+    assert.equal(grantRaceHandoff.value.created,true,"Handoff wins only before the Grant revocation commits");
+    assert.equal(grantRaceAfter.task.state,"queued");
+    await assert.rejects(registry.claimTaskForWorker({taskId:grantRaceTask.task.taskId,workerId:"worker-target-race",leaseMs:5000}),/no active grant/);
+  }else{
+    assert.equal(grantRaceAfter.task.state,"running","Grant revocation wins without partially committing Handoff");
+    assert.equal(grantRaceEvents.some(event=>event.eventType==="agent_handoff"),false);
+    await registry.transitionTask({taskId:grantRaceTask.task.taskId,expectedVersion:grantRaceRunning.version,lease:grantRaceClaim.lease,status:"failed",patch:{nextAction:"Grant race test cleanup"}});
+    await kernel.completeWorkerTask({workerId:loserId,taskId:grantRaceTask.task.taskId,lease:grantRaceClaim.lease,finalState:"failed"});
+    await registry.releaseLease({lease:grantRaceClaim.lease});
+  }
 
   const resourceAttempts=await Promise.all([
    registry.acquireLease({resourceKey:"resource:race",ownerId:"worker-a",leaseMs:5000}),
