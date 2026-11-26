@@ -13,6 +13,13 @@ const DEFAULT_LIMITS = Object.freeze({
 });
 const ALLOWED_EXTENSIONS = new Set([".pdf", ".xlsx", ".xlsm", ".docx"]);
 const VERIFICATION = new Set(["VERIFIED", "UNVERIFIED", "UNKNOWN", "EXPIRED", "MISMATCH"]);
+const COMPANY_PROFILE_FIELDS = Object.freeze([
+  "legalName","corporateNumber","registeredAddress","capital","employeeCount",
+  "businessDescription","officeLocations","equipmentInstallationLocation",
+  "fiscalYears","corporateTaxFilingStatus","consumptionTaxFilingStatus",
+  "taxCertificates","employmentInsuranceStatus","laborInsurancePaymentStatus",
+  "equipmentAndVehicles","quotations","businessPlan"
+]);
 const MATCH_STATES = new Set(["MATCH", "MISMATCH", "UNKNOWN", "EXPIRED"]);
 
 function sha256(input) {
@@ -233,6 +240,25 @@ async function readDocument({fileId, fileName, buffer, source, storageReference,
   const record=makeDocumentRecord({fileId,fileName,buffer,source,storageReference,extractionVersion:parsed.extractionVersion,extractionConfidence:parsed.requiresOcr?null:0.98,documentStatus:parsed.requiresOcr?"OCR_REQUIRED":"EXTRACTED"});
   return {record, parsed};
 }
+function extractStructuredValues(parsed) {
+  const fragments=[];
+  const add=(text,location,confidence=0.8)=>{if(typeof text==="string"&&text.trim())fragments.push({text:text.trim(),location,confidence});};
+  for(const page of parsed?.pages||[]) for(const item of page.items||[]) add(item.text,item.location,item.confidence);
+  for(const sheet of parsed?.sheets||[]) for(const row of sheet.rows||[]) for(const cell of row.cells||[]) {
+    const value=cell.value;
+    if(value!==null&&value!==undefined&&value!=="") add(String(value),{sheet:sheet.name,cell:cell.address},0.95);
+    if(cell.result!==null&&cell.result!==undefined) add(String(cell.result),{sheet:sheet.name,cell:cell.address,kind:"formula-result"},0.9);
+  }
+  for(const paragraph of parsed?.paragraphs||[]) add(paragraph.text,paragraph.location,0.9);
+  const dates=[], amounts=[];
+  const datePattern=/(?:令和|平成|昭和)\s*[元0-9０-９]{1,4}年\s*[0-9０-９]{1,2}月\s*[0-9０-９]{1,2}日|20[0-9０-９]{2}[年\/-][0-9０-９]{1,2}[月\/-][0-9０-９]{1,2}日?/g;
+  const amountPattern=/(?:¥|￥)?\s*[0-9０-９][0-9０-９,，]*(?:\.[0-9０-９]+)?\s*(?:円|万円|千円)/g;
+  for(const fragment of fragments) {
+    for(const match of fragment.text.matchAll(datePattern)) dates.push({value:match[0],location:fragment.location,confidence:fragment.confidence});
+    for(const match of fragment.text.matchAll(amountPattern)) amounts.push({value:match[0],location:fragment.location,confidence:fragment.confidence});
+  }
+  return {dates,amounts,sourceFragments:fragments.length};
+}
 function auditExtraction({originalHash, currentBuffer, requiredFields = [], extractedFields = {}, profile = {}}) {
   const currentHash=sha256(currentBuffer);
   const hashMatches=Boolean(originalHash && currentHash===originalHash);
@@ -253,7 +279,7 @@ function buildFieldMapping(templateFields, profile) {
   });
 }
 module.exports={
-  DEFAULT_LIMITS, sha256, detectFileType, makeDocumentRecord, evidence,
+  DEFAULT_LIMITS, COMPANY_PROFILE_FIELDS, sha256, detectFileType, makeDocumentRecord, evidence,
   createCompanyProfile, compareField, compareApplicationFields, evaluateChecklist,
-  readPdf, readExcel, readWord, readDocument, auditExtraction, buildFieldMapping
+  readPdf, readExcel, readWord, readDocument, extractStructuredValues, auditExtraction, buildFieldMapping
 };
