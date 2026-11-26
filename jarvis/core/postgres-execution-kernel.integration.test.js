@@ -169,12 +169,12 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   await revocations.revoke({agentId:"agent-target",revokedBy:"integration-test"});
   await registerScopedWorker({workerId:"worker-target-replacement",agentId:"agent-target-replacement",departmentId:"management",instanceId:"instance-target-replacement",processId:"900"});
   const originalHandoffEvent=handoffEvents.find(row=>row.eventType==="agent_handoff");
-  const recovery=await registry.recoverPostCommitHandoff({taskId:handoffTask.task.taskId,expectedVersion:originalHandoffEvent.version,candidateWorkerId:"worker-target-replacement",maxAttempts:3});
-  assert.equal(recovery.created,true,"post-commit recovery must append a durable re-selection event");
-  assert.equal(recovery.selectedWorker.workerId,"worker-target-replacement");
-  assert.equal(recovery.task.ownerAgent,"agent-target-replacement");
-  assert.equal(recovery.task.state,"queued");
-  assert.equal(recovery.task.leaseOwner,null,"recovery must not fabricate a Task Lease");
+  const postCommitRecovery=await registry.recoverPostCommitHandoff({taskId:handoffTask.task.taskId,expectedVersion:originalHandoffEvent.version,candidateWorkerId:"worker-target-replacement",maxAttempts:3});
+  assert.equal(postCommitRecovery.created,true,"post-commit recovery must append a durable re-selection event");
+  assert.equal(postCommitRecovery.selectedWorker.workerId,"worker-target-replacement");
+  assert.equal(postCommitRecovery.task.ownerAgent,"agent-target-replacement");
+  assert.equal(postCommitRecovery.task.state,"queued");
+  assert.equal(postCommitRecovery.task.leaseOwner,null,"recovery must not fabricate a Task Lease");
   const recoveredEvents=await registry.listTaskEvents({taskIds:[handoffTask.task.taskId],limit:20});
   assert.equal(recoveredEvents.filter(row=>row.eventType==="handoff_reselected").length,1);
   assert.equal(recoveredEvents.find(row=>row.eventType==="handoff_reselected").payload.originalHandoffVersion,originalHandoffEvent.version);
