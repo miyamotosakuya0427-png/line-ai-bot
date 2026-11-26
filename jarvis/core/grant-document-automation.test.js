@@ -123,3 +123,12 @@ test("structured date and amount extraction keeps source locations",()=>{
   assert.equal(values.amounts[0].value,"12,500円");
   assert.deepEqual(values.dates[0].location,{page:3,x:1,y:2});
 });
+
+test("checklist fails closed when a required issue date or expiry date is invalid",()=>{
+  const result=engine.evaluateChecklist([
+    {documentType:"納税証明",required:true,maxAgeDays:365}
+  ],[{fileId:"bad-date",documentType:"納税証明",issuedAt:"not-a-date"}],new Date("2026-11-26"));
+  assert.equal(result.complete,false);
+  assert.deepEqual(result.missingRequired,["納税証明"]);
+  assert.equal(engine.compareField({value:"法人名",verificationStatus:"VERIFIED",validUntil:"bad-date"},"法人名").status,"UNKNOWN");
+});
