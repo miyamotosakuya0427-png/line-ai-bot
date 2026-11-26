@@ -66,7 +66,7 @@ test("Excel reader retains hidden sheets, formulas, merged cells and print setti
   const sheet={name:"見積",state:"visible",rowCount:1,columnCount:2,model:{merges:["A1:B1"]},pageSetup:{printArea:"A1:B2"},eachRow:(_opts,cb)=>cb({number:1,eachCell:(_o,fn)=>{fn(cell("A1",{formula:"1+2",result:3},{formula:"1+2"}));fn(cell("B1",new Date("2026-01-01T00:00:00Z"),{numFmt:"yyyy-mm-dd"}));}})};
   const hidden={...sheet,name:"非表示",state:"hidden",model:{merges:[]}};
   class Workbook{constructor(){this.worksheets=[sheet,hidden];this.xlsx={load:async()=>{}};}}
-  const parsed=await engine.readExcel(Buffer.from("xlsx-fixture"),{ExcelJS:{Workbook}});
+  const parsed=await engine.readExcel(Buffer.from("xlsx-fixture"),{ExcelJS:{Workbook},JSZip:{loadAsync:async()=>({files:{}})}});
   assert.equal(parsed.sheetCount,2);
   assert.equal(parsed.includesHiddenSheets,true);
   assert.deepEqual(parsed.sheets[0].merges,["A1:B1"]);
@@ -138,4 +138,11 @@ test("structured extraction includes Word table cell evidence",()=>{
   assert.equal(values.dates[0].value,"2026年11月26日");
   assert.equal(values.amounts[0].value,"5,000円");
   assert.deepEqual(values.amounts[0].location,{part:"word/document.xml",table:1,row:1,cell:2});
+});
+
+test("office archive preflight rejects path traversal and oversized expansion",async()=>{
+  const pathZip={files:{"../escape.xml":{dir:false,_data:{uncompressedSize:10,compressedSize:10}}}};
+  await assert.rejects(()=>engine.loadSafeZip(Buffer.from("zip"),{JSZip:{loadAsync:async()=>pathZip}}),/UNSAFE_ARCHIVE_PATH/);
+  const largeZip={files:{"word/document.xml":{dir:false,_data:{uncompressedSize:1000,compressedSize:100}}}};
+  await assert.rejects(()=>engine.loadSafeZip(Buffer.from("zip"),{limits:{maxExpandedZipBytes:500},JSZip:{loadAsync:async()=>largeZip}}),/ARCHIVE_EXPANSION_LIMIT/);
 });
