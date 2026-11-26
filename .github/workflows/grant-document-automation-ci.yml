@@ -1,0 +1,35 @@
+name: Grant document automation CI
+
+on:
+  push:
+    branches:
+      - feature/one-jarvis-grant-document-automation-stage3
+    paths:
+      - "jarvis/**"
+      - ".github/workflows/grant-document-automation-ci.yml"
+  pull_request:
+    branches:
+      - one-jarvis-foundation
+    paths:
+      - "jarvis/**"
+      - ".github/workflows/grant-document-automation-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  document-automation:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: jarvis
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: jarvis/package-lock.json
+      - run: npm install --ignore-scripts
+      - run: npm test
+      - run: node --check core/grant-document-automation.js
