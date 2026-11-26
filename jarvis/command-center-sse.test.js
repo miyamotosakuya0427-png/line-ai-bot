@@ -105,6 +105,7 @@ test("Command Center SSE enforces global/per-Agent limits and releases capacity 
       const response=await fetch(url,{headers:headersFor(5)});
       assert.equal(response.status,200,"reconnect cycle "+i+" must succeed");
       await response.body.cancel();
+      await new Promise(resolve=>setTimeout(resolve,60));
     }
     await new Promise(resolve=>setTimeout(resolve,80));
     assert.equal(opened,29);
