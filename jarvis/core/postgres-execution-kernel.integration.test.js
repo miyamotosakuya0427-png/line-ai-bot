@@ -169,7 +169,13 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   await revocations.revoke({agentId:"agent-target",revokedBy:"integration-test"});
   await registerScopedWorker({workerId:"worker-target-replacement",agentId:"agent-target-replacement",departmentId:"management",instanceId:"instance-target-replacement",processId:"900"});
   const originalHandoffEvent=handoffEvents.find(row=>row.eventType==="agent_handoff");
-  const postCommitRecovery=await registry.recoverPostCommitHandoff({taskId:handoffTask.task.taskId,expectedVersion:originalHandoffEvent.version,candidateWorkerId:"worker-target-replacement",oldAgentAuthorized:false,maxAttempts:3});
+  const recoveryRaces=await Promise.allSettled([
+    registry.recoverPostCommitHandoff({taskId:handoffTask.task.taskId,expectedVersion:originalHandoffEvent.version,candidateWorkerId:"worker-target-replacement",oldAgentAuthorized:false,maxAttempts:3}),
+    registry.recoverPostCommitHandoff({taskId:handoffTask.task.taskId,expectedVersion:originalHandoffEvent.version,candidateWorkerId:"worker-target-replacement",oldAgentAuthorized:false,maxAttempts:3})
+  ]);
+  assert.equal(recoveryRaces.filter(row=>row.status==="fulfilled"&&row.value.created).length,1,"concurrent recovery requests must create exactly one replacement Handoff");
+  assert.equal(recoveryRaces.filter(row=>row.status==="rejected").length,1,"the stale concurrent recovery must fail closed");
+  const postCommitRecovery=recoveryRaces.find(row=>row.status==="fulfilled").value;
   assert.equal(postCommitRecovery.created,true,"post-commit recovery must append a durable re-selection event");
   assert.equal(postCommitRecovery.selectedWorker.workerId,"worker-target-replacement");
   assert.equal(postCommitRecovery.task.ownerAgent,"agent-target-replacement");
