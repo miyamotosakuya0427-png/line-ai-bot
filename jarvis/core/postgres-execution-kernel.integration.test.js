@@ -42,7 +42,6 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   await revocations.init();
   assert.equal((await revocations.revoke({agentId:"agent-revoked-live",revokedBy:"integration-test"})).revoked,true);
   // Re-running Migration 0010 on an existing schema must preserve existing audit rows.
-  const fs=require("node:fs/promises"),path=require("node:path");
   await pool.query(await fs.readFile(path.join(__dirname,"..","migrations","0010_task_registry_agent_revocations.sql"),"utf8"));
   assert.equal((await pool.query("SELECT 1 FROM jarvis.task_registry_agent_revocations WHERE agent_id=$1",["agent-revoked-live"])).rowCount,1,"Migration 0010 re-run preserves existing revocation audit rows");
   assert.equal(await revocations.isRevoked("agent-revoked-live"),true,"shared token revocation must be visible through PostgreSQL");
