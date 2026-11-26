@@ -45,6 +45,10 @@ VALUES
 
 INSERT INTO jarvis.task_registry_agent_revocations(agent_id,revoked_at,revoked_by)
 VALUES ('stage12-revoked-agent',now(),'stage12-owner');
+
+INSERT INTO jarvis.owner_audit_events(actor_kind,operator_issuer,operator_subject,request_id,action,metadata)
+VALUES ('oidc_owner','https://mock-owner.example/','synthetic-owner-subject','stage12-request-oidc','task.approve','{"source":"isolated-stage12"}'),
+       ('legacy_shared_owner_token',NULL,NULL,'stage12-request-legacy','task.approve','{"source":"legacy-shared-token","identity":"unattributed"}');
 SQL
 
 # Capture source fingerprints without emitting credential-bearing connection details.
@@ -56,6 +60,7 @@ SELECT 'grants',count(*),coalesce(string_agg(grant_id::text||':'||worker_id||':'
 SELECT 'outbox',count(*),coalesce(string_agg(source_event_id::text||':'||scope_cursor::text||':'||project_id||':'||conversation_id||':'||task_id,',' ORDER BY outbox_id),'') FROM jarvis.task_event_outbox;
 SELECT 'cursors',count(*),coalesce(string_agg(project_id||':'||conversation_id||':'||last_cursor::text,',' ORDER BY project_id,conversation_id),'') FROM jarvis.task_event_outbox_cursors;
 SELECT 'revocations',count(*),coalesce(string_agg(agent_id||':'||revoked_by,',' ORDER BY agent_id),'') FROM jarvis.task_registry_agent_revocations;
+SELECT 'owner_audit',count(*),coalesce(string_agg(actor_kind||':'||coalesce(operator_issuer,'NULL')||':'||coalesce(operator_subject,'NULL')||':'||coalesce(request_id,'NULL')||':'||action,',' ORDER BY audit_event_id),'') FROM jarvis.owner_audit_events;
 SQL
 
 backup_start=$(date +%s)
@@ -80,7 +85,7 @@ SQL
 
 diff -u "$ARTIFACT_DIR/source-fingerprint.txt" "$ARTIFACT_DIR/restore-fingerprint.txt"
 test "$(cat "$ARTIFACT_DIR/backup.sha256")" = "$(sha256sum "$ARTIFACT_DIR/jarvis-stage12.dump" | awk '{print $1}')"
-test "$(psql -X -d "$RESTORE_DB" -Atc "SELECT count(*) FROM jarvis.schema_migrations WHERE version IN ('0001_neon_event_store','0002_job_approval_stores','0003_append_only_event_ledger','0004_task_registry','0005_task_registry_scoped_dedupe','0006_scheduling_reservation_store','0007_execution_kernel_fencing','0008_worker_scope_grants','0009_task_event_outbox','0010_task_registry_agent_revocations')")" = "10"
+test "$(psql -X -d "$RESTORE_DB" -Atc "SELECT count(*) FROM jarvis.schema_migrations WHERE version IN ('0001_neon_event_store','0002_job_approval_stores','0003_append_only_event_ledger','0004_task_registry','0005_task_registry_scoped_dedupe','0006_scheduling_reservation_store','0007_execution_kernel_fencing','0008_worker_scope_grants','0009_task_event_outbox','0010_task_registry_agent_revocations','0011_owner_audit_identity')")" = "11"
 test "$(psql -X -d "$RESTORE_DB" -Atc "SELECT count(*) FROM jarvis.task_event_outbox o JOIN jarvis.events e ON e.event_id=o.source_event_id WHERE e.aggregate_type='task'")" = "2"
 test "$(psql -X -d "$RESTORE_DB" -Atc "SELECT count(*) FROM jarvis.worker_scope_grants g JOIN jarvis.worker_registry w USING(worker_id)")" = "1"
 test "$(psql -X -d "$RESTORE_DB" -Atc "SELECT last_cursor FROM jarvis.task_event_outbox_cursors WHERE project_id='stage12-project' AND conversation_id='stage12-conversation'")" = "2"
@@ -92,10 +97,22 @@ fi
 if psql -X -v ON_ERROR_STOP=1 -d "$RESTORE_DB" -c "DELETE FROM jarvis.task_registry_agent_revocations WHERE agent_id='stage12-revoked-agent'" >/dev/null 2>&1; then
   echo "FAIL: revocation ledger accepted DELETE" >&2; exit 1
 fi
+if psql -X -v ON_ERROR_STOP=1 -d "$RESTORE_DB" -c "UPDATE jarvis.owner_audit_events SET action='tampered' WHERE request_id='stage12-request-oidc'" >/dev/null 2>&1; then
+  echo "FAIL: Owner audit ledger accepted UPDATE" >&2; exit 1
+fi
+if psql -X -v ON_ERROR_STOP=1 -d "$RESTORE_DB" -c "TRUNCATE jarvis.owner_audit_events" >/dev/null 2>&1; then
+  echo "FAIL: Owner audit ledger accepted TRUNCATE" >&2; exit 1
+fi
+if psql -X -v ON_ERROR_STOP=1 -d "$RESTORE_DB" -c "INSERT INTO jarvis.owner_audit_events(actor_kind,operator_issuer,operator_subject,request_id,action) VALUES ('oidc_owner','https://mock-owner.example/',NULL,'stage12-invalid-pair','task.approve')" >/dev/null 2>&1; then
+  echo "FAIL: Owner audit ledger accepted a half-populated issuer/subject pair" >&2; exit 1
+fi
 # Re-run only idempotent 0009/0010 DDL in the isolated restore DB; do not reset data.
 psql -X -v ON_ERROR_STOP=1 -d "$RESTORE_DB" -f jarvis/migrations/0009_task_event_outbox.sql >/dev/null
 psql -X -v ON_ERROR_STOP=1 -d "$RESTORE_DB" -f jarvis/migrations/0010_task_registry_agent_revocations.sql >/dev/null
+psql -X -v ON_ERROR_STOP=1 -d "$RESTORE_DB" -f jarvis/migrations/0011_owner_audit_identity.sql >/dev/null
 test "$(psql -X -d "$RESTORE_DB" -Atc "SELECT count(*) FROM jarvis.task_registry_agent_revocations WHERE agent_id='stage12-revoked-agent'")" = "1"
+test "$(psql -X -d "$RESTORE_DB" -Atc "SELECT count(*) FROM jarvis.owner_audit_events WHERE actor_kind='oidc_owner' AND operator_issuer IS NOT NULL AND operator_subject IS NOT NULL")" = "1"
+test "$(psql -X -d "$RESTORE_DB" -Atc "SELECT count(*) FROM jarvis.owner_audit_events WHERE actor_kind='legacy_shared_owner_token' AND operator_issuer IS NULL AND operator_subject IS NULL")" = "1"
 
 cat > "$ARTIFACT_DIR/metrics.txt" <<EOF
 backup_seconds=$((backup_end-backup_start))
