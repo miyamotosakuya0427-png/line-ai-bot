@@ -6,7 +6,6 @@ const crypto = require("node:crypto");
 const path = require("node:path");
 const fs = require("node:fs");
 const { Worker } = require("node:worker_threads");
-const { Pool } = require("pg");
 const { verifyChain } = require("./market-data-audit");
 
 const databaseUrl = process.env.MARKET_DATA_TEST_DATABASE_URL;
@@ -101,6 +100,7 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
     "Worker integration tests may only use isolated localhost PostgreSQL");
 
   const schemaName = "stage6_worker_" + crypto.randomUUID().replace(/-/g, "");
+  const { Pool } = require("pg");
   const bootstrapPool = new Pool({ connectionString: databaseUrl, max: 1 });
   await bootstrapPool.query('CREATE SCHEMA "' + schemaName + '"');
   const isolatedUrl = new URL(databaseUrl);

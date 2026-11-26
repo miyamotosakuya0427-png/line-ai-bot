@@ -5,7 +5,6 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { Pool } = require("pg");
 const { MarketDataStore } = require("./market-data-store");
 const { verifyChain } = require("./market-data-audit");
 
@@ -50,6 +49,7 @@ test("Stage6 PostgreSQL migrations, rollback, idempotency, revisions, audit and 
     throw new Error("Stage6 PostgreSQL integration tests are restricted to isolated localhost PostgreSQL");
   }
 
+  const { Pool } = require("pg");
   const pool = new Pool({ connectionString: databaseUrl, max: 12 });
   const migrationsDir = path.join(__dirname, "..", "migrations");
   try {
