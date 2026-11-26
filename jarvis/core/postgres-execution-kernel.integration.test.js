@@ -72,6 +72,7 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
   await registerScopedWorker({workerId:"worker-target-race",agentId:"agent-target-race",departmentId:"management",instanceId:"instance-target-race",processId:"500"});
   await registerScopedWorker({workerId:"worker-target-grant-revoked",agentId:"agent-target-grant-revoked",departmentId:"management",instanceId:"instance-target-grant-revoked",processId:"600"});
   await registerScopedWorker({workerId:"worker-target-agent-race",agentId:"agent-target-agent-race",departmentId:"management",instanceId:"instance-target-agent-race",processId:"700"});
+  await registerScopedWorker({workerId:"worker-target-worker-race",agentId:"agent-target-worker-race",departmentId:"management",instanceId:"instance-target-worker-race",processId:"800"});
   const scopedWorkers=await kernel.listWorkersForScope({projectId:"one-jarvis",conversationId:"test-conversation"});
   assert.ok(scopedWorkers.some(row=>row.worker_id==="worker-a"&&row.grant_id),"only explicitly granted Workers are returned in a scope listing");
   const grantAudit=await kernel.listWorkerScopeGrants({limit:50});
@@ -254,6 +255,34 @@ test("PostgreSQL 16 execution kernel preserves fencing across multi-process clai
     await kernel.completeWorkerTask({workerId:loserId,taskId:agentRaceTask.task.taskId,lease:agentRaceClaim.lease,finalState:"failed"});
     await registry.releaseLease({lease:agentRaceClaim.lease});
   }
+
+  // A concurrent destination Worker stop is serialized by the stable Worker-row lock.
+  const workerRaceTask=await makeTask("handoff-worker-stop-race",loserId);
+  const workerRaceClaim=await registry.claimTaskForWorker({taskId:workerRaceTask.task.taskId,workerId:loserId,leaseMs:5000});
+  const workerRaceRunning=await registry.transitionTask({taskId:workerRaceTask.task.taskId,expectedVersion:workerRaceClaim.version,lease:workerRaceClaim.lease,status:"running"});
+  const workerRaceTarget=await kernel.getWorker("worker-target-worker-race");
+  const workerRaceInput={taskId:workerRaceTask.task.taskId,expectedVersion:workerRaceRunning.version,lease:workerRaceClaim.lease,targetWorkerId:"worker-target-worker-race",fromAgentId:(loserId==="worker-a"?"agent-a":"agent-b"),toAgentId:"agent-target-worker-race",fromDepartmentId:"engineering",toDepartmentId:"management",idempotencyKey:"handoff-worker-stop-race"};
+  const [workerRaceHandoff,workerRaceStop]=await Promise.allSettled([
+    runWorkerProcess("handoff",loserId,workerRaceTask.task.taskId,{JARVIS_EXECUTION_CHILD_HANDOFF_INPUT:JSON.stringify(workerRaceInput)}),
+    kernel.transitionWorker({workerId:"worker-target-worker-race",expectedVersion:Number(workerRaceTarget.version),status:"stopped"})
+  ]);
+  assert.equal(workerRaceStop.status,"fulfilled","Worker stop must serialize and complete");
+  const workerRaceAfter=await registry.getTask(workerRaceTask.task.taskId);
+  const workerRaceEvents=await registry.listTaskEvents({taskIds:[workerRaceTask.task.taskId],limit:20});
+  if(workerRaceHandoff.status==="fulfilled"){
+    assert.equal(workerRaceHandoff.value.created,true,"Handoff may commit only before Worker stop");
+    assert.equal(workerRaceAfter.task.state,"queued");
+    await assert.rejects(registry.claimTaskForWorker({taskId:workerRaceTask.task.taskId,workerId:"worker-target-worker-race",leaseMs:5000}),/Worker|worker/);
+  }else{
+    assert.equal(workerRaceAfter.task.state,"running","Worker stop wins without partially committing Handoff");
+    assert.equal(workerRaceEvents.some(event=>event.eventType==="agent_handoff"),false);
+    await registry.transitionTask({taskId:workerRaceTask.task.taskId,expectedVersion:workerRaceRunning.version,lease:workerRaceClaim.lease,status:"failed",patch:{nextAction:"Worker stop race test cleanup"}});
+    await kernel.completeWorkerTask({workerId:loserId,taskId:workerRaceTask.task.taskId,lease:workerRaceClaim.lease,finalState:"failed"});
+    await registry.releaseLease({lease:workerRaceClaim.lease});
+  }
+  let workerRaceStopped=await kernel.getWorker("worker-target-worker-race");
+  workerRaceStopped=await kernel.transitionWorker({workerId:"worker-target-worker-race",expectedVersion:Number(workerRaceStopped.version),status:"recovering"});
+  await kernel.transitionWorker({workerId:"worker-target-worker-race",expectedVersion:Number(workerRaceStopped.version),status:"idle"});
 
   const resourceAttempts=await Promise.all([
    registry.acquireLease({resourceKey:"resource:race",ownerId:"worker-a",leaseMs:5000}),
