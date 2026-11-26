@@ -283,27 +283,30 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         }
         await assertLease(c,lease);
         if(lease.resourceKey!=="task:"+taskId)throw new Error("Handoff Task Lease mismatch");
-        const worker=await c.query("SELECT worker_id,agent_id,department_id,current_task_id,lease_resource_key,fencing_token,version FROM jarvis.worker_registry WHERE worker_id=$1 FOR UPDATE",[lease.ownerId]);
-        // Lock and revalidate the destination inside the same transaction as the Task/event handoff.
-        const target=await c.query("SELECT worker_id,agent_id,department_id,status,current_task_id,heartbeat_at,version FROM jarvis.worker_registry WHERE worker_id=$1 FOR UPDATE",[targetWorkerId]);
-        if(!target.rows[0]||target.rows[0].agent_id!==toAgentId||target.rows[0].department_id!==toDepartmentId||target.rows[0].status!=="idle"||target.rows[0].current_task_id!==null)throw new Error("Handoff target Worker is no longer idle or does not match the requested Agent/Department");
-        const targetHeartbeat=Date.parse(target.rows[0].heartbeat_at||"");
+        // Acquire both Worker row locks in a globally stable order. Opposite-direction
+        // Handoffs must not deadlock by locking source then destination in reverse order.
+        const lockedWorkers=await c.query("SELECT worker_id,agent_id,department_id,status,current_task_id,lease_resource_key,fencing_token,heartbeat_at,version FROM jarvis.worker_registry WHERE worker_id=ANY($1::text[]) ORDER BY worker_id FOR UPDATE",[[lease.ownerId,targetWorkerId]]);
+        const worker=lockedWorkers.rows.find(row=>row.worker_id===lease.ownerId)||null;
+        const target=lockedWorkers.rows.find(row=>row.worker_id===targetWorkerId)||null;
+        // Revalidate the destination inside the same transaction as the Task/event handoff.
+        if(!target||target.agent_id!==toAgentId||target.department_id!==toDepartmentId||target.status!=="idle"||target.current_task_id!==null)throw new Error("Handoff target Worker is no longer idle or does not match the requested Agent/Department");
+        const targetHeartbeat=Date.parse(target.heartbeat_at||"");
         if(!Number.isFinite(targetHeartbeat)||Date.parse(clock())-targetHeartbeat>120000)throw new Error("Handoff target Worker heartbeat is stale");
         const targetGrant=await c.query("SELECT grant_id FROM jarvis.worker_scope_grants WHERE worker_id=$1 AND project_id=(SELECT payload->>'projectId' FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$2 ORDER BY aggregate_version DESC LIMIT 1) AND conversation_id=(SELECT payload->>'ownerConversation' FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$2 ORDER BY aggregate_version DESC LIMIT 1) AND revoked_at IS NULL FOR SHARE",[targetWorkerId,taskId]);
         if(!targetGrant.rows[0])throw new Error("Handoff target Worker has no active Project/Conversation Grant");
         await assertAgentsActive(c,[fromAgentId,toAgentId]);
-        if(!worker.rows[0]||worker.rows[0].current_task_id!==taskId||worker.rows[0].lease_resource_key!==lease.resourceKey||Number(worker.rows[0].fencing_token)!==lease.fencingToken)throw new Error("Handoff Worker binding is stale");
+        if(!worker||worker.current_task_id!==taskId||worker.lease_resource_key!==lease.resourceKey||Number(worker.fencing_token)!==lease.fencingToken)throw new Error("Handoff Worker binding is stale");
         await lock(c,"task:"+taskId);
         const current=await latest(c,taskId);
         if(!current||current.version!==expectedVersion)throw new Error("Stale Task version for handoff");
         const task=current.task;
         const handoffHistory=await c.query("SELECT payload FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1 AND event_type='agent_handoff' ORDER BY aggregate_version ASC",[taskId]);
         validateHandoffRoute(handoffHistory.rows,fromDepartmentId,toDepartmentId,8);
-        if((task.state||task.status)!=="running"||task.leaseOwner!==lease.ownerId||Number(task.fencingToken)!==lease.fencingToken||worker.rows[0].agent_id!==fromAgentId||task.ownerAgent!==fromAgentId||worker.rows[0].department_id!==fromDepartmentId||task.departmentId!==fromDepartmentId)throw new Error("Handoff source ownership or fencing validation failed");
+        if((task.state||task.status)!=="running"||task.leaseOwner!==lease.ownerId||Number(task.fencingToken)!==lease.fencingToken||worker.agent_id!==fromAgentId||task.ownerAgent!==fromAgentId||worker.department_id!==fromDepartmentId||task.departmentId!==fromDepartmentId)throw new Error("Handoff source ownership or fencing validation failed");
         const now=clock();
         const next={...task,ownerAgent:toAgentId,departmentId:toDepartmentId,resultResourceId,status:"queued",state:"queued",leaseOwner:null,leaseTokenHash:null,leaseExpiresAt:null,fencingToken:0,updatedAt:now,nextAction:"Queued for authorized Agent handoff"};
         await c.query("UPDATE jarvis.coordination_leases SET expires_at=$1::timestamptz,updated_at=$1::timestamptz WHERE resource_key=$2 AND owner_id=$3 AND fencing_token=$4",[now,lease.resourceKey,lease.ownerId,lease.fencingToken]);
-        const released=await c.query("UPDATE jarvis.worker_registry SET status='idle',current_task_id=NULL,lease_resource_key=NULL,fencing_token=NULL,version=version+1,updated_at=$1 WHERE worker_id=$2 AND version=$3 RETURNING worker_id",[now,lease.ownerId,Number(worker.rows[0].version)]);
+        const released=await c.query("UPDATE jarvis.worker_registry SET status='idle',current_task_id=NULL,lease_resource_key=NULL,fencing_token=NULL,version=version+1,updated_at=$1 WHERE worker_id=$2 AND version=$3 RETURNING worker_id",[now,lease.ownerId,Number(worker.version)]);
         if(released.rowCount!==1)throw new Error("Handoff Worker release lost concurrency race");
         await append(c,taskId,"agent_handoff",{...next,fromAgentId,toAgentId,toWorkerId:targetWorkerId,fromDepartmentId,toDepartmentId,fromWorkerId:lease.ownerId,handoffRequest:handoffRequest?clone(handoffRequest):null,handoffAt:now},keyHash);
         return {created:true,task:clone(next),version:current.version+1,event:{eventType:"agent_handoff",fromAgentId,toAgentId,fromDepartmentId,toDepartmentId,workerId:lease.ownerId,createdAt:now}};
