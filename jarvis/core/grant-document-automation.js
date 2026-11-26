@@ -160,7 +160,7 @@ async function readExcel(buffer, options = {}) {
           address:cell.address,
           value:cell.value instanceof Date ? cell.value.toISOString() : cell.value,
           formula,
-          result:cell.result instanceof Date ? cell.result.toISOString() : cell.result ?? null,
+          result:cell.value && typeof cell.value === "object" && "result" in cell.value ? cell.value.result : null,
           numFmt:cell.numFmt || null,
           type:cell.type,
           isMerged:cell.isMerged === true
@@ -174,7 +174,7 @@ async function readExcel(buffer, options = {}) {
       hidden:sheet.state !== "visible",
       rowCount:sheet.rowCount,
       columnCount:sheet.columnCount,
-      merges:[...sheet.model.merges || []],
+      merges:[...(sheet.model.merges || [])],
       pageSetup:sheet.pageSetup,
       rows
     });
