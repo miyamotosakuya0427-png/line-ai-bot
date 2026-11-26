@@ -106,7 +106,7 @@ Implemented in branch:
 - Isolated Owner OIDC verification module and Mock IdP tests.
 
 Still not completed / not proven:
-- Exact final-Head CI until the latest runs complete.
+- Exact final-Head CI is complete; results are recorded in the verification addendum below.
 - Multi-hour SSE soak and DB/NOTIFY chaos.
 - Full production OIDC code exchange, secure session lifecycle, and approved IdP configuration.
 - Owner audit schema migration and approval.
@@ -115,3 +115,21 @@ Still not completed / not proven:
 - Production Neon Migration 0010, Render deployment, or production cutover.
 
 PR #78 must remain Draft/Open/unmerged. PR #77 and all other Worker branches remain untouched.
+
+
+## 7. Final exact-Head verification addendum — 2026-11-26
+
+Exact PR #78 Head: `ba8d8ffa06deed60514a6970a22567e3fd6cc024`
+
+- JARVIS tests — run `45813991652`: success; **322 passed / 0 failed / 4 skipped**.
+- ONE JARVIS tests — run `45813992081`: success; **322 passed / 0 failed / 4 skipped**.
+- PostgreSQL 16 Task Registry — run `45813991683`: success; **326 passed / 0 failed / 0 skipped**.
+- PostgreSQL 16 integration log confirms post-commit recovery with replacement Worker and safe waiting without replacement; bounded non-overlapping recovery scheduler; `outcome_unknown` quarantine/no automatic retry and explicit reconciliation; append-only event/revocation/outbox protections.
+- JARVIS and ONE JARVIS logs confirm Mock IdP signature/claims/JWKS/rotation and PKCE/State/Nonce tests, 25 reconnect/cancel cycles, 3-global/1-per-Agent SSE limits, and independent 15-second authorization revalidation (measured approximately 15.0 seconds).
+- Dashboard responsive rendering, authenticated API use, and credential non-persistence tests passed. These are automated tests, not physical device checks.
+- The CI log intentionally contains PostgreSQL ERROR lines for rejected UPDATE/DELETE attempts against append-only tables; these are expected negative-test assertions, not workflow failures.
+- Combined status endpoint returned no individual status contexts; the three workflow runs above are the verified CI evidence.
+
+Not performed: multi-hour/high-volume SSE soak; CPU/memory/DB-pool/socket/listener pressure metrics; PostgreSQL disconnect/reconnect or deliberate NOTIFY-loss chaos; actual backup artifact/restore/post-restore row reconciliation; physical iPhone/PC tests; live IdP integration; production OIDC route/session exchange; production audit migration; production Neon migration 0010.
+
+The three successful CI workflows do not establish production readiness. PR #78 remains Draft/Open/unmerged and PR #77 remains unchanged.
