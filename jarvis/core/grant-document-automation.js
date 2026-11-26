@@ -236,7 +236,7 @@ async function readWord(buffer, options = {}) {
   }
   const text=paragraphs.map(p=>p.text).join("\n");
   if (text.length>limits.maxTextChars) throw new Error("EXTRACTED_TEXT_TOO_LARGE");
-  return {fileType:"docx", parts, paragraphs, tables, text, extractionVersion:"docx-xml/jszip/3.10.1"};
+  return {fileType:"docx", parts, paragraphs, tables, text, extractionVersion:"docx-xml/jszip/3.10.2"};
 }
 async function readDocument({fileId, fileName, buffer, source, storageReference, ocrAdapter, limits}) {
   const fileType=detectFileType(fileName);
