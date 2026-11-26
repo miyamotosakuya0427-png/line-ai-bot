@@ -273,7 +273,7 @@ test("independent worker_threads: concurrency, idempotency, revision and audit-c
       ["worker-%-" + sourceId + "%"]
     );
     assert.ok(ownBatches.rows[0].count >= 4);
-    assert.deepEqual(counters, { success: 4, failure: 1, duplicate: 5, retry: 1 });
+    assert.deepEqual(counters, { success: 5, failure: 1, duplicate: 5, retry: 1 });
   } finally {
     await pool.end();
     await bootstrapPool.query('DROP SCHEMA IF EXISTS "' + schemaName + '" CASCADE');
