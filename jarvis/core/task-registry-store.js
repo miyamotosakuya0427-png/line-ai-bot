@@ -328,6 +328,8 @@ function createTaskRegistry({pool,clock=()=>new Date().toISOString(),tokenFactor
         const originVersion=Number(original.aggregate_version);
         const attempts=handoffs.rows.filter(row=>row.event_type==="handoff_reselected"||row.event_type==="handoff_recovery_waiting"||row.event_type==="handoff_recovery_exhausted").length;
         const attempt=attempts+1;
+        if(attempts>maxAttempts)return {created:false,replayed:false,reason:"MAX_HANDOFF_RECOVERY_ATTEMPTS_REACHED",task:clone(currentSnapshot.task),version:currentSnapshot.version,attempt:attempts};
+        if(!candidateWorkerId&&(currentSnapshot.task.state||currentSnapshot.task.status)==="waiting"&&latestHandoff.event_type==="handoff_recovery_waiting")return {created:false,replayed:false,reason:"WAITING_FOR_REPLACEMENT_WORKER",task:clone(currentSnapshot.task),version:currentSnapshot.version,attempt:attempts};
         const recoveryKey=hash(["handoff-post-commit-recovery",taskId,String(originVersion),String(attempt),candidateWorkerId||"waiting"].join(":"));
         const prior=await c.query("SELECT aggregate_version,payload FROM jarvis.events WHERE aggregate_type='task' AND aggregate_id=$1 AND idempotency_key=$2 LIMIT 1",[taskId,recoveryKey]);
         if(prior.rows[0])return {created:false,replayed:true,task:clone(prior.rows[0].payload),version:Number(prior.rows[0].aggregate_version),attempt};
