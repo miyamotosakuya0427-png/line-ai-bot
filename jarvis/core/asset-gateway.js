@@ -16,8 +16,65 @@ function detectMimeType(buffer) {
   if (buffer.toString("ascii", 0, 4) === "RIFF" && buffer.toString("ascii", 8, 12) === "WEBP") return "image/webp";
   if (buffer.toString("ascii", 0, 4) === "RIFF" && buffer.toString("ascii", 8, 12) === "WAVE") return "audio/wav";
   if (buffer.toString("ascii", 0, 3) === "ID3" || (buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0)) return "audio/mpeg";
-  if (buffer.toString("ascii", 4, 8) === "ftyp") return "video/mp4";
+  if (buffer.toString("ascii", 4, 8) === "ftyp") return detectMp4MimeType(buffer);
   if (buffer.subarray(0, 4).equals(Buffer.from([0x1a,0x45,0xdf,0xa3]))) return "video/webm";
+  return null;
+}
+
+function readIsoBmffBoxes(buffer, start, end) {
+  const boxes = [];
+  let offset = start;
+  while (offset < end) {
+    if (end - offset < 8) return null;
+    const size32 = buffer.readUInt32BE(offset);
+    const type = buffer.toString("ascii", offset + 4, offset + 8);
+    let headerSize = 8;
+    let size;
+    if (size32 === 1) {
+      if (end - offset < 16) return null;
+      const largeSize = buffer.readBigUInt64BE(offset + 8);
+      if (largeSize > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+      size = Number(largeSize);
+      headerSize = 16;
+    } else if (size32 === 0) {
+      size = end - offset;
+    } else {
+      size = size32;
+    }
+    if (size < headerSize || offset + size > end) return null;
+    boxes.push({ type, payloadStart: offset + headerSize, end: offset + size });
+    offset += size;
+    if (size32 === 0) break;
+  }
+  return offset === end ? boxes : null;
+}
+
+function detectMp4MimeType(buffer) {
+  const topLevel = readIsoBmffBoxes(buffer, 0, buffer.length);
+  if (!topLevel || !topLevel.some((box) => box.type === "ftyp")) return null;
+  const moov = topLevel.find((box) => box.type === "moov");
+  if (!moov) return null;
+  const movieBoxes = readIsoBmffBoxes(buffer, moov.payloadStart, moov.end);
+  if (!movieBoxes) return null;
+
+  let hasAudioTrack = false;
+  let hasVideoTrack = false;
+  for (const track of movieBoxes.filter((box) => box.type === "trak")) {
+    const trackBoxes = readIsoBmffBoxes(buffer, track.payloadStart, track.end);
+    if (!trackBoxes) return null;
+    const media = trackBoxes.find((box) => box.type === "mdia");
+    if (!media) continue;
+    const mediaBoxes = readIsoBmffBoxes(buffer, media.payloadStart, media.end);
+    if (!mediaBoxes) return null;
+    const handler = mediaBoxes.find((box) => box.type === "hdlr");
+    if (!handler || handler.end - handler.payloadStart < 12) continue;
+    const handlerType = buffer.toString("ascii", handler.payloadStart + 8, handler.payloadStart + 12);
+    if (handlerType === "soun") hasAudioTrack = true;
+    if (handlerType === "vide") hasVideoTrack = true;
+  }
+
+  if (hasVideoTrack) return "video/mp4";
+  if (hasAudioTrack) return "audio/mp4";
   return null;
 }
 

@@ -8,6 +8,23 @@ const { createAssetGateway, detectMimeType, validateKey } = require("./asset-gat
 function wavFixture() {
   return Buffer.concat([Buffer.from("RIFF"), Buffer.from([36,0,0,0]), Buffer.from("WAVE"), Buffer.alloc(28)]);
 }
+function isoBmffBox(type, payload = Buffer.alloc(0)) {
+  const header = Buffer.alloc(8);
+  header.writeUInt32BE(payload.length + 8, 0);
+  header.write(type, 4, 4, "ascii");
+  return Buffer.concat([header, payload]);
+}
+function mp4Fixture(handlerTypes) {
+  const ftyp = isoBmffBox("ftyp", Buffer.concat([Buffer.from("isom"), Buffer.alloc(4), Buffer.from("isom")]));
+  const tracks = handlerTypes.map((handlerType) => {
+    const hdlr = isoBmffBox("hdlr", Buffer.concat([
+      Buffer.alloc(4), Buffer.alloc(4), Buffer.from(handlerType), Buffer.alloc(12)
+    ]));
+    return isoBmffBox("trak", isoBmffBox("mdia", hdlr));
+  });
+  return Buffer.concat([ftyp, isoBmffBox("moov", Buffer.concat(tracks)), isoBmffBox("mdat", Buffer.alloc(4))]);
+}
+
 function memoryStore() {
   const objects = new Map();
   return {
@@ -161,3 +178,19 @@ test("download rejects an oversized declared ContentLength before reading the bo
   assert.equal(iterated, false);
 });
 
+
+test("detects audio-only, video-only, and mixed MP4 tracks from handler metadata", () => {
+  assert.equal(detectMimeType(mp4Fixture(["soun"])), "audio/mp4");
+  assert.equal(detectMimeType(mp4Fixture(["vide"])), "video/mp4");
+  assert.equal(detectMimeType(mp4Fixture(["soun", "vide"])), "video/mp4");
+});
+
+test("rejects MP4 containers without readable audio or video track metadata", () => {
+  const ftypOnly = isoBmffBox("ftyp", Buffer.concat([Buffer.from("isom"), Buffer.alloc(4), Buffer.from("isom")]));
+  assert.equal(detectMimeType(ftypOnly), null);
+  const noMediaTracks = Buffer.concat([
+    isoBmffBox("ftyp", Buffer.concat([Buffer.from("isom"), Buffer.alloc(4), Buffer.from("isom")])),
+    isoBmffBox("moov", isoBmffBox("trak", isoBmffBox("mdia", isoBmffBox("hdlr", Buffer.alloc(4)))))
+  ]);
+  assert.equal(detectMimeType(noMediaTracks), null);
+});
