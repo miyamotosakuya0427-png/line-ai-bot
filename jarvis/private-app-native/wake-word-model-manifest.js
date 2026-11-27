@@ -34,7 +34,9 @@ function verifyWakeWordModelBundle({ manifest, modelsRoot }) {
   for (const field of REQUIRED_LICENSE_FIELDS) {
     if (!(field in manifest)) throw new Error("MODEL_LICENSE_METADATA_INCOMPLETE");
   }
-  if (manifest.commercialUse !== true || manifest.redistribution !== true ||
+  if (typeof manifest.modelLicense !== "string" || !manifest.modelLicense.trim() ||
+      typeof manifest.runtimeLicense !== "string" || !manifest.runtimeLicense.trim() ||
+      manifest.commercialUse !== true || manifest.redistribution !== true ||
       typeof manifest.licenseEvidence !== "string" || !manifest.licenseEvidence.trim()) {
     throw new Error("MODEL_LICENSE_NOT_APPROVED");
   }
@@ -42,8 +44,10 @@ function verifyWakeWordModelBundle({ manifest, modelsRoot }) {
     throw new TypeError("MODELS_ROOT_REQUIRED");
   }
 
-  const root = path.resolve(modelsRoot);
-  const file = path.resolve(root, manifest.modelFile);
+  const root = fs.realpathSync(modelsRoot);
+  const candidate = path.resolve(root, manifest.modelFile);
+  if (!candidate.startsWith(root + path.sep)) throw new Error("MODEL_PATH_OUTSIDE_ROOT");
+  const file = fs.realpathSync(candidate);
   if (!file.startsWith(root + path.sep)) throw new Error("MODEL_PATH_OUTSIDE_ROOT");
   const stat = fs.statSync(file);
   if (!stat.isFile()) throw new Error("MODEL_FILE_NOT_REGULAR");
