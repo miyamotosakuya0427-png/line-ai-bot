@@ -38,19 +38,43 @@ function createTaskEventOutbox({pool,maxBatch=500}={}) {
   async function listen(onWake) {
     if(typeof onWake!=="function")throw new Error("Notification callback is required");
     const client=await pool.connect();
-    let closed=false;
+    let closed=false,released=false;
+    const release=(destroy=false)=>{
+      if(released)return;
+      released=true;
+      client.release(destroy?new Error("PostgreSQL notification listener connection lost"):undefined);
+    };
     const handler=message=>{
       if(closed||message.channel!=="jarvis_task_events")return;
       const cursor=Number(message.payload);
       if(Number.isSafeInteger(cursor)&&cursor>0)Promise.resolve(onWake(cursor)).catch(()=>{});
     };
-    client.on("notification",handler);
-    await client.query("LISTEN jarvis_task_events");
-    return async function close(){
+    // A checked-out pg Client does not emit its socket error through Pool's
+    // idle-client error handler. Handle it here or a deliberate backend
+    // termination becomes an uncaught EventEmitter error and kills the process.
+    const onClientError=()=>{
       if(closed)return;
       closed=true;
+      release(true);
+      Promise.resolve(onWake(0)).catch(()=>{});
+    };
+    client.on("notification",handler);
+    client.on("error",onClientError);
+    try {
+      await client.query("LISTEN jarvis_task_events");
+    } catch(error) {
+      closed=true;
       client.removeListener("notification",handler);
-      try{await client.query("UNLISTEN jarvis_task_events");}finally{client.release();}
+      client.removeListener("error",onClientError);
+      release(true);
+      throw error;
+    }
+    return async function close(){
+      if(closed){client.removeListener("notification",handler);client.removeListener("error",onClientError);return;}
+      closed=true;
+      client.removeListener("notification",handler);
+      client.removeListener("error",onClientError);
+      try{await client.query("UNLISTEN jarvis_task_events");}finally{release();}
     };
   }
   return {replay,listen};
