@@ -67,3 +67,18 @@ test("benchmark rejects invalid windows and malformed labels",()=>{
   assert.throws(()=>summarizeWakeWordTrials([],0),/OBSERVATION_HOURS/);
   assert.throws(()=>summarizeWakeWordTrials([{detected:true}],1),/INVALID_TRIAL/);
 });
+
+test("duplicate wake-word events inside the cooldown are suppressed",async()=>{
+  const n=nativeStub(), e=createWakeWordEngine({nativeModule:n,modelManifest:manifest,cooldownMs:1500}), found=[];
+  await e.start({explicitConsent:true,permissionGranted:true,onDetected:x=>found.push(x)});
+  n.events[0].callback({keyword:"ジャービス",detectedAtMonotonicMs:1000});
+  n.events[0].callback({keyword:"ジャービス",detectedAtMonotonicMs:1200});
+  n.events[0].callback({keyword:"ジャービス",detectedAtMonotonicMs:2600});
+  assert.equal(found.length,2);
+  assert.equal(found[0].detectedAtMonotonicMs,1000);
+  assert.equal(found[1].detectedAtMonotonicMs,2600);
+});
+
+test("wake-word cooldown rejects invalid values",()=>{
+  assert.throws(()=>createWakeWordEngine({cooldownMs:-1}),/COOLDOWN_INVALID/);
+});
