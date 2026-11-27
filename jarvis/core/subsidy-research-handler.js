@@ -66,8 +66,8 @@ async function fetchOfficialSourceSnapshots({sources=SUBSIDY_SOURCES,fetchImpl=f
   }
  }));
 }
-function createSubsidyResearchHandler({apiKey,model,fetchImpl=fetch,researchFetchImpl=fetch,store=null}={}) {
- const summarize=createOpenAIHandler({apiKey,model,fetchImpl,instructions:"あなたはONE OFFICEの補助金・助成金調査担当です。提供された公式サイト取得結果を根拠として、制度名・実施主体・対象地域・対象事業者・対象経費・補助率・上限額・開始日・締切・必要書類・窓口・公式URL・確認日時・変更点・株式会社Oneとの適合度・不足情報を整理してください。個別公募要領や詳細ページを取得できていない場合、募集状況・締切・金額・適格性を推測せず「個別公募要領未確認」と明記してください。404や取得失敗を制度終了と解釈しないでください。検索結果や古い記事を最新の公式要件と扱わないでください。申請提出・誓約・外部送信・契約・納税は行いません。"});
+function createSubsidyResearchHandler({apiKey,model,fetchImpl=fetch,researchFetchImpl=fetch,store=null,instructionsSuffix=""}={}) {
+ const summarize=createOpenAIHandler({apiKey,model,fetchImpl,instructions:"あなたはONE OFFICEの補助金・助成金調査担当です。提供された公式サイト取得結果を根拠として、制度名・実施主体・対象地域・対象事業者・対象経費・補助率・上限額・開始日・締切・必要書類・窓口・公式URL・確認日時・変更点・株式会社Oneとの適合度・不足情報を整理してください。個別公募要領や詳細ページを取得できていない場合、募集状況・締切・金額・適格性を推測せず「個別公募要領未確認」と明記してください。404や取得失敗を制度終了と解釈しないでください。検索結果や古い記事を最新の公式要件と扱わないでください。申請提出・誓約・外部送信・契約・納税は行いません。"+(typeof instructionsSuffix==="string"?instructionsSuffix:"")});
  return async payload=>{
   const request=typeof payload?.request==="string"?payload.request:"";
   if(!/補助金|助成金|支援制度|公募|雇用助成/i.test(request))return summarize(payload);

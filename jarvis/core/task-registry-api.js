@@ -3,7 +3,7 @@
 const {ALL_TASK_STATES}=require("./task-state-machine");
 const TASK_STATES=ALL_TASK_STATES;
 const ACTIONS=Object.freeze({
-  list:"tasks:read",get:"tasks:read",create:"tasks:write",claim:"tasks:claim",
+  list:"tasks:read",get:"tasks:read",create:"tasks:write",claim:"tasks:claim",dispatch:"tasks:dispatch",
   heartbeat:"tasks:lease",release:"tasks:lease",transition:"tasks:transition",resourceLease:"resources:lease"
 });
 function createInMemoryTaskRegistryRateLimiter({limit=120,windowMs=60000,clock=()=>Date.now()}={}){
@@ -23,9 +23,23 @@ function createInMemoryTaskRegistryRateLimiter({limit=120,windowMs=60000,clock=(
   }};
 }
 
-function createTaskRegistryApi({registry=null,authorize=null,json,readJson,rateLimiter=null}={}){
+function redactTask(task){
+  if(!task||typeof task!=="object"||Array.isArray(task))return task;
+  const safe={...task};
+  for(const key of Object.keys(safe))if(["leasetokenhash","tokenhash","secret","accesstoken","apitoken","password"].includes(key.toLowerCase()))delete safe[key];
+  return safe;
+}
+function redactTaskResult(result){
+  if(!result||typeof result!=="object"||Array.isArray(result))return result;
+  const safe={...result};
+  if(safe.task)safe.task=redactTask(safe.task);
+  if(Array.isArray(safe.tasks))safe.tasks=safe.tasks.map(row=>row?.task?{...row,task:redactTask(row.task)}:redactTask(row));
+  return safe;
+}
+function createTaskRegistryApi({registry=null,authorize=null,json,readJson,rateLimiter=null,dispatcher=null}={}){
   if(typeof json!=="function"||typeof readJson!=="function")throw new Error("JSON response and request readers are required");
   if(registry&&typeof authorize==="function"&&(!rateLimiter||typeof rateLimiter.consume!=="function"))throw new Error("A shared Task Registry rate limiter must be explicitly configured");
+  if(dispatcher!==null&&typeof dispatcher.dispatchTask!=="function")throw new Error("A compatible Task Dispatcher is required");
   if(!rateLimiter)rateLimiter={async consume(){throw new Error("Rate limiter is not configured");}};
   async function principalFor(req,action,taskId){
     if(!registry||typeof authorize!=="function")return {error:"unavailable"};
@@ -97,7 +111,7 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson,rateL
         if(!auth.principal.projectIds.includes(projectId))return json(res,403,{ok:false,error:"Project is outside the authenticated agent scope"});
         if((status!==null&&!TASK_STATES.has(status))||!Number.isInteger(limit)||limit<1||limit>200||!Number.isInteger(offset)||offset<0||offset>1000000)return json(res,400,{ok:false,error:"Invalid task list parameters"});
         const tasks=await registry.listTasks({status,limit,offset,projectId,ownerAgent:auth.principal.agentId,ownerConversation:(auth.principal.conversationId||"agent:"+auth.principal.agentId)});
-        json(res,200,{ok:true,tasks});return true;
+        json(res,200,{ok:true,tasks:redactTaskResult({tasks}).tasks});return true;
       }
       if(req.method==="POST"&&path==="/v1/tasks"){
         const auth=await principalFor(req,"create");
@@ -112,9 +126,9 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson,rateL
           dependencyTaskIds:d.dependencyTaskIds||[],parentTaskId:d.parentTaskId||null,ownerConversation:auth.principal.conversationId||"agent:"+agentId,ownerAgent:agentId,
           ...(d.status==="ready"&&auth.principal.scopes.includes("tasks:dispatch")?{status:"ready"}:{status:"proposed"})
         });
-        json(res,result.created?201:200,{ok:true,...result});return true;
+        json(res,result.created?201:200,{ok:true,...redactTaskResult(result)});return true;
       }
-      const match=/^\/v1\/tasks\/([A-Za-z0-9._:-]{1,80})(?:\/(claim|heartbeat|release|transition))?$/.exec(path);
+      const match=/^\/v1\/tasks\/([A-Za-z0-9._:-]{1,80})(?:\/(claim|dispatch|heartbeat|release|transition))?$/.exec(path);
       if(!match)return json(res,404,{ok:false,error:"Not Found"});
       const taskId=match[1],operation=match[2]||"get";
       if(operation==="get"&&req.method==="GET"){
@@ -122,7 +136,21 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson,rateL
         if(authResponse(res,auth))return true;
         const result=await registry.getTask(taskId,{ownerAgent:auth.principal.agentId,ownerConversation:(auth.principal.conversationId||"agent:"+auth.principal.agentId)});
         if(!result||!auth.principal.projectIds.includes(result.task.projectId))return json(res,404,{ok:false,error:"Task not found"});
-        json(res,200,{ok:true,...result});return true;
+        json(res,200,{ok:true,...redactTaskResult(result)});return true;
+      }
+      if(operation==="dispatch"&&req.method==="POST"){
+        const auth=await principalFor(req,"dispatch",taskId);
+        if(authResponse(res,auth))return true;
+        if(!dispatcher)return json(res,503,{ok:false,error:"Common Task Dispatcher is not configured"});
+        if(!req.headers?.["content-type"]?.toLowerCase().startsWith("application/json"))return json(res,415,{ok:false,error:"Content-Type must be application/json"});
+        const d=await readJson(req);
+        const projectId=d.projectId||auth.principal.projectIds[0];
+        const conversationId=auth.principal.conversationId||"agent:"+auth.principal.agentId;
+        if(!auth.principal.projectIds.includes(projectId))return json(res,403,{ok:false,error:"Project is outside the authenticated agent scope"});
+        const owned=await registry.getTask(taskId,{ownerAgent:auth.principal.agentId,ownerConversation:conversationId,projectId});
+        if(!owned)return json(res,404,{ok:false,error:"Task not found"});
+        const result=await dispatcher.dispatchTask({taskId,requesterAgentId:auth.principal.agentId,conversationId,projectId});
+        json(res,result.dispatched?200:409,{ok:true,...redactTaskResult(result)});return true;
       }
       if(operation==="claim"&&req.method==="POST"){
         const auth=await principalFor(req,"claim",taskId);
@@ -133,7 +161,7 @@ function createTaskRegistryApi({registry=null,authorize=null,json,readJson,rateL
         if(!owned||!auth.principal.projectIds.includes(owned.task.projectId))return json(res,404,{ok:false,error:"Task not found"});
         const result=await registry.claimTask({taskId,ownerId:auth.principal.agentId,leaseMs:d.leaseMs===undefined?60000:d.leaseMs});
         if(!result)return json(res,409,{ok:false,error:"Task is leased or not claimable"});
-        json(res,200,{ok:true,...result});return true;
+        json(res,200,{ok:true,...redactTaskResult(result)});return true;
       }
       if(["heartbeat","release","transition"].includes(operation)&&req.method==="POST"){
         const auth=await principalFor(req,operation,taskId);

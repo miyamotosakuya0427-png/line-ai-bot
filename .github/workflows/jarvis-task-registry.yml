@@ -1,5 +1,5 @@
 name: ONE JARVIS Task Registry PostgreSQL 16
-# Stage 5: canonical Task State Machine, Dispatcher, recovery, shared API limiter and no-blind-retry validation
+# Stage 5 + command center: Task State Machine, Dispatcher, recovery, shared API limiter, dashboard UI tests
 
 permissions:
   contents: read
@@ -15,13 +15,27 @@ on:
       - "jarvis/core/execution-recovery-scheduler.test.js"
       - "jarvis/coordination/EXECUTION_KERNEL_STAGE5.md"
       - "jarvis/core/task-registry-store*.test.js"
+      - "jarvis/command-center-sse.test.js"
+      - "jarvis/task-handoff-route.test.js"
+      - "jarvis/worker-scope-grants-api.test.js"
+      - "jarvis/command-center-dashboard.test.js"
       - "jarvis/core/task-registry-api.js"
       - "jarvis/core/task-registry-api.test.js"
       - "jarvis/core/task-registry-auth.js"
       - "jarvis/core/task-registry-auth.test.js"
+      - "jarvis/core/postgres-task-registry-revocation-store.js"
+      - "jarvis/core/postgres-task-registry-revocation-store.test.js"
+      - "jarvis/task-registry-revocation-api.test.js"
+      - "jarvis/migrations/0010_task_registry_agent_revocations.sql"
       - "jarvis/server.js"
       - "jarvis/dashboard.js"
       - "jarvis/dashboard.test.js"
+      - "jarvis/command-center-dashboard.js"
+      - "jarvis/command-center-dashboard.test.js"
+      - "jarvis/command-center-telemetry.test.js"
+      - "jarvis/coordination/COMMAND_CENTER_TELEMETRY_STAGE2.md"
+      - "jarvis/coordination/COMMAND_CENTER_STAGE3.md"
+      - "jarvis/coordination/COMMAND_CENTER_STAGE4.md"
       - "jarvis/migrations/0004_task_registry.sql"
       - "jarvis/migrations/0005_task_registry_scoped_dedupe.sql"
       - "jarvis/migrations/0006_scheduling_reservation_store.sql"
@@ -29,8 +43,19 @@ on:
       - "jarvis/core/postgres-scheduling-store.integration.test.js"
       - "jarvis/core/postgres-execution-kernel.js"
       - "jarvis/core/postgres-execution-kernel.integration.test.js"
+      - "jarvis/core/postgres-task-dispatch-runtime.js"
+      - "jarvis/core/postgres-task-dispatch-runtime.test.js"
+      - "jarvis/core/owner-oidc.js"
+      - "jarvis/core/owner-oidc.test.js"
+      - "jarvis/core/task-registry-store.js"
       - "jarvis/core/postgres-task-registry-rate-limiter.js"
       - "jarvis/migrations/0007_execution_kernel_fencing.sql"
+      - "jarvis/migrations/0008_worker_scope_grants.sql"
+      - "jarvis/migrations/0009_task_event_outbox.sql"
+      - "jarvis/core/task-event-outbox.js"
+      - "jarvis/core/postgres-execution-kernel.integration.test.js"
+      - "jarvis/coordination/COMMAND_CENTER_STAGE5.md"
+      - "jarvis/coordination/COMMAND_CENTER_STAGE10.md"
       - ".github/workflows/jarvis-task-registry.yml"
   push:
     branches:

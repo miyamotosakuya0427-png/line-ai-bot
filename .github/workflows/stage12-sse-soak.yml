@@ -1,0 +1,71 @@
+name: ONE JARVIS Stage 12 SSE 60 Minute Soak
+
+on:
+  pull_request:
+    branches:
+      - "integration/one-jarvis-stage5-dispatcher-state-machine"
+    paths:
+      - "jarvis/scripts/command-center-sse-soak.js"
+      - "jarvis/migrations/**"
+      - "jarvis/server.js"
+      - "jarvis/core/task-event-outbox.js"
+      - "jarvis/core/owner-session-security.js"
+      - "jarvis/core/owner-session-security.test.js"
+      - ".github/workflows/stage12-sse-soak.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stage12-sse-soak-${{ github.event.pull_request.head.sha }}
+  cancel-in-progress: false
+
+jobs:
+  sse-soak:
+    name: Isolated SSE 60 minute soak and notification-loss recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: jarvis
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Syntax-check soak harness
+        run: node --check scripts/command-center-sse-soak.js
+      - name: Install isolated test dependencies
+        run: npm install --ignore-scripts
+      - name: Apply migrations to isolated PostgreSQL 16
+        run: |
+          for migration in migrations/*.sql; do
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration" >/dev/null
+          done
+      - name: Run actual HTTP SSE 60 minute soak
+        run: node scripts/command-center-sse-soak.js
+      - name: Upload redacted soak metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: one-jarvis-stage12-sse-soak
+          path: jarvis/stage12-sse-metrics.json
+          if-no-files-found: ignore
+          retention-days: 7

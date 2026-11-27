@@ -1,0 +1,67 @@
+name: ONE JARVIS Stage 12 Isolated Backup Restore
+
+on:
+  pull_request:
+    branches:
+      - "integration/one-jarvis-stage5-dispatcher-state-machine"
+    paths:
+      - "jarvis/scripts/postgres-backup-restore-rehearsal.sh"
+      - "jarvis/migrations/**"
+      - ".github/workflows/stage12-isolated-backup-restore.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stage12-backup-restore-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  backup-restore:
+    name: PostgreSQL 16 physical backup and isolated restore
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      STAGE12_ARTIFACT_DIR: stage12-artifacts
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Verify PostgreSQL tools
+        run: |
+          psql --version
+          pg_dump --version
+          pg_restore --version
+          psql -X -v ON_ERROR_STOP=1 -d postgres -Atc "SHOW server_version;"
+      - name: Run isolated backup, restore and reconciliation with matching PostgreSQL 16 tools
+        run: |
+          docker run --rm --network host -u "$(id -u):$(id -g)" \
+            -v "$GITHUB_WORKSPACE:/workspace" -w /workspace \
+            -e PGHOST=127.0.0.1 -e PGPORT=5432 -e PGUSER=postgres \
+            -e PGPASSWORD="$PGPASSWORD" \
+            -e STAGE12_ARTIFACT_DIR=stage12-artifacts \
+            postgres:16 bash jarvis/scripts/postgres-backup-restore-rehearsal.sh
+      - name: Upload backup and reconciliation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: one-jarvis-stage12-backup-restore
+          path: stage12-artifacts/
+          if-no-files-found: warn
+          retention-days: 7

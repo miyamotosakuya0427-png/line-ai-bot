@@ -5,13 +5,13 @@ const {createServer}=require("../server");
 const {createTaskRegistryApi,createInMemoryTaskRegistryRateLimiter}=require("./task-registry-api");
 const {canonicalTaskState}=require("./task-state-machine");
 
-function fixture({configured=true,authorize=true,rateLimiter=null}={}){
+function fixture({configured=true,authorize=true,rateLimiter=null,dispatcher=null}={}){
   const tasks=new Map();let sequence=0;
   const registry={
     async listTasks({status=null,limit=50,offset=0,ownerAgent=null,ownerConversation=null,projectId=null}={}){return [...tasks.values()].filter(x=>(status===null||x.task.status===status)&&(ownerAgent===null||x.task.ownerAgent===ownerAgent)&&(ownerConversation===null||x.task.ownerConversation===ownerConversation)&&(projectId===null||x.task.projectId===projectId)).slice(offset,offset+limit);},
     async createTask(input){const id="task-"+(++sequence);const task={taskId:id,...input,state:canonicalTaskState(input.status||"proposed")};const value={task,version:1};tasks.set(id,value);return{...value,created:true};},
     async getTask(id,{ownerAgent=null,ownerConversation=null}={}){const value=tasks.get(id);if(!value)return null;if(ownerAgent!==null&&value.task.ownerAgent!==ownerAgent)return null;if(ownerConversation!==null&&value.task.ownerConversation!==ownerConversation)return null;return value;},
-    async claimTask({taskId,ownerId,leaseMs}){const current=tasks.get(taskId);if(!current||current.task.status!=="ready")return null;const lease={resourceKey:"task:"+taskId,ownerId,token:"opaque-token",fencingToken:1,expiresAt:new Date(Date.now()+leaseMs).toISOString()};const next={...current.task,status:"claimed",state:"claimed",ownerAgent:ownerId};const value={task:next,version:current.version+1};tasks.set(taskId,value);return{...value,lease};},
+    async claimTask({taskId,ownerId,leaseMs}){const current=tasks.get(taskId);if(!current||current.task.status!=="ready")return null;const lease={resourceKey:"task:"+taskId,ownerId,token:"opaque-token",fencingToken:1,expiresAt:new Date(Date.now()+leaseMs).toISOString()};const next={...current.task,status:"claimed",state:"claimed",ownerAgent:ownerId,leaseTokenHash:"sensitive-lease-token-hash"};const value={task:next,version:current.version+1};tasks.set(taskId,value);return{...value,lease};},
     async heartbeatLease({lease,leaseMs}){return{...lease,expiresAt:new Date(Date.now()+leaseMs).toISOString()};},
     async releaseLease(){return true;},
     async transitionTask({taskId,expectedVersion,lease,status,patch}){const current=tasks.get(taskId);if(!current)return null;if(current.version!==expectedVersion)throw new Error("Stale task version");const value={task:{...current.task,...patch,status,state:canonicalTaskState(status)},version:current.version+1};tasks.set(taskId,value);return value;},
@@ -21,7 +21,8 @@ function fixture({configured=true,authorize=true,rateLimiter=null}={}){
   const server=createServer({
     taskRegistry:configured?registry:null,
     authorizeTaskRegistry:authorize?async(req)=>req.headers.authorization==="Bearer agent-a"?{agentId:"agent-a",conversationId:"opaque-conversation",scopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]}:req.headers.authorization==="Bearer agent-b"?{agentId:"agent-b",scopes,projectIds:["other-project"],resourcePrefixes:["path:other-project:"]}:req.headers.authorization==="Bearer agent-a-other"?{agentId:"agent-a",conversationId:"other-conversation",scopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]}:req.headers.authorization==="Bearer agent-a-unbound"?{agentId:"agent-a",scopes,projectIds:["one-jarvis"],resourcePrefixes:["path:one-jarvis:"]}:null:null,
-    taskRegistryRateLimiter:rateLimiter||createInMemoryTaskRegistryRateLimiter()
+    taskRegistryRateLimiter:rateLimiter||createInMemoryTaskRegistryRateLimiter(),
+    taskDispatcher:dispatcher
   });
   return{server,registry,tasks};
 }
@@ -72,6 +73,11 @@ test("Task Registry API creates, claims, heartbeats, transitions and releases un
   const claimed=await post(root,"/v1/tasks/"+id+"/claim",{leaseMs:10000});
   assert.equal(claimed.status,200);const claim=await claimed.json();
   assert.equal(claim.lease.ownerId,"agent-a");
+  assert.equal(claim.task.leaseTokenHash,undefined,"Task API never exposes a lease token hash");
+  const claimedRead=await fetch(root+"/v1/tasks/"+id,{headers:{Authorization:"Bearer agent-a"}});
+  assert.equal((await claimedRead.json()).task.leaseTokenHash,undefined,"GET Task response redacts lease token hashes");
+  const claimedList=await fetch(root+"/v1/tasks?projectId=one-jarvis",{headers:{Authorization:"Bearer agent-a"}});
+  assert.equal((await claimedList.json()).tasks[0].task.leaseTokenHash,undefined,"Task list response redacts lease token hashes");
   const wrongOwner=await post(root,"/v1/tasks/"+id+"/heartbeat",{lease:claim.lease},"agent-b");
   assert.equal(wrongOwner.status,403);
   const renewed=await post(root,"/v1/tasks/"+id+"/heartbeat",{lease:claim.lease,leaseMs:15000});
@@ -114,4 +120,26 @@ test("Task Registry API applies a per-agent rate limit and returns Retry-After",
   assert.equal(second.status,429);
   assert.equal(second.headers.get("retry-after"),"23");
   assert.equal((await second.json()).error,"Task Registry rate limit exceeded");
+});
+
+test("authenticated Task Registry dispatch route invokes only the injected common Dispatcher",async t=>{
+ const calls=[];
+ const dispatcher={async dispatchTask(input){calls.push(input);return{dispatched:true,outcome:"completed",task:{taskId:input.taskId,status:"completed"}};}};
+ const {server}=fixture({dispatcher});t.after(()=>new Promise(resolve=>server.close(resolve)));
+ const root=await listen(server);
+ const created=await post(root,"/v1/tasks",{title:"Dispatcher API task",dedupeKey:"dispatch-api-1",status:"ready",departmentId:"construction"});
+ assert.equal(created.status,201);
+ const task=(await created.json()).task;
+ const denied=await post(root,"/v1/tasks/"+task.taskId+"/dispatch",{});
+ assert.equal(denied.status,200);
+ assert.equal((await denied.json()).outcome,"completed");
+ assert.deepEqual(calls,[{taskId:task.taskId,requesterAgentId:"agent-a",conversationId:"opaque-conversation",projectId:"one-jarvis"}]);
+});
+test("Task Registry dispatch route fails closed when the common Dispatcher is absent",async t=>{
+ const {server}=fixture();t.after(()=>new Promise(resolve=>server.close(resolve)));
+ const root=await listen(server);
+ const created=await post(root,"/v1/tasks",{title:"No dispatcher task",dedupeKey:"dispatch-api-2",status:"ready",departmentId:"construction"});
+ const task=(await created.json()).task;
+ const response=await post(root,"/v1/tasks/"+task.taskId+"/dispatch",{});
+ assert.equal(response.status,503);
 });
