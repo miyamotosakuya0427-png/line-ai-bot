@@ -14,7 +14,7 @@ const REQUIRED_LICENSE_FIELDS = [
   "licenseEvidence"
 ];
 
-function verifyWakeWordModelBundle({ manifest, modelsRoot }) {
+async function verifyWakeWordModelBundle({ manifest, modelsRoot }) {
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
     throw new TypeError("MODEL_MANIFEST_REQUIRED");
   }
@@ -51,7 +51,13 @@ function verifyWakeWordModelBundle({ manifest, modelsRoot }) {
   if (!file.startsWith(root + path.sep)) throw new Error("MODEL_PATH_OUTSIDE_ROOT");
   const stat = fs.statSync(file);
   if (!stat.isFile()) throw new Error("MODEL_FILE_NOT_REGULAR");
-  const actualSha256 = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+  const actualSha256 = await new Promise((resolve, reject) => {
+    const hash = crypto.createHash("sha256");
+    const stream = fs.createReadStream(file);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("error", reject);
+    stream.on("end", () => resolve(hash.digest("hex")));
+  });
   if (actualSha256.toLowerCase() !== manifest.sha256.toLowerCase()) {
     throw new Error("MODEL_SHA256_MISMATCH");
   }
