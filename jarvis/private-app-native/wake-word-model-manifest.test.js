@@ -28,47 +28,47 @@ function fixture() {
   return { root, manifest, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
 }
 
-test("model manifest verifies file SHA-256 and explicit license metadata", () => {
+test("model manifest verifies file SHA-256 and explicit license metadata", async () => {
   const f = fixture();
   try {
-    const result = verifyWakeWordModelBundle({ manifest: f.manifest, modelsRoot: f.root });
+    const result = await verifyWakeWordModelBundle({ manifest: f.manifest, modelsRoot: f.root });
     assert.equal(result.status, "verified");
     assert.equal(result.keyword, "ジャービス");
     assert.equal(result.sha256, f.manifest.sha256);
   } finally { f.cleanup(); }
 });
 
-test("model manifest rejects modified model bytes", () => {
+test("model manifest rejects modified model bytes", async () => {
   const f = fixture();
   try {
     fs.writeFileSync(path.join(f.root, "model", "model.onnx"), "changed");
-    assert.throws(() => verifyWakeWordModelBundle({ manifest: f.manifest, modelsRoot: f.root }), /SHA256_MISMATCH/);
+    await assert.rejects(verifyWakeWordModelBundle({ manifest: f.manifest, modelsRoot: f.root }), /SHA256_MISMATCH/);
   } finally { f.cleanup(); }
 });
 
-test("model manifest rejects missing or unapproved redistribution rights", () => {
+test("model manifest rejects missing or unapproved redistribution rights", async () => {
   const f = fixture();
   try {
     f.manifest.redistribution = false;
-    assert.throws(() => verifyWakeWordModelBundle({ manifest: f.manifest, modelsRoot: f.root }), /LICENSE_NOT_APPROVED/);
+    await assert.rejects(verifyWakeWordModelBundle({ manifest: f.manifest, modelsRoot: f.root }), /LICENSE_NOT_APPROVED/);
   } finally { f.cleanup(); }
 });
 
-test("model manifest rejects path traversal", () => {
+test("model manifest rejects path traversal", async () => {
   const f = fixture();
   try {
     f.manifest.modelFile = "../outside.onnx";
-    assert.throws(() => verifyWakeWordModelBundle({ manifest: f.manifest, modelsRoot: f.root }), /PATH_OUTSIDE_ROOT/);
+    await assert.rejects(verifyWakeWordModelBundle({ manifest: f.manifest, modelsRoot: f.root }), /PATH_OUTSIDE_ROOT/);
   } finally { f.cleanup(); }
 });
 
-test("model manifest rejects a different keyword and malformed hash", () => {
+test("model manifest rejects a different keyword and malformed hash", async () => {
   const f = fixture();
   try {
     f.manifest.keyword = "別の単語";
-    assert.throws(() => verifyWakeWordModelBundle({ manifest: f.manifest, modelsRoot: f.root }), /KEYWORD_MISMATCH/);
+    await assert.rejects(verifyWakeWordModelBundle({ manifest: f.manifest, modelsRoot: f.root }), /KEYWORD_MISMATCH/);
     f.manifest.keyword = "ジャービス";
     f.manifest.sha256 = "not-a-hash";
-    assert.throws(() => verifyWakeWordModelBundle({ manifest: f.manifest, modelsRoot: f.root }), /SHA256_INVALID/);
+    await assert.rejects(verifyWakeWordModelBundle({ manifest: f.manifest, modelsRoot: f.root }), /SHA256_INVALID/);
   } finally { f.cleanup(); }
 });
