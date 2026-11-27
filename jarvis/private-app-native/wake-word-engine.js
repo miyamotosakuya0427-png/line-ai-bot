@@ -7,9 +7,13 @@
  */
 const DEFAULT_KEYWORD = "ジャービス";
 
-function createWakeWordEngine({ nativeModule, modelManifest } = {}) {
+function createWakeWordEngine({ nativeModule, modelManifest, cooldownMs = 1500 } = {}) {
   let state = "idle";
   let listener = null;
+  let lastDetectionAt = null;
+  if (!Number.isFinite(cooldownMs) || cooldownMs < 0) {
+    throw new RangeError("WAKE_WORD_COOLDOWN_INVALID");
+  }
 
   function getStatus() {
     const ready = Boolean(nativeModule && modelManifest &&
@@ -39,6 +43,11 @@ function createWakeWordEngine({ nativeModule, modelManifest } = {}) {
     }
     listener = nativeModule.addListener("onWakeWordDetected", (event) => {
       if (state !== "listening" || !event || event.keyword !== DEFAULT_KEYWORD) return;
+      const detectedAt = Number.isFinite(event.detectedAtMonotonicMs)
+        ? event.detectedAtMonotonicMs : Date.now();
+      if (lastDetectionAt !== null && detectedAt >= lastDetectionAt &&
+          detectedAt - lastDetectionAt < cooldownMs) return;
+      lastDetectionAt = detectedAt;
       if (typeof onDetected === "function") onDetected(Object.freeze({
         keyword: DEFAULT_KEYWORD,
         detectedAtMonotonicMs: Number.isFinite(event.detectedAtMonotonicMs)
@@ -62,6 +71,7 @@ function createWakeWordEngine({ nativeModule, modelManifest } = {}) {
   async function stop() {
     if (listener && typeof listener.remove === "function") listener.remove();
     listener = null;
+    lastDetectionAt = null;
     if (nativeModule && typeof nativeModule.stop === "function") await nativeModule.stop();
     state = "idle";
     return getStatus();
