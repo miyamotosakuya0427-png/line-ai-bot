@@ -29,6 +29,8 @@ function fakePool() {
     },
     async query(sql, params) {
       state.queries.push({ sql, params });
+      if (sql.includes("to_regclass")) return { rows: [{ events: "jarvis.events", migrations: "jarvis.schema_migrations", migration: true }] };
+      if (sql.startsWith("SELECT EXISTS") && sql.includes("schema_migrations")) return { rows: [{ migration: true }] };
       if (sql.startsWith("SELECT event_id")) return { rows: state.rows.filter(x => x.aggregate_type === params[0] && x.aggregate_id === params[1] && x.aggregate_version > params[2]).slice(0, params[3]).map(x => ({ ...x, idempotency_key: x.idempotency_key })) };
       return { rows: [{ ok: 1 }] };
     },
@@ -72,7 +74,7 @@ test("retries transient failures with bounded attempts only", async () => {
 });
 
 test("connection errors are sanitized at health boundary", async () => {
-  const pool = fakePool(); pool.connect = async () => { throw new Error("postgres://secret@host/db"); };
+  const pool = fakePool(); pool.query = async () => { throw new Error("postgres://secret@host/db"); };
   const store = createPostgresEventStore({ pool });
   const result = await store.health();
   assert.deepEqual(result, { ok: false, storage: "postgresql", error: "database_unavailable" });

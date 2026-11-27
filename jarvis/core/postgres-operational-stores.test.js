@@ -7,6 +7,8 @@ function fakePool(){
  const state={events:[],released:0,rowLocks:new Set(),queries:[]};
  async function query(sql,p=[]){
   state.queries.push(sql);
+  if(sql.startsWith("SELECT to_regclass"))return{rows:[{events:"jarvis.events",migrations:"jarvis.schema_migrations"}],rowCount:1};
+  if(sql.startsWith("SELECT EXISTS")&&sql.includes("schema_migrations"))return{rows:[{migration_0002:true,migration_0003:true,append_only_row:true,append_only_truncate:true}],rowCount:1};
   if(sql==="COMMIT"||sql==="ROLLBACK"){state.rowLocks.clear();return{rows:[]};}
   if(sql.includes("FOR UPDATE SKIP LOCKED")&&sql.includes("e.payload->>'status'='running'")){const now=Date.parse(p[0]);const latest=new Map();for(const e of state.events.filter(x=>x.aggregate_type==="job")){const old=latest.get(e.aggregate_id);if(!old||old.aggregate_version<e.aggregate_version)latest.set(e.aggregate_id,e);}const candidate=[...latest.values()].filter(e=>e.payload.status==="running"&&Date.parse(e.payload.lease?.expiresAt||0)<=now&&!state.rowLocks.has(e.aggregate_id)).sort((a,b)=>a.payload.createdAt.localeCompare(b.payload.createdAt))[0];if(!candidate)return{rows:[]};state.rowLocks.add(candidate.aggregate_id);return{rows:[{aggregate_id:candidate.aggregate_id,payload:candidate.payload}]};}
   if(sql.includes("FOR UPDATE SKIP LOCKED")&&sql.includes("e.payload->>'status'='queued'")){const now=Date.parse(p[0]);const latest=new Map();for(const e of state.events.filter(x=>x.aggregate_type==="job")){const old=latest.get(e.aggregate_id);if(!old||old.aggregate_version<e.aggregate_version)latest.set(e.aggregate_id,e);}const candidate=[...latest.values()].filter(e=>e.payload.status==="queued"&&(!e.payload.retryAt||Date.parse(e.payload.retryAt)<=now)&&!state.rowLocks.has(e.aggregate_id)).sort((a,b)=>a.payload.createdAt.localeCompare(b.payload.createdAt))[0];if(!candidate)return{rows:[]};state.rowLocks.add(candidate.aggregate_id);return{rows:[{aggregate_id:candidate.aggregate_id,payload:candidate.payload}]};}
@@ -24,8 +26,9 @@ function fakePool(){
  return{state,async connect(){return{query,release(){state.released++;}}},query,async end(){}};
 }
 
-test("operational store init installs append-only migration after operational indexes",async()=>{
- const pool=fakePool(),{jobs}=createPostgresOperationalStores({pool});
+test("explicit operational migration installs append-only guards after operational indexes",async()=>{
+ const pool=fakePool(),stores=createPostgresOperationalStores({pool}),{jobs}=stores;
+ await stores.migrate();
  await jobs.init();
  const q=pool.state.queries;
  const indexes=q.findIndex(sql=>sql.includes("events_job_idempotency_lookup"));
