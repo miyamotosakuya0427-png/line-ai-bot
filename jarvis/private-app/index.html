@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#071321">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="株式会社One 専用AIアシスタント ONE JARVIS">
+  <meta name="referrer" content="no-referrer">
+  <title>ONE JARVIS｜Private App Preview</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icons/icon.svg">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./voice-core.js" defer></script>
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="ONE JARVIS ホーム">
+        <span class="brand-mark" aria-hidden="true">O</span>
+        <span><strong>ONE JARVIS</strong><small>PRIVATE COMPANY AI</small></span>
+      </a>
+      <div class="top-actions">
+        <span class="preview-pill">PRIVATE APP PREVIEW</span>
+        <button id="install-button" class="quiet-button" type="button" hidden>アプリをインストール</button>
+      </div>
+    </header>
+    <main>
+      <section class="hero panel">
+        <div class="hero-copy">
+          <p class="eyebrow">株式会社One｜統合AIアシスタント</p>
+          <h1>お呼びでしょうか。</h1>
+          <p class="hero-sub">声で話しかけ、会社の仕事をひとつの場所から。</p>
+          <div class="connection-state"><span class="state-dot"></span><span id="connection-label">AI接続：認証機能の実装待ち</span></div>
+        </div>
+        <div class="orb-wrap" aria-hidden="true"><div class="orb-ring ring-one"></div><div class="orb-ring ring-two"></div><div class="orb"><span>J</span></div></div>
+      </section>
+      <section class="voice-panel panel" aria-labelledby="voice-title">
+        <div class="section-heading">
+          <div><p class="eyebrow">VOICE INTERFACE</p><h2 id="voice-title">音声アシスタント</h2></div>
+          <span id="voice-state" class="state-chip">待機中</span>
+        </div>
+        <p class="voice-instruction">マイクを開始してから「ジャービス」と呼びかけてください。画面を開いている間だけ音声認識します。</p>
+        <div class="voice-controls">
+          <button id="voice-start" class="mic-button" type="button" aria-label="音声認識を開始"><span class="mic-icon" aria-hidden="true">◉</span><span>音声で呼びかける</span></button>
+          <button id="voice-stop" class="secondary-button" type="button" disabled>停止</button>
+        </div>
+        <p id="voice-status" class="status-message" role="status" aria-live="polite">マイクは起動していません。</p>
+        <div class="transcript-box">
+          <label for="command-draft">認識した内容・指示案</label>
+          <textarea id="command-draft" rows="3" maxlength="1000" placeholder="音声または文字で指示を入力できます。"></textarea>
+          <div class="draft-actions"><span class="privacy-note">このプレビューでは指示を外部送信しません。</span><button id="preview-command" class="secondary-button" type="button">内容を確認</button></div>
+        </div>
+        <p class="disclosure">音声認識はブラウザ／OSの音声サービスを利用する場合があります。音声が端末外で処理される可能性があるため、パスワードや機密情報は話さないでください。アプリは音声・会話を保存しません。</p>
+      </section>
+      <section class="modules-section">
+        <div class="section-heading"><div><p class="eyebrow">ONE OPERATIONS</p><h2>会社の統合メニュー</h2></div><span class="muted">接続準備中</span></div>
+        <div class="module-grid">
+          <article class="module-card"><span class="module-icon">⌘</span><h3>司令センター</h3><p>AI社員・タスク・進捗管理</p><span class="module-status">統合予定</span></article>
+          <article class="module-card"><span class="module-icon">▦</span><h3>経営・財務</h3><p>売上・経費・資金状況</p><span class="module-status">統合予定</span></article>
+          <article class="module-card"><span class="module-icon">⚒</span><h3>土木・工事</h3><p>現場・見積・施工管理</p><span class="module-status">統合予定</span></article>
+          <article class="module-card"><span class="module-icon">✓</span><h3>承認センター</h3><p>実行前確認・監査履歴</p><span class="module-status">統合予定</span></article>
+          <article class="module-card"><span class="module-icon">▶</span><h3>動画制作</h3><p>企画・制作・品質確認</p><span class="module-status">統合予定</span></article>
+          <article class="module-card"><span class="module-icon">◇</span><h3>AI社員・各部署</h3><p>13部門Agent・Worker管理</p><span class="module-status">統合予定</span></article>
+        </div>
+      </section>
+    </main>
+    <footer class="footer"><span>ONE JARVIS · 株式会社One</span><span>Prototype only · No production API connection</span></footer>
+  </div>
+</body>
+</html>

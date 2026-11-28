@@ -1,0 +1,15 @@
+{
+  "id": "/private-app/",
+  "name": "ONE JARVIS｜株式会社One専用",
+  "short_name": "ONE JARVIS",
+  "description": "株式会社One 専用AIアシスタント",
+  "lang": "ja",
+  "start_url": "/private-app/",
+  "scope": "/private-app/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#06101d",
+  "theme_color": "#071321",
+  "categories": ["business", "productivity"],
+  "icons": [{"src":"./icons/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+}
