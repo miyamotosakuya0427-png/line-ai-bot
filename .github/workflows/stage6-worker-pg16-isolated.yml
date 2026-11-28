@@ -1,0 +1,59 @@
+name: ONE JARVIS Stage 6 isolated PostgreSQL 16 (CI only)
+on:
+  push:
+    branches:
+      - ci/stage6-worker-pg16-isolated-20261128
+    paths:
+      - "jarvis/core/market-data-*.js"
+      - "jarvis/core/market-data-*.test.js"
+      - "jarvis/core/market-data-quality.test.js"
+      - "jarvis/core/paper-trading-jsonl-parity*.js"
+      - "jarvis/core/backtest-data-gate*.js"
+      - "jarvis/core/execution-cost-model*.js"
+      - "jarvis/core/paper-trading.js"
+      - "jarvis/core/paper-trading.test.js"
+      - "jarvis/migrations/**"
+      - ".github/workflows/stage6-worker-pg16-isolated.yml"
+permissions:
+  contents: read
+jobs:
+  stage6-postgres16:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: one_jarvis_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d one_jarvis_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: jarvis
+    env:
+      MARKET_DATA_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/one_jarvis_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install isolated PostgreSQL test driver
+        run: npm install --ignore-scripts --no-audit --no-fund --no-package-lock pg@8
+      - name: Verify isolated PostgreSQL target
+        run: |
+          test -n "$MARKET_DATA_TEST_DATABASE_URL"
+          node -e 'const u=new URL(process.env.MARKET_DATA_TEST_DATABASE_URL); if(!["localhost","127.0.0.1","::1"].includes(u.hostname)) process.exit(1); console.log("Isolated loopback PostgreSQL target verified.")'
+      - name: Syntax checks
+        run: |
+          for file in core/market-data-*.js core/backtest-data-gate.js core/execution-cost-model.js core/paper-trading.js; do
+            node --check "$file"
+          done
+      - name: Stage 6 unit and PostgreSQL integration tests
+        run: |
+          node --test core/market-data-gateway-adapter.test.js core/market-data-store.test.js core/market-data-migration.test.js core/market-data-quality.test.js core/backtest-data-gate.test.js core/paper-trading-jsonl-parity.test.js core/market-data-store.postgres.test.js core/market-data-store.worker.postgres.test.js core/paper-trading.test.js core/execution-cost-model.test.js
